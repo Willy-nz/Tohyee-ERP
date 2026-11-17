@@ -246,6 +246,7 @@ export const AI_TOOL_PLAIN_WORDS: readonly { name: string; level: AiAccessLevel;
   { name: "suggest_analytics_commentary", level: "draft", words: "Add commentary to an Analytics report, for a person to accept" },
   { name: "update_analytics_dashboard", level: "draft", words: "Change an Analytics report: name, dates, add, change and reorder tiles (not take tiles off, share it or delete it); each change is in the report's History" },
   { name: "add_analytics_image", level: "draft", words: "Put a picture on an Analytics report, from a web address or a file" },
+  { name: "change_analytics_picture", level: "draft", words: "Fade, move or remove a picture on an Analytics report" },
   { name: "delete_analytics_dashboard", level: "full", words: "Delete an Analytics report with its tiles and pictures, after confirming" },
   { name: "refresh_analytics_sources", level: "draft", words: "Load the latest data into Analytics for a report or tables (owners and admins only; it can't change connections or schedules)" },
   { name: "approve_invoice", level: "post", words: "Approve a draft invoice (it's numbered and posted)" },

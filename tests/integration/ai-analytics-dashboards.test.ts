@@ -502,4 +502,76 @@ describeWithDatabase("the AI's Analytics reports", () => {
     const count = await inOrganisation(ORG, { userId: owner.id, email: owner.email }, (tx) => tx.query<{ count: string }>("select count(*)::text as count from analytics_dashboard_images where dashboard_id = $1", [id]));
     expect(count.rows[0].count).toBe("2");
   });
+  it("PIC1-PIC6 (#9): the AI sees, fades, moves and removes pictures, uses a photo left for it or one already on a report, and History brings a removed picture back", async () => {
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const made = await call(tokens["owner-drafts"], "create_analytics_dashboard", {
+      name: "CFO report",
+      pages: [
+        { id: "cover", name: "Cover" },
+        { id: "money", name: "Money" },
+      ],
+      tiles: [{ ...ORDERS, page: "money" }],
+    });
+    const id = (made.dashboard as Json).id as string;
+    let version = (made.dashboard as Json).version as number;
+    const read = async () => {
+      const report = await call(tokens["owner-drafts"], "get_analytics_dashboard", { dashboardId: id });
+      version = (report.dashboard as Json).version as number;
+      return report;
+    };
+
+    // PIC5: a photo left for the AI; text-reading it says what to do instead.
+    const upload = await inOrganisation(ORG, { userId: owner.id, email: owner.email }, async (tx) => {
+      const { addAiFile } = await import("@/lib/ai-workspace/files");
+      return addAiFile(tx, { fileName: "dog.png", contentBase64: png });
+    });
+    expect(upload.contentType).toBe("image/png");
+    await expect(call(tokens["owner-drafts"], "read_ai_upload", { fileId: upload.id })).rejects.toThrow(/is a picture, not words/);
+    await expect(call(tokens["owner-drafts"], "add_analytics_image", { dashboardId: id, expectedVersion: version, uploadId: upload.id, base64: png })).rejects.toThrow(/Give one of uploadId/);
+    await call(tokens["owner-drafts"], "add_analytics_image", { dashboardId: id, expectedVersion: version, uploadId: upload.id, place: "background", page: "cover", dim: 50 });
+
+    // PIC1: the background and its fade can be seen.
+    let report = await read();
+    const cover = (report.pages as Json[]).find((page) => page.id === "cover") as Json;
+    expect(cover).toMatchObject({ picture: { fileName: "dog.png", dim: 50 } });
+    const pictureId = (cover.picture as Json).id as string;
+
+    // PIC2: fade it, then move it into a tile so all of it shows.
+    await expect(call(tokens["owner-drafts"], "change_analytics_picture", { dashboardId: id, expectedVersion: version, action: "fade", page: "money", dim: 10 })).rejects.toThrow(/Money has no background picture/);
+    await call(tokens["owner-drafts"], "change_analytics_picture", { dashboardId: id, expectedVersion: version, action: "fade", page: "cover", dim: 0 });
+    report = await read();
+    expect((report.pages as Json[])[0]).toMatchObject({ picture: { id: pictureId, dim: 0 } });
+    await call(tokens["owner-drafts"], "change_analytics_picture", { dashboardId: id, expectedVersion: version, action: "to_tile", page: "cover", alt: "Kobe on the beach", title: "Kobe" });
+    report = await read();
+    expect((report.pages as Json[])[0].picture).toBeUndefined();
+    const pictureTile = (report.tiles as Json[]).find((tile) => tile.visual === "image") as Json;
+    expect(pictureTile).toMatchObject({ title: "Kobe", width: "full", height: "large", image: { id: pictureId, fileName: "dog.png", alt: "Kobe on the beach", fit: "contain" } });
+
+    // On the cover: the first page, which a tile's saved page leaves out.
+    expect(pictureTile.page ?? "cover").toBe("cover");
+
+    // PIC3: change the tile, then copy the same picture onto another report (PIC6).
+    await call(tokens["owner-drafts"], "change_analytics_picture", { dashboardId: id, expectedVersion: version, action: "change", tileId: pictureTile.id, fit: "cover", alt: "" });
+    report = await read();
+    expect((report.tiles as Json[]).find((tile) => tile.id === pictureTile.id)).toMatchObject({ image: { id: pictureId, fit: "cover" } });
+    const other = await call(tokens["owner-drafts"], "create_analytics_dashboard", { name: "Shop", tiles: [ORDERS] });
+    const otherId = (other.dashboard as Json).id as string;
+    const copied = await call(tokens["owner-drafts"], "add_analytics_image", { dashboardId: otherId, expectedVersion: (other.dashboard as Json).version, fromReport: { dashboardId: id, imageId: pictureId } });
+    expect(copied).toMatchObject({ added: "an image tile" });
+
+    // PIC4: removed, its file is kept while History uses it, and putting the version back brings it back.
+    const before = version;
+    await call(tokens["owner-drafts"], "change_analytics_picture", { dashboardId: id, expectedVersion: version, action: "remove", tileId: pictureTile.id });
+    report = await read();
+    expect((report.tiles as Json[]).some((tile) => tile.visual === "image")).toBe(false);
+    const kept = await inOrganisation(ORG, { userId: owner.id, email: owner.email }, (tx) => tx.query<{ count: string }>("select count(*)::text as count from analytics_dashboard_images where dashboard_id = $1", [id]));
+    expect(kept.rows[0].count).toBe("1");
+    const restored = await historyRoute.POST(
+      apiRequest(`/api/analytics/dashboards/${id}/history`, { method: "POST", cookie: ownerCookie, body: { organisationId: ORG, version: before, expectedVersion: version } }),
+      params({ dashboardId: id }),
+    );
+    expect(restored.status).toBe(200);
+    report = await read();
+    expect((report.tiles as Json[]).find((tile) => tile.visual === "image")).toMatchObject({ image: { id: pictureId } });
+  });
 });

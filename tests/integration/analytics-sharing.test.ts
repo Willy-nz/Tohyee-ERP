@@ -481,9 +481,11 @@ describeWithDatabase("analytics dashboard sharing", () => {
     // A button that isn't available yet is refused.
     expect((await body(await patch(sharedId, [{ ...items[3], button: { label: "Next", action: "go_to_page" } }]))).status).toBe(400);
 
-    // Saving without the image tile removes the image.
+    // Saving without the image tile: the report's History still uses it, so it's kept for putting back (PIC4),
+    // but the client, who doesn't see History, can't open it any more.
     expect((await body(await patch(sharedId, [tile("regions"), pivotTile]))).status).toBe(200);
-    expect((await getImage(sharedId, imageId, ownerCookie)).status).toBe(404);
+    expect((await getImage(sharedId, imageId, ownerCookie)).status).toBe(200);
+    expect((await getImage(sharedId, imageId, clientCookie)).status).toBe(404);
 
     // : a page's background picture is one of the report's images. It's kept through a save of just the tiles,
     // the client can see it on the shared report, another report's can't be used, and it goes when the page drops it.
@@ -499,7 +501,8 @@ describeWithDatabase("analytics dashboard sharing", () => {
     expect(stolen.status).toBe(400);
     expect(stolen.data.error).toMatch(/background picture isn't one of this report's/);
     expect((await body(await settings([{ id: "page-1", name: "Page 1" }]))).status).toBe(200);
-    expect((await getImage(sharedId, backdrop, ownerCookie)).status).toBe(404);
+    expect((await getImage(sharedId, backdrop, ownerCookie)).status).toBe(200);
+    expect((await getImage(sharedId, backdrop, clientCookie)).status).toBe(404);
   });
 
   it("#710: an accounting report sits on a page; a client sees a published one, never a draft; an archived one says it's gone", async () => {

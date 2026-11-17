@@ -875,7 +875,7 @@ function DashboardViewInner({ organisationId, dashboardId, startEditing }: { org
       {pageTiles.length === 0 ? (
         <Empty>{canEdit ? editing ? `Start ${pages?.length ? "this page" : "your report"} with Add chart. Choose a source, a visual and the fields to show.` : "This page is empty. Choose Edit to add a chart." : "No tiles yet."}</Empty>
       ) : (
-        <div id={`report-page-${dashboard.id}`} role={pages?.length ? "tabpanel" : undefined} aria-label={pages?.length ? page.name : undefined} style={look.style} className={`${styles.grid} ${themeClass} ${look.tinted ? styles.tintedPage : ""} ${look.style.background ? styles.colouredPage : ""}`}>
+        <div id={`report-page-${dashboard.id}`} role={pages?.length ? "tabpanel" : undefined} aria-label={pages?.length ? page.name : undefined} style={look.style} className={`${styles.grid} ${themeClass} ${look.tinted ? styles.tintedPage : ""} ${look.style.background ? styles.colouredPage : ""} ${look.pictured ? styles.picturedPage : ""}`}>
           {drawnTiles.map((tile, index) => {
             if (!pageTiles.includes(tile) || (!editing && hidden.includes(tile.id))) return null;
             const isDraft = inPlace?.draft.id === tile.id;

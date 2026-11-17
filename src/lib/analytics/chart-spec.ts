@@ -361,6 +361,17 @@ type Css = Record<string, string | number>;
  * checked by parseChartFormat (hex colours, whole numbers), so it's safe to
  * put on the page. Left out, the card keeps the theme's look.
  */
+/** A card at least this solid, in a dark colour, gets light words (DTX1). */
+export const DARK_CARD_LEAST_OPACITY = 60;
+/** The words on a dark card: the theme's and the app's text colours, set on the card so everything in it follows. */
+export const ON_DARK_CARD: Css = {
+  color: "#f3f5f9",
+  "--text": "#f3f5f9",
+  "--text-muted": "#c9d0dc",
+  "--report-text": "#f3f5f9",
+  "--report-text-muted": "#c9d0dc",
+};
+
 /** A colour chosen for text, with its dark-mode version worked out, for CSS's light-dark(). */
 export function textColour(hex: string): string {
   return `light-dark(${hex}, ${adaptForDark(hex, "text")})`;
@@ -392,6 +403,10 @@ export function cardStyle(format: ChartFormat | undefined): { card: Css; title: 
   const opacity = card.opacity ?? 100;
   if (card.fill) style.card.background = both(card.fill, "surface", opacity / 100);
   else if (card.opacity !== undefined) style.card.background = `color-mix(in srgb, var(--report-card, var(--surface)) ${opacity}%, transparent)`;
+  // On a dark card the words follow the card (DTX1): light text, unless a colour was chosen for the
+  // title, subtitle or body (set on those parts, so they still win). A dark fill's dark-mode version
+  // stays dark, so light text suits both modes.
+  if (card.fill && isDarkSurface(card.fill) && opacity >= DARK_CARD_LEAST_OPACITY) Object.assign(style.card, ON_DARK_CARD);
   if (card.borderColor) style.card.borderColor = both(card.borderColor, "mark");
   if (card.borderWidth !== undefined) {
     style.card.borderWidth = `${card.borderWidth}px`;

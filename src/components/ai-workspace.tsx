@@ -92,7 +92,7 @@ function Files({ organisationId }: { organisationId: string }) {
   return (
     <Card
       title="Files for the AI"
-      description={<>Drop in spreadsheets, exports and notes for your AI to organise.{" "}<InfoTip label="Files for your AI">However they come: CSV, text, JSON or Excel, up to 10 MB. Your AI reads them and organises what it finds into its own tables. Livestock it finds comes to you as suggestions to accept.</InfoTip></>}
+      description={<>Drop in spreadsheets, exports, notes and photos for your AI.{" "}<InfoTip label="Files for your AI">However they come: CSV, text, JSON or Excel, up to 10 MB. Your AI reads them and organises what it finds into its own tables. JPG and PNG photos (up to 5 MB to go on a report) are for your AI to put on Analytics reports. Livestock it finds comes to you as suggestions to accept.</InfoTip></>}
     >
       {error ? <Notice tone="error">{error}</Notice> : null}
       {message ? <Notice tone="success">{message}</Notice> : null}
@@ -102,7 +102,7 @@ function Files({ organisationId }: { organisationId: string }) {
             <input value={note} maxLength={1000} onChange={(event) => setNote(event.target.value)} placeholder="e.g. Calving from the herd app, 2025" />
           </Field>
           <Field label="Files">
-            <input type="file" multiple accept=".csv,.tsv,.txt,.json,.md,.xml,.tab,.xlsx" disabled={busy} onChange={(event) => void upload(event.target.files)} />
+            <input type="file" multiple accept=".csv,.tsv,.txt,.json,.md,.xml,.tab,.xlsx,.jpg,.jpeg,.png" disabled={busy} onChange={(event) => void upload(event.target.files)} />
           </Field>
         </div>
       ) : null}
