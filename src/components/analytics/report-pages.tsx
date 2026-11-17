@@ -188,7 +188,7 @@ function withoutKey<T extends object, K extends keyof T>(value: T, key: K): Omit
 }
 
 /** How a page is drawn: its width and background (a chosen colour gets a dark version). */
-export function pageStyle(page: ReportPage, pictures?: { organisationId: string; dashboardId: string }): { style: CSSProperties; tinted: boolean } {
+export function pageStyle(page: ReportPage, pictures?: { organisationId: string; dashboardId: string }): { style: CSSProperties; tinted: boolean; pictured: boolean } {
   const max = PAGE_MAX_WIDTHS[page.width ?? "full"];
   const style: CSSProperties = max ? { maxWidth: `${max}px`, marginInline: "auto" } : {};
   if (page.background && page.background !== "tinted") style.background = `light-dark(${page.background}, ${adaptForDark(page.background, "surface")})`;
@@ -199,5 +199,6 @@ export function pageStyle(page: ReportPage, pictures?: { organisationId: string;
     const wash = `color-mix(in srgb, ${colour} ${page.picture.dim ?? 0}%, transparent)`;
     style.background = `linear-gradient(${wash}, ${wash}), url("${address}") center / cover no-repeat`;
   }
-  return { style, tinted: page.background === "tinted" };
+  // A page with a picture is at least about a screen tall (PBG1), so a cover with one tile shows the whole photo.
+  return { style, tinted: page.background === "tinted", pictured: Boolean(page.picture && pictures) };
 }

@@ -64,7 +64,8 @@ import { TIME_PERIODS } from "@/lib/analytics/time-intelligence";
 import type { OrgRunner, OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, ForbiddenError, HttpError, ValidationError } from "@/lib/errors";
 import { requestHash } from "@/lib/idempotency";
-import { addDashboardImage } from "@/lib/analytics/images";
+import { addDashboardImage, imageNames, readDashboardImage } from "@/lib/analytics/images";
+import { aiFileImage } from "@/lib/ai-workspace/files";
 import { decodeImage, downloadImage } from "@/lib/analytics/image-download";
 
 /*
@@ -279,8 +280,82 @@ function dashboardSummary(dashboard: Dashboard) {
   };
 }
 
+/**
+ * What change_analytics_picture saves (PIC2, PIC3): the report's new pages or
+ * tiles, and the words for its History. Refuses, saving nothing, anything
+ * that doesn't fit the picture asked about.
+ */
+export function changePicture(
+  current: Pick<Dashboard, "settings" | "tiles">,
+  args: Record<string, unknown>,
+  names: Map<string, string>,
+): { input: { settings?: DashboardSettings; tiles?: Array<Record<string, unknown>> }; words: string } {
+  const action = String(args.action ?? "");
+  const fileName = (id: string) => names.get(id) ?? "the picture";
+  if (action === "fade" || action === "to_tile" || (action === "remove" && args.page != null)) {
+    if (args.tileId != null) throw new ValidationError(`${action}: give page for a background picture, not tileId. Nothing was saved.`);
+    const pages = reportPages(current.settings.pages);
+    const pageId = String(args.page ?? "");
+    const page = pages.find((entry) => entry.id === pageId);
+    if (!page) throw new ValidationError(`page: there's no page ${pageId || "(none given)"} on this report (get_analytics_dashboard lists them). Nothing was saved.`);
+    const picture = page.picture;
+    if (!picture) throw new ValidationError(`${page.name} has no background picture. Nothing was saved.`);
+    const withPage = (next: typeof page) => ({ ...current.settings, pages: pages.map((entry) => (entry.id === page.id ? next : entry)) });
+    const { picture: _removed, ...bare } = page;
+    void _removed;
+    if (action === "fade") {
+      const dim = args.dim;
+      if (typeof dim !== "number" || !Number.isInteger(dim) || dim < 0 || dim > 90) throw new ValidationError("fade: dim is a whole number from 0 to 90. Nothing was saved.");
+      return { input: { settings: withPage({ ...page, picture: { id: picture.id, ...(dim ? { dim } : {}) } }) }, words: `Faded ${page.name}'s background picture to ${dim}%` };
+    }
+    if (action === "remove") return { input: { settings: withPage(bare) }, words: `Took ${fileName(picture.id)} off ${page.name}'s background` };
+    // to_tile: the same picture, now a tile at the top of its page.
+    const tiles: Array<Record<string, unknown>> = current.tiles.map((tile) => ({ ...tile }));
+    const alt = typeof args.alt === "string" ? args.alt : undefined;
+    const tile: Record<string, unknown> = {
+      id: `ai-image-${Date.now().toString(36)}`,
+      title: typeof args.title === "string" && args.title.trim() ? args.title.trim() : fileName(picture.id).replace(/\.[a-z]+$/i, ""),
+      visual: "image",
+      width: args.width ?? "full",
+      height: args.height ?? "large",
+      ...(current.settings.pages?.length ? { page: page.id } : {}),
+      image: { id: picture.id, ...(alt ? { alt } : {}), ...(args.fit === "cover" ? { fit: "cover" } : {}) },
+    };
+    const firstOnPage = tiles.findIndex((entry) => tilePage(entry as { page?: string }, current.settings.pages) === page.id);
+    const at = typeof args.position === "number" && Number.isInteger(args.position) ? Math.min(Math.max(args.position - 1, 0), tiles.length) : firstOnPage < 0 ? tiles.length : firstOnPage;
+    tiles.splice(at, 0, tile);
+    return { input: { settings: withPage(bare), tiles }, words: `Moved ${fileName(picture.id)} from ${page.name}'s background into a picture tile` };
+  }
+  if (action === "change" || action === "remove") {
+    if (args.page != null) throw new ValidationError(`${action}: give tileId for a picture tile, not page. Nothing was saved.`);
+    const at = current.tiles.findIndex((tile) => tile.id === args.tileId);
+    const tile = current.tiles[at];
+    if (!tile || tile.visual !== "image" || !tile.image) throw new ValidationError(`tileId: there's no picture tile ${String(args.tileId ?? "(none given)")} on this report (get_analytics_dashboard lists them). Nothing was saved.`);
+    const tiles: Array<Record<string, unknown>> = current.tiles.map((entry) => ({ ...entry }));
+    if (action === "remove") {
+      tiles.splice(at, 1);
+      if (!tiles.length) throw new ValidationError("remove: that would leave the report empty. People delete reports in Tohyee. Nothing was saved.");
+      return { input: { tiles }, words: `Took the picture ${tile.title} off the report` };
+    }
+    const image: Record<string, unknown> = { ...tile.image };
+    if (typeof args.alt === "string") {
+      if (args.alt) image.alt = args.alt;
+      else delete image.alt;
+    }
+    if (args.fit === "cover") image.fit = "cover";
+    if (args.fit === "contain") delete image.fit;
+    const next: Record<string, unknown> = { ...tiles[at], image };
+    if (typeof args.title === "string" && args.title.trim()) next.title = args.title.trim();
+    if (args.width != null) next.width = args.width;
+    if (args.height != null) next.height = args.height;
+    tiles[at] = next;
+    return { input: { tiles }, words: `Changed the picture ${String(next.title)}` };
+  }
+  throw new ValidationError("action is fade, remove, to_tile or change. Nothing was saved.");
+}
+
 /** A tile as the AI reads it back: as saved, without the parts it can't set. */
-function tileOut(tile: Tile) {
+function tileOut(tile: Tile, names: Map<string, string> = new Map()) {
   return {
     id: tile.id,
     title: tile.title,
@@ -297,7 +372,9 @@ function tileOut(tile: Tile) {
     ...(tile.button ? { button: tile.button } : {}),
     ...(tile.signoff ? { signoff: tile.signoff } : {}),
     ...(tile.directory ? { directory: tile.directory } : {}),
-    ...(tile.visual === "image" ? { note: "An image: people add and change images in Tohyee." } : {}),
+    ...(tile.visual === "image" && tile.image
+      ? { image: { id: tile.image.id, fileName: names.get(tile.image.id) ?? null, ...(tile.image.alt ? { alt: tile.image.alt } : {}), fit: tile.image.fit ?? "contain" }, note: "A picture: change_analytics_picture changes, removes or describes it." }
+      : {}),
   };
 }
 
@@ -858,9 +935,9 @@ export const ANALYTICS_READ_TOOLS: AiTool[] = [
         await requireAnalytics(tx);
         const dashboard = await getDashboard(tx, String(args.dashboardId ?? ""), readerOf(tx, context));
         const freshness = (await reportLoadFacts(tx, dashboard)).map(({ name, tables, refreshedAt, failedAt, failedReason, running }) => ({ name, tables, refreshedAt, failedAt, ...(failedReason ? { failedReason } : {}), running }));
-        return { organisationId: tx.organisationId, dashboard, freshness, dates: await dateContext(tx), model: await loadModel(tx), hidden: await hiddenFarmTables(tx) };
+        return { organisationId: tx.organisationId, dashboard, freshness, names: await imageNames(tx, dashboard.id), dates: await dateContext(tx), model: await loadModel(tx), hidden: await hiddenFarmTables(tx) };
       });
-      const { dashboard } = facts;
+      const { dashboard, names } = facts;
       const tiles = typeof args.page === "string" && args.page ? dashboard.tiles.filter((tile) => tilePage(tile, dashboard.settings.pages) === args.page) : dashboard.tiles;
       const runs = await runTiles(facts.organisationId, tiles, dashboard.settings, { today: facts.dates.today, yearEndMonth: facts.dates.yearEndMonth }, facts.model, facts.hidden);
       const rows = boundedLimit(args.rows, 20, 200);
@@ -868,10 +945,19 @@ export const ANALYTICS_READ_TOOLS: AiTool[] = [
         dashboard: dashboardSummary(dashboard),
         theme: dashboard.settings.theme ?? "tohyee",
         paper: { size: dashboard.settings.paper?.size ?? "landscape", contents: dashboard.settings.paper?.contents ?? "none", header: dashboard.settings.paper?.header === true, cover: dashboard.settings.paper?.cover === true, contentsTiles: dashboard.settings.paper?.contentsTiles === true },
+        // Each page with its look, so a background picture can be seen and changed (PIC1).
+        pages: reportPages(dashboard.settings.pages).map((page) => ({
+          id: page.id,
+          name: page.name,
+          width: page.width ?? "full",
+          ...(page.background ? { background: page.background } : {}),
+          ...(page.picture ? { picture: { id: page.picture.id, fileName: names.get(page.picture.id) ?? null, dim: page.picture.dim ?? 0 } } : {}),
+          ...(page.hidden ? { hidden: true } : {}),
+        })),
         slicers: dashboard.settings.slicers.map((slicer) => ({ table: slicer.table, field: slicer.field, label: slicer.label, ...(slicer.style ? { style: slicer.style } : {}), ...(slicer.pages ? { pages: slicer.pages } : {}) })),
         // When each source was last refreshed, and whether a refresh failed or is running.
         freshness: facts.freshness,
-        tiles: runs.map((entry) => ({ ...tileOut(entry.tile), ...(entry.result ? { figures: figures(entry.result, rows) } : {}), ...(entry.error ? { error: entry.error } : {}) })),
+        tiles: runs.map((entry) => ({ ...tileOut(entry.tile, names), ...(entry.result ? { figures: figures(entry.result, rows) } : {}), ...(entry.error ? { error: entry.error } : {}) })),
         ...notesFor(dashboard, runs, typeof args.page === "string" && args.page ? args.page : undefined),
       };
     },
@@ -1019,7 +1105,7 @@ export const ANALYTICS_WRITE_TOOLS: AiTool[] = [
     name: "update_analytics_dashboard",
     title: "Change an Analytics report",
     description:
-      "Changes a report: its name, description or dates; adds tiles (at a position); changes tiles by id (only the fields you send; query replaces the whole question); puts tiles in a new order; takes tiles off (removeTiles); and sets its theme, pages and slicers. Tiles you add or change are run first: if one doesn't work, nothing is saved. Read it with get_analytics_dashboard first and pass its version as expectedVersion, so you don't save over someone else's change. add_analytics_image adds pictures; people change sharing in Tohyee; delete_analytics_dashboard deletes a whole report.",
+      "Changes a report: its name, description or dates; adds tiles (at a position); changes tiles by id (only the fields you send; query replaces the whole question); puts tiles in a new order; takes tiles off (removeTiles); and sets its theme, pages and slicers. Tiles you add or change are run first: if one doesn't work, nothing is saved. Read it with get_analytics_dashboard first and pass its version as expectedVersion, so you don't save over someone else's change. add_analytics_image adds pictures and change_analytics_picture changes them; people change sharing in Tohyee; delete_analytics_dashboard deletes a whole report.",
     level: "draft",
     inputSchema: schema(
       {
@@ -1064,8 +1150,6 @@ export const ANALYTICS_WRITE_TOOLS: AiTool[] = [
       for (const id of removing) {
         const tile = tiles.find((entry) => entry.id === id);
         if (!tile) throw new ValidationError(`removeTiles: there's no tile ${id} on this report (get_analytics_dashboard lists them). Nothing was saved.`);
-        // An image's file goes with its tile, so History couldn't bring it back.
-        if (tile.visual === "image") throw new ValidationError(`removeTiles: ${String(tile.title)} is an image, which people remove in Tohyee. Nothing was saved.`);
       }
       if (removing.length) {
         tiles = tiles.filter((tile) => !removing.includes(String(tile.id)));
@@ -1076,7 +1160,6 @@ export const ANALYTICS_WRITE_TOOLS: AiTool[] = [
         const change = (raw ?? {}) as Record<string, unknown>;
         const at = tiles.findIndex((tile) => tile.id === change.tileId);
         if (at < 0) throw new ValidationError(`changeTiles ${index + 1}: there's no tile ${String(change.tileId)} on this report (get_analytics_dashboard lists them). Nothing was saved.`);
-        if (tiles[at].visual === "image") throw new ValidationError(`changeTiles ${index + 1}: ${String(tiles[at].title)} is an image, which people change in Tohyee. Nothing was saved.`);
         const next: Record<string, unknown> = { ...tiles[at] };
         for (const [field, value] of Object.entries(change)) {
           if (field === "tileId") continue;
@@ -1227,13 +1310,20 @@ export const ANALYTICS_WRITE_TOOLS: AiTool[] = [
     title: "Add a picture to an Analytics report",
     level: "draft",
     description:
-      "Puts a picture on a report: as an image tile (place: tile), or behind a page's tiles (place: background). The picture comes from a public https address (url), such as a product photo on the organisation's own website, or as base64 JPG or PNG contents (base64). Only https and public addresses; at most 3 redirects, 15 seconds and 5 MB; JPG or PNG, checked from its contents as an upload is. Read the report with get_analytics_dashboard first and pass its version as expectedVersion. The change goes into the report's History. Use pictures the organisation owns or may use. People remove pictures in Tohyee.",
+      "Puts a picture on a report: as an image tile (place: tile), or behind a page's tiles (place: background). The picture comes from one of: a file a person left for the AI in Tohyee (uploadId, from list_ai_uploads: a JPG or PNG there, such as a photo they couldn't paste into the chat); a picture already on a report they can open (fromReport: this one or another, imageId from get_analytics_dashboard); a public https address (url), such as a product photo on the organisation's own website; or base64 JPG or PNG contents (base64). Give exactly one. Addresses: only https and public, at most 3 redirects, 15 seconds and 5 MB. JPG or PNG, checked from its contents as an upload is. Read the report with get_analytics_dashboard first and pass its version as expectedVersion. The change goes into the report's History. Use pictures the organisation owns or may use. change_analytics_picture changes or removes one afterwards.",
     inputSchema: schema(
       {
         dashboardId: { type: "string" },
         expectedVersion: { type: "integer", minimum: 1, description: "The version you read; refused if someone has saved since." },
-        url: { type: "string", maxLength: 2000, description: "The picture's https:// address. Give url or base64." },
-        base64: { type: "string", description: "The picture's contents, base64 (JPG or PNG, up to 5 MB). Give url or base64." },
+        uploadId: { type: "string", description: "A JPG or PNG left for the AI (list_ai_uploads)." },
+        fromReport: {
+          type: "object",
+          description: "A picture already on a report: its imageId (get_analytics_dashboard shows each picture tile's and background's id) and the report it's on (default this one).",
+          properties: { dashboardId: { type: "string" }, imageId: { type: "string" } },
+          required: ["imageId"],
+        },
+        url: { type: "string", maxLength: 2000, description: "The picture's https:// address." },
+        base64: { type: "string", description: "The picture's contents, base64 (JPG or PNG, up to 5 MB)." },
         fileName: { type: "string", maxLength: 120, description: "With base64: its name." },
         place: { type: "string", enum: ["tile", "background"], description: "Default tile." },
         title: { type: "string", maxLength: 100, description: "A tile's title (for the contents and screen readers); default the file name." },
@@ -1249,11 +1339,25 @@ export const ANALYTICS_WRITE_TOOLS: AiTool[] = [
     ),
     async runSteps(run, args, context) {
       requireEditor(context);
-      if ((args.url == null) === (args.base64 == null)) throw new ValidationError("Give url or base64, not both. Nothing was saved.");
+      const sources = [args.uploadId, args.fromReport, args.url, args.base64].filter((source) => source != null).length;
+      if (sources !== 1) throw new ValidationError("Give one of uploadId, fromReport, url or base64. Nothing was saved.");
       const place = args.place ?? "tile";
       if (place !== "tile" && place !== "background") throw new ValidationError("place is tile or background. Nothing was saved.");
       // Fetched before the transaction: a slow website doesn't hold the books open.
-      const picture = args.url != null ? await downloadImage(args.url) : decodeImage(args.base64, args.fileName);
+      const picture =
+        args.url != null
+          ? await downloadImage(args.url)
+          : args.base64 != null
+            ? decodeImage(args.base64, args.fileName)
+            : await run(async (tx) => {
+                await requireAnalytics(tx);
+                if (args.uploadId != null) return aiFileImage(tx, args.uploadId);
+                // A picture already on a report this person can open (PIC6).
+                const from = (args.fromReport ?? {}) as { dashboardId?: unknown; imageId?: unknown };
+                const source = await getDashboard(tx, from.dashboardId == null || from.dashboardId === "" ? String(args.dashboardId ?? "") : String(from.dashboardId), readerOf(tx, context));
+                const image = await readDashboardImage(tx, source.id, String(from.imageId ?? ""));
+                return { fileName: image.fileName, content: image.content };
+              });
       const dashboard = await run(async (tx) => {
         await requireAnalytics(tx);
         const current = await getDashboard(tx, String(args.dashboardId ?? ""));
@@ -1287,7 +1391,48 @@ export const ANALYTICS_WRITE_TOOLS: AiTool[] = [
       return {
         dashboard: { id: dashboard.id, name: dashboard.name, version: dashboard.version, link: `/analytics/dashboards/${dashboard.id}` },
         added: place === "background" ? "a background picture" : "an image tile",
-        note: "Saved, and in the report's History. People remove or replace pictures in Tohyee.",
+        note: "Saved, and in the report's History. change_analytics_picture changes or removes it.",
+      };
+    },
+  }),
+  stepped({
+    // Changing a picture already on a report, as a person does in the editor (PIC2, PIC3).
+    name: "change_analytics_picture",
+    title: "Change or remove a picture on an Analytics report",
+    level: "draft",
+    description:
+      "Changes a picture already on a report. A page's background picture (give page): fade (dim 0 to 90, how much it's washed towards the page colour), remove, or to_tile (moves it off the background into a picture tile on the same page, so all of it shows). A picture tile (give tileId): change (its title, alt words, fit, width or height) or remove. get_analytics_dashboard shows each page's background and each picture tile. Read the report first and pass its version as expectedVersion. Every change goes into the report's History, where a person can put an earlier version back, picture and all.",
+    inputSchema: schema(
+      {
+        dashboardId: { type: "string" },
+        expectedVersion: { type: "integer", minimum: 1, description: "The version you read; refused if someone has saved since." },
+        action: { type: "string", enum: ["fade", "remove", "to_tile", "change"] },
+        page: { type: "string", description: "The page whose background picture this is (fade, remove, to_tile)." },
+        tileId: { type: "string", description: "The picture tile (change, remove)." },
+        dim: { type: "integer", minimum: 0, maximum: 90, description: "fade: 0 shows the picture as it is; 90 nearly hides it." },
+        title: { type: "string", maxLength: 100, description: "to_tile or change: the tile's title. Default the file name." },
+        alt: { type: "string", maxLength: 250, description: "to_tile or change: what the picture shows, for people who can't see it. Empty for a purely decorative picture." },
+        fit: { type: "string", enum: ["contain", "cover"], description: "to_tile or change: contain shows all of it; cover fills the tile, cropping. to_tile's default contain." },
+        width: { type: "string", enum: [...TILE_WIDTHS], description: "to_tile or change. to_tile's default full." },
+        height: { type: "string", enum: [...TILE_HEIGHTS], description: "to_tile or change. to_tile's default large." },
+        position: { type: "integer", minimum: 1, description: "to_tile: where the tile goes among the report's tiles, 1 first. Default first on its page." },
+      },
+      ["dashboardId", "expectedVersion", "action"],
+    ),
+    async runSteps(run, args, context) {
+      requireEditor(context);
+      const dashboard = await run(async (tx) => {
+        await requireAnalytics(tx);
+        const current = await getDashboard(tx, String(args.dashboardId ?? ""));
+        if (args.expectedVersion !== current.version) {
+          throw new ValidationError(`${current.updatedByEmail} saved this report (version ${current.version}) after the version you read (${String(args.expectedVersion)}). Read it again with get_analytics_dashboard. Nothing was saved.`);
+        }
+        const change = changePicture(current, args, await imageNames(tx, current.id));
+        return updateDashboard(tx, current.id, { expectedVersion: current.version, ...change.input }, { change: change.words });
+      });
+      return {
+        dashboard: { id: dashboard.id, name: dashboard.name, version: dashboard.version, link: `/analytics/dashboards/${dashboard.id}` },
+        note: "Saved, and in the report's History, where a person can put the earlier version back.",
       };
     },
   }),

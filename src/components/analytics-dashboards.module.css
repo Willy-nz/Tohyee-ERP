@@ -516,6 +516,8 @@
 .slideBar:hover, .slideBar:focus-within { opacity: 1; }
 @media print { .slideBar { display: none; } }
 .presenting .grid { min-height: calc(100vh - 170px); align-content: start; }
+/* A page with a background picture: at least about a screen tall, so a cover with one tile shows the whole photo (PBG1). */
+.picturedPage { min-height: max(420px, 75vh); align-content: start; }
 /* Paper has nothing to click: the keyboard's group picker stays off the sheet. */
 .paperLandscape .groupChooser, .paperPortrait .groupChooser { display: none; }
 /* On paper: no freshness line, dates bar or editing controls, as in Present. */

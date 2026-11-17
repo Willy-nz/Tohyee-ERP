@@ -19533,6 +19533,47 @@ books. The sales are made up: Otago 2 at 10.00 on 5 March and 1 at 0.20 on
   refused, "That source is already loading.", and nothing starts. The
   source's settings are unchanged.
 
+## Report pictures and dark cards (PIC1-PIC6, PBG1, DTX1; issue #9, 18 Nov 2026; following common practice, not yet reviewed)
+
+Tested in `tests/integration/ai-analytics-dashboards.test.ts` and
+`tests/unit/analytics-pictures-dark-cards.test.ts`. A made-up report "CFO
+report" has two pages, Cover (no tiles) and Money (one Orders tile).
+
+- **PIC1 The AI sees the pictures.** get_analytics_dashboard lists each page
+  with its look. The cover's background shows as **dog.png, faded 50%**, with
+  its id. A picture tile shows its id, file name, alt words and fit
+  (contain or cover).
+- **PIC2 A background.** The AI fades the cover's picture to **0%**; it
+  moves it into a picture tile (**full** width, **large**, showing all of
+  it) on the cover, with the alt words "Kobe on the beach", and the page
+  has no background any more; or it removes it. Fading the Money page is
+  refused: "Money has no background picture." Nothing is saved.
+- **PIC3 A picture tile.** The AI changes its title, alt words, fit, width or
+  height, or removes it. A picture tile can also be taken off or resized
+  with update_analytics_dashboard like any other tile.
+- **PIC4 History brings a picture back.** A picture taken off a report is
+  kept while any version in the report's History (the last 100 saves)
+  still uses it. Putting the version before the removal back shows the
+  picture again. A report viewer, who doesn't see History, can't open a
+  picture the report no longer shows. When no kept version uses it, it's
+  deleted at the next save. A report shows up to 40 pictures and keeps up to 200, counting the
+  ones only History uses.
+- **PIC5 A photo left for the AI.** Files for your AI now take JPG and PNG
+  photos, checked from their contents as any attachment is. The AI puts
+  one on a report with add_analytics_image's uploadId. Reading it as text
+  is refused: "dog.png is a picture, not words".
+- **PIC6 A picture already on a report.** add_analytics_image's fromReport
+  copies a picture from this report or another one the person can open (the
+  report's picture is copied, so each report keeps its own).
+- **PBG1 A page with a background picture** is at least three quarters of
+  the screen tall (420px at least), so a
+  cover with one short tile shows the whole photo instead of a strip.
+- **DTX1 Words on a dark card.** A card filled with a dark colour (#1f2a44),
+  at least 60% solid, gets light words (#f3f5f9, muted #c9d0dc): the body,
+  subtitle, title and figures. A colour chosen for the title, subtitle or
+  body still wins. A light fill, a mostly see-through dark fill, or no fill
+  keeps the theme's colours.
+
 ## Income tax stage 1: taxable income, tax, provisional tax and terminal tax (ITX1-ITX10; from IRD's published rules, read by Claude 16 Oct 2026, not yet reviewed by an accountant)
 
 Tax is law, so these examples are **not** "as is common practice": they were written

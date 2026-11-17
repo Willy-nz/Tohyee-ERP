@@ -108,7 +108,9 @@ describeWithDatabase("the AI's farm workspace", () => {
     sheet.addRow(["102", new Date(Date.UTC(2025, 7, 3)), "M", 35.25]);
     sheet.addRow(["103", new Date(Date.UTC(2025, 8, 2)), "F", 30.1]);
     const file = await asOwner(async (tx) => addAiFile(tx, { fileName: "calving.xlsx", contentBase64: Buffer.from(await workbook.xlsx.writeBuffer()).toString("base64"), note: "From the herd app" }));
-    await expect(asOwner((tx) => addAiFile(tx, { fileName: "photo.jpg", contentBase64: "AAAA" }))).rejects.toThrow(/CSV, TSV, text, JSON and Excel/);
+    await expect(asOwner((tx) => addAiFile(tx, { fileName: "photo.gif", contentBase64: "AAAA" }))).rejects.toThrow(/CSV, TSV, text, JSON and Excel/);
+    // A JPG is taken now (PIC5), but only if it really is one.
+    await expect(asOwner((tx) => addAiFile(tx, { fileName: "photo.jpg", contentBase64: "AAAA" }))).rejects.toThrow(/doesn't look like a JPG/);
     //: no macro workbooks, and a workbook is checked before it's opened.
     const plain = Buffer.from(await workbook.xlsx.writeBuffer());
     await expect(asOwner((tx) => addAiFile(tx, { fileName: "calving.xlsm", contentBase64: plain.toString("base64") }))).rejects.toThrow(/CSV, TSV, text, JSON and Excel/);

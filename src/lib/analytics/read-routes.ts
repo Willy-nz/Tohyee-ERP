@@ -17,7 +17,7 @@ import { runBuiltQuery } from "@/lib/analytics/engine";
 import { hiddenFarmTables, requireAnalyticsTable } from "@/lib/analytics/farm-access";
 import { FILTER_OPS } from "@/lib/analytics/filters";
 import { combineFreshness, dataThroughSql, mayChangeSql, reportLoadFacts, tileDateFields } from "@/lib/analytics/freshness";
-import { readDashboardImage } from "@/lib/analytics/images";
+import { imagesInUse, readDashboardImage } from "@/lib/analytics/images";
 import { loadModel } from "@/lib/analytics/model";
 import { reportPages, tilePage } from "@/lib/analytics/pages";
 import { applyChoice, draftParameterValues, parameterValues, parseChoice } from "@/lib/analytics/parameters";
@@ -169,7 +169,10 @@ export function imageRead(run: OrganisationRunner) {
     const { dashboardId, imageId } = await context.params;
     const image = await run(request, searchParams(request).get("organisationId"), "report_viewer", async (tx, { auth, membership }) => {
       await requireAnalytics(tx);
-      const dashboard = await getDashboard(tx, dashboardId, { userId: auth.user.id, reportViewer: membership.role === "report_viewer" });
+      const reportViewer = membership.role === "report_viewer";
+      const dashboard = await getDashboard(tx, dashboardId, { userId: auth.user.id, reportViewer });
+      // A picture taken off the report is kept for its History (PIC4), which report viewers don't see.
+      if (reportViewer && !(await imagesInUse(tx, dashboard.id)).includes(imageId)) throw new NotFoundError("That image wasn't found.");
       return readDashboardImage(tx, dashboard.id, imageId);
     });
     return fileResponse(image, false);

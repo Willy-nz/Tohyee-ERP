@@ -231,6 +231,7 @@ export const ANALYTICS_TOOLS: readonly string[] = [
   "suggest_analytics_commentary",
   "refresh_analytics_sources",
   "add_analytics_image",
+  "change_analytics_picture",
   "delete_analytics_dashboard",
 ];
 

@@ -3,6 +3,7 @@ import { checkXlsxArchive, type XlsxLimits } from "@/lib/analytics/xlsx";
 import { writeAuditEvent } from "@/lib/audit";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { NotFoundError, ValidationError } from "@/lib/errors";
+import { checkAttachment } from "@/lib/records/file-types";
 import { optionalString, requireId, requireString } from "@/lib/validation";
 
 /*
@@ -19,6 +20,9 @@ export const READ_CHUNK = 100_000;
 
 const TEXT_TYPES = /\.(csv|tsv|txt|json|md|xml|tab)$/i;
 const EXCEL_TYPES = /\.xlsx$/i;
+/** Photos left for the AI to put on an Analytics report (PIC5): kept, never read as text. */
+const IMAGE_TYPES = /\.(jpe?g|png)$/i;
+const IMAGE_CONTENT_TYPES = new Set(["image/jpeg", "image/png"]);
 
 /**
  * A workbook is checked before it's opened, as everywhere else
@@ -53,16 +57,19 @@ export async function listAiFiles(tx: OrgTx): Promise<AiFile[]> {
 /** Adds a file (AIW3): text or Excel, up to 10 MB, sent as base64. */
 export async function addAiFile(tx: OrgTx, input: { fileName: unknown; contentBase64: unknown; note?: unknown }): Promise<AiFile> {
   const fileName = requireString(input.fileName, "The file name", { maxLength: 255 }).replace(/[\\/]/g, "_");
-  if (!TEXT_TYPES.test(fileName) && !EXCEL_TYPES.test(fileName)) {
-    throw new ValidationError("The AI can read CSV, TSV, text, JSON and Excel (.xlsx) files. Save other files as one of those first.");
+  if (!TEXT_TYPES.test(fileName) && !EXCEL_TYPES.test(fileName) && !IMAGE_TYPES.test(fileName)) {
+    throw new ValidationError("The AI can read CSV, TSV, text, JSON and Excel (.xlsx) files, and use JPG and PNG pictures. Save other files as one of those first.");
   }
   if (typeof input.contentBase64 !== "string" || input.contentBase64 === "") throw new ValidationError("The file is empty.");
   const content = Buffer.from(input.contentBase64, "base64");
   if (content.length === 0) throw new ValidationError("The file is empty.");
   if (content.length > MAX_FILE_BYTES) throw new ValidationError("Files can be up to 10 MB.");
   if (EXCEL_TYPES.test(fileName)) await checkXlsxArchive(content, AI_XLSX_LIMITS);
+  // A picture is checked as any attachment is: its type from the name, confirmed by its contents.
+  const picture = IMAGE_TYPES.test(fileName) ? checkAttachment(fileName, new Uint8Array(content)) : null;
+  if (picture && !IMAGE_CONTENT_TYPES.has(picture.contentType)) throw new ValidationError(`${fileName} isn't a JPG or PNG picture.`);
   const note = optionalString(input.note, "note", { maxLength: 1000 });
-  const contentType = EXCEL_TYPES.test(fileName) ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "text/plain";
+  const contentType = picture ? picture.contentType : EXCEL_TYPES.test(fileName) ? "application/vnd.openxmlformats-officedocument.spreadsheetml.sheet" : "text/plain";
   const row = await tx.query<Row>(
     `insert into ai_files (file_name, content_type, size_bytes, content, note, uploaded_by_email) values ($1, $2, $3, $4, $5, $6) returning ${COLUMNS}`,
     [fileName, contentType, content.length, content, note, tx.actor.email],
@@ -99,6 +106,7 @@ export async function aiFileText(tx: OrgTx, idInput: unknown): Promise<{ file: A
   const row = (await tx.query<Row & { content: Buffer }>(`select ${COLUMNS}, content from ai_files where id = $1 and archived_at is null`, [id])).rows[0];
   if (!row) throw new NotFoundError("File not found.");
   const file = toFile(row);
+  if (IMAGE_CONTENT_TYPES.has(file.contentType)) throw new ValidationError(`${file.fileName} is a picture, not words: put it on an Analytics report with add_analytics_image (uploadId ${file.id}).`);
   if (!/\.(xlsx|xlsm)$/i.test(file.fileName)) return { file, text: row.content.toString("utf8") };
   // Checked again on reading: files added before the check (and any .xlsm) are refused here if unsafe.
   await checkXlsxArchive(row.content, AI_XLSX_LIMITS);
@@ -113,4 +121,13 @@ export async function aiFileText(tx: OrgTx, idInput: unknown): Promise<{ file: A
     });
   });
   return { file, text: parts.join("\n") };
+}
+
+/** A JPG or PNG left for the AI, to put on an Analytics report (PIC5). */
+export async function aiFileImage(tx: OrgTx, idInput: unknown): Promise<{ fileName: string; content: Uint8Array }> {
+  const id = requireId(idInput, "uploadId");
+  const row = (await tx.query<{ file_name: string; content_type: string; content: Buffer }>("select file_name, content_type, content from ai_files where id = $1 and archived_at is null", [id])).rows[0];
+  if (!row) throw new NotFoundError("That file wasn't found in the files left for the AI (list_ai_uploads).");
+  if (!IMAGE_CONTENT_TYPES.has(row.content_type)) throw new ValidationError(`${row.file_name} isn't a picture: a report's pictures are JPG or PNG.`);
+  return { fileName: row.file_name, content: new Uint8Array(row.content) };
 }
