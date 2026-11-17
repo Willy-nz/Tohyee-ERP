@@ -49,8 +49,20 @@ export default async function GetPowerPointAddinPage() {
                 <strong>Tohyee Analytics</strong> appears on the slide. Sign in, then pick an organisation, a report and a page or tile.
               </li>
             </ol>
+            <h2 className={styles.title}>No Upload My Add-in? (PowerPoint on Windows)</h2>
+            <p>
+              Some versions of PowerPoint for Windows don&apos;t have it. This file adds the add-in for you: run it on the PC with PowerPoint and choose <strong>Yes</strong> when Windows asks to share a folder.
+            </p>
+            <p>
+              <a className={`${ui.button} ${ui.secondary}`} href={`${addresses.origin}/office/powerpoint/setup.cmd`} download="tohyee-powerpoint-setup.cmd">
+                Download the Windows setup
+              </a>
+            </p>
             <p className={styles.quiet}>
-              No Upload My Add-in? Your work&apos;s Microsoft 365 admin has turned it off. Send them this page: they can add it for everyone in the Microsoft 365 admin center, under Settings › Integrated apps › Upload custom apps › Office Add-in, with this file or its address:
+              Then open PowerPoint again and choose <strong>Insert › My Add-ins › Shared Folder › Tohyee Analytics</strong>. If Windows warns about a downloaded file, choose <strong>More info › Run anyway</strong>.
+            </p>
+            <p className={styles.quiet}>
+              At work, a Microsoft 365 admin can instead add it for everyone in the Microsoft 365 admin center, under Settings › Integrated apps › Upload custom apps › Office Add-in, with the add-in file or its address:
             </p>
             <p className={styles.quiet}>
               <code style={{ wordBreak: "break-all" }}>{addresses.manifestUrl}</code>

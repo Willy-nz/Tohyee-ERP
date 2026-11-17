@@ -28,6 +28,16 @@ To hand it out, send people `/office/powerpoint/get` on the remote access addres
 
 - **Just you:** in PowerPoint, Home › Add-ins (or Insert › Add-ins) › My
   Add-ins › Upload My Add-in, and pick the file.
+- **PowerPoint for Windows without Upload My Add-in:** download the Windows
+  setup (`/office/powerpoint/setup.cmd`, from Settings › PowerPoint add-in
+  or the page above) and run it on that PC, or use **Add Tohyee to PowerPoint
+  on this PC…** in the Tohyee tray menu on the server. It saves the manifest
+  in `%LOCALAPPDATA%\Tohyee\PowerPoint`, shares that folder read-only to the
+  signed-in user (Windows asks once), and adds the share as a Trusted Add-in
+  Catalog (`HKCU\Software\Microsoft\Office\16.0\WEF\TrustedCatalogs`, shown
+  in the menu). Then open PowerPoint again: Insert › My Add-ins › Shared
+  Folder › Tohyee Analytics. `src/lib/office/windows-setup.ts`; not yet tried
+  on real Windows.
 - **Everyone:** a Microsoft 365 admin goes to the Microsoft 365 admin center ›
   Settings › Integrated apps › Upload custom apps › Office Add-in, and
   uploads the file (or gives its address,

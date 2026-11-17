@@ -68,8 +68,16 @@ export default function PowerPointAddinPage() {
               On the web an uploaded add-in stays in that browser only.{" "}
               <InfoTip label="If uploading doesn't work">
               <InfoPara>If Upload My Add-in isn&apos;t there, your Microsoft 365 admin has turned it off: use 2b.</InfoPara>
-              <InfoPara>On some versions of PowerPoint for Windows, an add-in from a file has to come from a shared folder catalogue instead (File › Options › Trust Center › Trusted Add-in Catalogs).</InfoPara>
+              <InfoPara>Some versions of PowerPoint for Windows don&apos;t have it at all: use the Windows setup below.</InfoPara>
               </InfoTip>
+            </p>
+            <p>
+              <strong>No Upload My Add-in in PowerPoint for Windows?</strong> Download the Windows setup and run it on the PC with PowerPoint. It shares a folder with the add-in in it (Windows asks once; choose Yes) and adds that folder to PowerPoint&apos;s add-in list. Then open PowerPoint again and choose <strong>Insert › My Add-ins › Shared Folder › Tohyee Analytics</strong>.
+            </p>
+            <p>
+              <a className={`${ui.button} ${ui.secondary}`} href={`${new URL(data.manifestUrl).origin}/office/powerpoint/setup.cmd`} download="tohyee-powerpoint-setup.cmd">
+                Download the Windows setup
+              </a>
             </p>
           </Card>
           <Card title="2b. Everyone in your organisation: deploy it in Microsoft 365">
