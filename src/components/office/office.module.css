@@ -150,10 +150,20 @@
   gap: 8px;
 }
 
-/* The live report. */
+/* The live report: the toolbar, then the page scaled to fill the rest with no scrolling. */
 .live {
-  min-height: 100vh;
+  display: flex;
+  flex-direction: column;
+  height: 100vh;
+  overflow: hidden;
   background: var(--bg);
+}
+
+.fitFrame {
+  position: relative;
+  flex: 1;
+  min-height: 0;
+  overflow: hidden;
 }
 
 .toolbar {
