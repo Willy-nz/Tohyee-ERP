@@ -296,7 +296,9 @@ that something happened.
   arrow-key row moves, names typed in place, Group for chosen accounts,
   hidden rows, page breaks, row notes, and × ÷ and % of formulas (blank
   when dividing by zero). An account drags onto another group to move it
-  there, or ticked accounts **Move to** a group (CR21); the editor lists
+  there, or ticked accounts **Move to** a group (CR21); an account drags up or
+  down within its group, or a ticked one moves **Up** and **Down**, to set the
+  group's order (CR26); the editor lists
   every account in use, with or without an amount (CR23); the first Update
   layout makes the layout the one Reports shows (CR22, not yet reviewed). Save as keeps named versions; one can be the
   **default layout** that Reports shows (deliberately unlike other accounting software, which

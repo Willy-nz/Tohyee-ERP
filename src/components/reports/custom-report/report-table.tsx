@@ -5,7 +5,7 @@ import { Button,ui } from "@/components/ui";
 import {
 type ComputedBlock,CUSTOM_REPORT_LIMITS,type CustomReportFigures,
 type CustomReportLayout,groupAccounts,
-moveAccounts,moveRow,
+moveAccounts,moveRow,orderAccount,
 newLayoutId,type ReportBlock,type ReportRow,
 type ReportTrackingFilter
 } from "@/lib/reports/custom-layout";
@@ -125,6 +125,13 @@ export function ReportTable({
             layout.blocks = moveAccounts(layout, block.id, fromRowId, codes, toRowId).blocks;
           });
           setAnnounce(`${codes.length} ${codes.length === 1 ? "account" : "accounts"} moved to ${to?.label ?? "the group"}.`);
+        },
+        orderAccount: (rowId, shown, code, toIndex) => {
+          onChange((layout) => {
+            layout.blocks = orderAccount(layout, block.id, rowId, shown, code, toIndex).blocks;
+          });
+          const label = (layoutBlock?.rows ?? []).find((entry) => entry.id === rowId)?.label ?? "the group";
+          setAnnounce(`${code} moved to place ${toIndex + 1} of ${shown.length} in ${label}.`);
         },
         rowMenu: (row) => {
           const layoutRow = layoutBlock?.rows.find((entry) => entry.id === row.id);

@@ -11,6 +11,7 @@ import { type BalanceLeaf, balancingEarnings, isReportRounding, roundToUnit } fr
 import {
   CUSTOM_REPORT_BASES,
   CUSTOM_REPORT_LIMITS as LIMITS,
+  inGroupOrder,
   type ComputedBlock,
   type ComputedLine,
   type ComputedRow,
@@ -266,6 +267,9 @@ function parseRowBody(base: FinancialReportBase, raw: Record<string, unknown>, i
       const also = list(raw.alsoCodes, `The accounts moved into ${label}`, LIMITS.accountCodesPerGroup).map((code) =>
         text(code, `An account code moved into ${label}`, 20, { required: true }),
       );
+      const order = list(raw.order, `The order of ${label}'s accounts`, LIMITS.accountCodesPerGroup).map((code) =>
+        text(code, `An account code in ${label}'s order`, 20, { required: true }),
+      );
       const both = also.filter((code) => except.includes(code));
       if (both.length > 0) throw new ValidationError(`${label} both leaves out and takes ${both.join(", ")}. It can only do one.`);
       return {
@@ -276,6 +280,7 @@ function parseRowBody(base: FinancialReportBase, raw: Record<string, unknown>, i
         accountCodes: [...new Set(codes)],
         ...(except.length > 0 && codes.length === 0 ? { exceptCodes: [...new Set(except)] } : {}),
         ...(also.length > 0 && codes.length === 0 ? { alsoCodes: [...new Set(also)] } : {}),
+        ...(order.length > 0 ? { order: [...new Set(order)] } : {}),
         showAccounts: bool(raw.showAccounts, "showAccounts"),
       };
     }
@@ -753,6 +758,8 @@ export async function computeCustomReport(
         }
       }
       const format = formatOf(row);
+      const ordered = row.kind === "group" ? inGroupOrder(lines, row.order) : lines;
+      lines.splice(0, lines.length, ...ordered);
       return {
         id: row.id,
         kind: row.kind,

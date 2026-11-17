@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { groupAccounts, moveAccounts, moveRow, standardLayout } from "@/lib/reports/custom-layout";
+import { groupAccounts, inGroupOrder, moveAccounts, moveRow, orderAccount, standardLayout } from "@/lib/reports/custom-layout";
 
 describe("editing a layout", () => {
   it("starts from the standard report's labels", () => {
@@ -93,5 +93,36 @@ describe("editing a layout", () => {
       "other_income",
       "net_profit",
     ]);
+  });
+
+  describe("putting accounts in order within a group (CR26)", () => {
+    const row = (layout: ReturnType<typeof standardLayout>, id: string) => (layout.blocks[0].kind === "table" ? layout.blocks[0].rows : []).find((entry) => entry.id === id);
+
+    it("moves one account to a new place and remembers the group's order", () => {
+      const layout = standardLayout("profit_and_loss", "2026-06-30");
+      const ordered = orderAccount(layout, "main", "expenses", ["6010", "6060", "6120"], "6120", 0);
+      expect(row(ordered, "expenses")).toMatchObject({ order: ["6120", "6010", "6060"] });
+      expect(orderAccount(ordered, "main", "expenses", ["6120", "6010", "6060"], "6120", 9)).toMatchObject({});
+      expect(row(orderAccount(ordered, "main", "expenses", ["6120", "6010", "6060"], "6120", 9), "expenses")).toMatchObject({ order: ["6010", "6060", "6120"] });
+      // The original isn't changed, and an account that isn't listed is refused.
+      expect(row(layout, "expenses")).not.toHaveProperty("order");
+      expect(() => orderAccount(layout, "main", "expenses", ["6010"], "6120", 0)).toThrow(/isn't in Operating expenses/);
+      expect(() => orderAccount(layout, "main", "gross_profit", ["6010"], "6010", 0)).toThrow(/inside a group/);
+    });
+
+    it("lists the chosen order first, then any other accounts in code order", () => {
+      const lines = ["6010", "6060", "6120", "6200"].map((code) => ({ code }));
+      expect(inGroupOrder(lines, ["6120", "6010"]).map((line) => line.code)).toEqual(["6120", "6010", "6060", "6200"]);
+      expect(inGroupOrder(lines, undefined)).toBe(lines);
+      expect(inGroupOrder(lines, ["9999"]).map((line) => line.code)).toEqual(["6010", "6060", "6120", "6200"]);
+    });
+
+    it("moving an account to another group takes it out of the order", () => {
+      const layout = orderAccount(standardLayout("profit_and_loss", "2026-06-30"), "main", "expenses", ["6010", "6120"], "6120", 0);
+      const moved = moveAccounts(layout, "main", "expenses", ["6120"], "cost_of_sales");
+      expect(row(moved, "expenses")).toMatchObject({ order: ["6010"] });
+      const all = moveAccounts(moved, "main", "expenses", ["6010"], "cost_of_sales");
+      expect(row(all, "expenses")).not.toHaveProperty("order");
+    });
   });
 });

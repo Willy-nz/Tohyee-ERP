@@ -195,6 +195,8 @@ export type ReportRow = RowExtras &
         exceptCodes?: string[];
         /** With account types: these accounts as well (they've been moved in from another group, CR21). */
         alsoCodes?: string[];
+        /** The accounts' order, by code (CR26); accounts not listed follow in code order. */
+        order?: string[];
         showAccounts: boolean;
       }
     | {
@@ -662,6 +664,37 @@ export function groupAccounts(
  * of chosen accounts must keep at least one account. Formulas aren't
  * changed: the two groups' totals move by the accounts' amounts.
  */
+/**
+ * Puts one account at a new place among its group's accounts (CR26), as
+ * dragging it up or down does. `shown` is the group's accounts as listed
+ * now; the group remembers that order with the account moved, and accounts
+ * added later follow in code order. Only the order changes: no amount does.
+ */
+export function orderAccount(layout: CustomReportLayout, blockId: string, rowId: string, shown: string[], code: string, toIndex: number): CustomReportLayout {
+  const next = structuredClone(layout);
+  const block = next.blocks.find((entry) => entry.id === blockId);
+  if (!block || block.kind !== "table") throw new Error("That table isn't in the report.");
+  const row = block.rows.find((entry) => entry.id === rowId);
+  if (!row || row.kind !== "group") throw new Error("Accounts are put in order inside a group.");
+  const list = [...new Set(shown)];
+  const from = list.indexOf(code);
+  if (from === -1) throw new Error(`${code} isn't in ${row.label}.`);
+  list.splice(from, 1);
+  list.splice(Math.max(0, Math.min(toIndex, list.length)), 0, code);
+  row.order = list;
+  return next;
+}
+
+/** A group's accounts in its chosen order (CR26): those listed first, in that order, then the rest in code order. */
+export function inGroupOrder<T extends { code: string }>(lines: T[], order: string[] | undefined): T[] {
+  if (!order || order.length === 0) return lines;
+  const place = new Map(order.map((code, index) => [code, index]));
+  return lines
+    .map((line, index) => ({ line, index }))
+    .sort((a, b) => (place.get(a.line.code) ?? order.length + a.index) - (place.get(b.line.code) ?? order.length + b.index))
+    .map((entry) => entry.line);
+}
+
 export function moveAccounts(layout: CustomReportLayout, blockId: string, fromRowId: string, codes: string[], toRowId: string): CustomReportLayout {
   const next = structuredClone(layout);
   const block = next.blocks.find((entry) => entry.id === blockId);
@@ -672,6 +705,11 @@ export function moveAccounts(layout: CustomReportLayout, blockId: string, fromRo
   const moving = [...new Set(codes)];
   if (moving.length === 0) throw new Error("Choose at least one account.");
   if (from.id === to.id) return next;
+  if (from.order) {
+    const kept = from.order.filter((code) => !moving.includes(code));
+    if (kept.length > 0) from.order = kept;
+    else delete from.order;
+  }
 
   if (from.accountCodes.length > 0) {
     const left = from.accountCodes.filter((code) => !moving.includes(code));

@@ -56,6 +56,8 @@ export type RowEditor = {
   group: (rowId: string, codes: string[], label: string) => void;
   /** Moves these accounts (by code) from one group to another in the same table (CR21). */
   moveAccounts?: (fromRowId: string, codes: string[], toRowId: string) => void;
+  /** Puts an account at a new place in its group (CR26); `shown` is the group's accounts as listed. */
+  orderAccount?: (rowId: string, shown: string[], code: string, toIndex: number) => void;
   /** The layout editor (LE1): clicking a row picks it, to change it in Details. */
   select?: (rowId: string) => void;
   selectedId?: string | null;
@@ -201,6 +203,10 @@ export function CustomFiguresTable({
   const [dropGroup, setDropGroup] = useState<string | null>(null);
   const groups = block.rows.filter((row) => row.kind === "group");
   const canMoveAccounts = Boolean(editor?.moveAccounts) && groups.length > 1;
+  const canOrder = Boolean(editor?.orderAccount);
+  const canDragLines = canMoveAccounts || canOrder;
+  /** The account a dragged account would go above, in its own group (CR26). */
+  const [dropLine, setDropLine] = useState<string | null>(null);
   const draggingAccounts = () => accountDrag.current?.tableId === id;
   const startAccountDrag = (event: React.DragEvent, rowId: string, code: string, name: string, ticked: string[]) => {
     holdAccountDrag({ tableId: id, rowId, codes: ticked.includes(code) ? ticked : [code] });
@@ -210,6 +216,7 @@ export function CustomFiguresTable({
   const endAccountDrag = () => {
     holdAccountDrag(null);
     setDropGroup(null);
+    setDropLine(null);
   };
   /** Dropping an account on any row of a group moves it into that group. */
   const accountDrop = (groupId: string) =>
@@ -236,6 +243,40 @@ export function CustomFiguresTable({
           },
         }
       : {};
+  /** Dropping one account on another account of its own group puts it above that one; anywhere else, as accountDrop. */
+  const lineDrop = (groupId: string, shown: string[], code: string) => {
+    const across: Partial<Record<"onDragOver" | "onDrop", (event: React.DragEvent) => void> & { onDragLeave: () => void }> = accountDrop(groupId);
+    if (!canOrder) return across;
+    const mine = () => {
+      const carried = accountDrag.current;
+      return Boolean(carried && carried.tableId === id && carried.rowId === groupId && carried.codes.length === 1);
+    };
+    return {
+      onDragOver: (event: React.DragEvent) => {
+        if (!mine()) return across.onDragOver?.(event);
+        event.preventDefault();
+        event.stopPropagation();
+        event.dataTransfer.dropEffect = "move";
+        setDropLine(`${groupId}:${code}`);
+      },
+      onDragLeave: () => {
+        setDropLine((current) => (current === `${groupId}:${code}` ? null : current));
+        across.onDragLeave?.();
+      },
+      onDrop: (event: React.DragEvent) => {
+        if (!mine()) return across.onDrop?.(event);
+        const carried = accountDrag.current!;
+        event.preventDefault();
+        event.stopPropagation();
+        endAccountDrag();
+        const moving = carried.codes[0];
+        if (moving === code) return;
+        const without = shown.filter((entry) => entry !== moving);
+        editor!.orderAccount!(groupId, shown, moving, without.indexOf(code));
+        setSelected(null);
+      },
+    };
+  };
   // Hidden rows, and groups with nothing in these periods, are left out of the report.
   // Accounts with nothing in these columns are only listed in the editor, to be moved (CR23).
   const linesOf = (row: ComputedRow) => (editor ? row.lines : row.lines.filter((line) => !line.empty));
@@ -362,17 +403,17 @@ export function CustomFiguresTable({
                     <td colSpan={columns.length + 1}>{name(row)}</td>
                     {tools(row)}
                   </tr>
-                  {linesOf(row).map((line) => (
+                  {linesOf(row).map((line, _index, shownLines) => (
                     <tr
                       key={line.code}
-                      className={`${ui.reportSection} ${row.hidden ? ui.layoutHiddenRow : ""} ${line.empty ? ui.layoutEmptyLine : ""} ${dropGroup === row.id ? ui.layoutDropGroup : ""} ${canMoveAccounts ? ui.layoutDragLine : ""}`}
+                      className={`${ui.reportSection} ${row.hidden ? ui.layoutHiddenRow : ""} ${line.empty ? ui.layoutEmptyLine : ""} ${dropGroup === row.id ? ui.layoutDropGroup : ""} ${canDragLines ? ui.layoutDragLine : ""} ${dropLine === `${row.id}:${line.code}` ? ui.layoutDropAbove : ""}`}
                       {...(row.hidden || line.empty ? { "data-export-ignore": "true" } : {})}
                       {...(line.empty ? { "data-print": "hide" } : {})}
-                      {...accountDrop(row.id)}
-                      {...(canMoveAccounts
+                      {...lineDrop(row.id, shownLines.map((entry) => entry.code), line.code)}
+                      {...(canDragLines
                         ? {
                             draggable: !editor!.busy,
-                            title: "Drag to another group to move it there",
+                            title: canMoveAccounts ? "Drag up or down to reorder, or to another group to move it there" : "Drag up or down to reorder",
                             onDragStart: (event: React.DragEvent) => startAccountDrag(event, row.id, line.code, line.name, picked),
                             onDragEnd: endAccountDrag,
                           }
@@ -381,7 +422,7 @@ export function CustomFiguresTable({
                       <td>
                         {editor ? (
                           <label className={ui.layoutPick} data-export-ignore>
-                            {canMoveAccounts ? (
+                            {canDragLines ? (
                               <span
                                 className={ui.layoutLineGrip}
                                 aria-hidden="true"
@@ -421,6 +462,28 @@ export function CustomFiguresTable({
                     <tr data-export-ignore="true" data-print="hide">
                       <td colSpan={span}>
                         <span className={ui.layoutGroupBar}>
+                          {canOrder && picked.length === 1
+                            ? (() => {
+                                const shown = linesOf(row).map((entry) => entry.code);
+                                const at = shown.indexOf(picked[0]);
+                                return (
+                                  <>
+                                    <button type="button" className={`${ui.button} ${ui.secondary}`} disabled={editor.busy || at <= 0} onClick={() => editor.orderAccount!(row.id, shown, picked[0], at - 1)}>
+                                      Up
+                                    </button>
+                                    <button
+                                      type="button"
+                                      className={`${ui.button} ${ui.secondary}`}
+                                      disabled={editor.busy || at === -1 || at >= shown.length - 1}
+                                      onClick={() => editor.orderAccount!(row.id, shown, picked[0], at + 1)}
+                                    >
+                                      Down
+                                    </button>
+                                    <span className={ui.muted}>or</span>
+                                  </>
+                                );
+                              })()
+                            : null}
                           {canMoveAccounts ? (
                             <>
                               <select aria-label="Move the chosen accounts to" value={moveTo} onChange={(event) => setMoveTo(event.target.value)}>
