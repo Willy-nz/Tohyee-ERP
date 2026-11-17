@@ -444,7 +444,7 @@ function LiveReport({
     if (!pages || !pages[index]) return;
     onPage(pages[index].id);
   };
-  const { setFrame, setContent, style: fitStyle } = useFitToFrame();
+  const { setFrame, setContent, style: fitStyle, sizer, scrolls } = useFitToFrame();
   const setReportArea = useCallback(
     (element: HTMLDivElement | null) => {
       area.current = element;
@@ -531,7 +531,8 @@ function LiveReport({
       ) : (
         <button type="button" className={styles.showRefresh} onClick={reload} aria-label="Refresh the report">↻</button>
       )}
-      <div ref={setFrame} className={styles.fitFrame}>
+      <div ref={setFrame} className={styles.fitFrame} style={{ overflowY: scrolls ? "auto" : "hidden" }}>
+        <div style={sizer}>
         <div ref={setReportArea} className={styles.report} style={fitStyle}>
         {!organisation ? (
           <Notice tone="warning">You can&apos;t open {choice.organisationName} in Tohyee, so there&apos;s nothing to show you here.</Notice>
@@ -544,6 +545,7 @@ function LiveReport({
             </AnalyticsEmbedContext.Provider>
           </WorkspaceProvider>
         ) : null}
+        </div>
         </div>
       </div>
     </main>
@@ -574,10 +576,20 @@ function useReportPages(auth: OfficeAuth, organisationId: string, dashboardId: s
 /** The width a slide's report is laid out at, then scaled to fit the slide, so a page looks the same however big the add-in is. */
 export const FIT_WIDTH = 1280;
 
-/** How much to scale a page laid out at FIT_WIDTH so all of it fits the frame (at most 2x), and how far in to centre it. */
-export function fitBox(width: number, height: number, naturalHeight: number): { scale: number; left: number } {
-  const scale = Math.min(width / FIT_WIDTH, height / Math.max(naturalHeight, 1), 2);
-  return { scale, left: Math.max(0, (width - FIT_WIDTH * scale) / 2) };
+/** A page is shrunk to fit the slide's height down to this share of its fit-the-width size; any smaller would squeeze it, so it scrolls instead. */
+export const FIT_LEAST = 0.7;
+
+/**
+ * How much to scale a page laid out at FIT_WIDTH (at most 2x): all of it on
+ * the slide when that keeps it readable, otherwise as wide as the slide and
+ * scrolling down. With how far in to centre it and its scaled height.
+ */
+export function fitBox(width: number, height: number, naturalHeight: number): { scale: number; left: number; height: number; scrolls: boolean } {
+  const across = Math.min(width / FIT_WIDTH, 2);
+  const whole = Math.min(across, height / Math.max(naturalHeight, 1));
+  const scrolls = whole < across * FIT_LEAST;
+  const scale = scrolls ? across : whole;
+  return { scale, left: Math.max(0, (width - FIT_WIDTH * scale) / 2), height: naturalHeight * scale, scrolls };
 }
 
 /**
@@ -588,7 +600,7 @@ export function fitBox(width: number, height: number, naturalHeight: number): { 
 function useFitToFrame() {
   const [outer, setFrame] = useState<HTMLDivElement | null>(null);
   const [inner, setContent] = useState<HTMLDivElement | null>(null);
-  const [box, setBox] = useState<{ scale: number; left: number } | null>(null);
+  const [box, setBox] = useState<{ scale: number; left: number; height: number; scrolls: boolean } | null>(null);
   useEffect(() => {
     if (!outer || !inner || typeof ResizeObserver === "undefined") return;
     const measure = () => {
@@ -596,8 +608,10 @@ function useFitToFrame() {
       const height = outer.clientHeight;
       const naturalHeight = Math.max(inner.scrollHeight, 1);
       if (!width || !height) return;
-      const { scale, left } = fitBox(width, height, naturalHeight);
-      setBox((current) => (current && Math.abs(current.scale - scale) < 0.001 && Math.abs(current.left - left) < 0.5 ? current : { scale, left }));
+      const next = fitBox(width, height, naturalHeight);
+      setBox((current) =>
+        current && Math.abs(current.scale - next.scale) < 0.001 && Math.abs(current.left - next.left) < 0.5 && Math.abs(current.height - next.height) < 0.5 && current.scrolls === next.scrolls ? current : next,
+      );
     };
     const observer = new ResizeObserver(measure);
     observer.observe(outer);
@@ -606,5 +620,7 @@ function useFitToFrame() {
     return () => observer.disconnect();
   }, [outer, inner]);
   const style: React.CSSProperties = { width: FIT_WIDTH, transformOrigin: "top left", transform: box ? `translateX(${box.left}px) scale(${box.scale})` : undefined };
-  return { setFrame, setContent, style };
+  // The scaled page's own height, so scrolling stops at its end rather than at its unscaled size.
+  const sizer: React.CSSProperties = box ? { height: box.height, overflow: "hidden" } : {};
+  return { setFrame, setContent, style, sizer, scrolls: box?.scrolls ?? false };
 }
