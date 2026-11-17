@@ -1,0 +1,56 @@
+export const REPORT_EXPORTS = [
+  "account-transactions",
+  "aged-payables",
+  "analytics-pivot",
+  "aged-receivables",
+  "balance-sheet",
+  "bank-reconciliation",
+  "budget-vs-actual",
+  "cash-flow-forecast",
+  "cash-flow-statement",
+  "changes-in-equity",
+  "consolidated-balance-sheet",
+  "coop-share-register",
+  "consolidated-profit-and-loss",
+  "customer-statement",
+  "custom-report",
+  "farm-benchmarks",
+  "farm-benchmarks-by-farm",
+  "fixed-asset-register",
+  "gst-audit",
+  "gst-return",
+  "inventory-valuation",
+  "journal-report",
+  "profit-and-loss",
+  "project-profitability",
+  "project-time",
+  "sales-by-salesperson",
+  "trial-balance",
+] as const;
+
+export type ReportExportName = (typeof REPORT_EXPORTS)[number];
+export type ReportExportCell = { text: string; value?: string; numeric?: boolean };
+/**
+ * How a row looks: a section heading, an account line
+ * (indented), a total (a line above it) or the statement's last total, net
+ * profit or net assets (a line above, a double line below). Rows without a
+ * kind are plain.
+ */
+export type ReportExportRowKind = "section" | "account" | "total" | "grand";
+export const REPORT_EXPORT_ROW_KINDS: readonly ReportExportRowKind[] = ["section", "account", "total", "grand"];
+/** `pageBreakAfter`: the PDF starts a new page after this row (a custom report's page break). */
+export type ReportExportRow = { cells: ReportExportCell[]; kind?: ReportExportRowKind; pageBreakAfter?: boolean };
+export type ReportExportTable = { title?: string; columns: string[]; rows: ReportExportRow[] };
+
+export type ReportExportData = {
+  report: ReportExportName;
+  organisationName: string;
+  title: string;
+  period: string;
+  basis: string | null;
+  filters: string[];
+  producedAt: string;
+  /** "statement" (P&L, balance sheet and the like): no grid lines, lines above totals, as on screen. */
+  style?: "statement" | "table";
+  tables: ReportExportTable[];
+};

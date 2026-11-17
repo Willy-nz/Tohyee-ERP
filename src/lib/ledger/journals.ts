@@ -1,0 +1,1116 @@
+import { parseAccountCodeInput, resolveAccountsByCode } from "@/lib/accounts/service";
+import { assertRequiredFields, keptCustom, parseCustomInput, resolveDocumentCustom } from "@/lib/custom-fields/service";
+import type { CustomValues } from "@/lib/custom-fields/values";
+import { writeAuditEvent } from "@/lib/audit";
+import { parseIsoDate, parseOptionalIsoDate } from "@/lib/dates";
+import type { OrgTx } from "@/lib/db/org-transaction";
+import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
+import { assertSameRequest, requestHash } from "@/lib/idempotency";
+import { assertPostingDateAllowed } from "@/lib/ledger/period-controls";
+import { assertRequiredTags, checkNewTags, keptValues, loadTrackingContext, parseTrackingInput, sortedTags, type TrackingTags } from "@/lib/tracking/service";
+import { currencyMinorUnits, parseCurrencyCode } from "@/lib/money/currency";
+import {
+  add,
+  cmp,
+  dec,
+  isPositive,
+  isZero,
+  mul,
+  parseDecimalInput,
+  roundHalfUp,
+  significantScale,
+  toFixedString,
+  toPlainString,
+  ZERO_DECIMAL,
+} from "@/lib/money/decimal";
+import {
+  asRecord,
+  optionalId,
+  optionalSource,
+  optionalString,
+  requireArray,
+  requireId,
+  requireIdempotencyKey,
+  requireString,
+} from "@/lib/validation";
+
+export type JournalOrigin =
+  | "manual"
+  | "correction"
+  | "inventory"
+  | "fx_revaluation"
+  | "invoice"
+  | "customer_payment"
+  | "customer_payment_batch"
+  | "supplier_payment_batch"
+  | "bill"
+  | "supplier_payment"
+  | "sales_credit_note"
+  | "sales_credit_note_refund"
+  | "supplier_credit_note"
+  | "supplier_credit_note_refund"
+  | "customer_overpayment_refund"
+  | "bank_transaction"
+  | "bank_transfer"
+  | "expense_claim"
+  | "expense_claim_payment"
+  | "fixed_asset_depreciation"
+  | "fixed_asset_disposal"
+  | "opening_balance"
+  | "payroll"
+  | "livestock_valuation"
+  | "livestock_rations"
+  | "recode"
+  | "history"
+  | "sales_when_sent";
+export type CorrectionKind = "reversal" | "replacement";
+
+/**
+ * How a foreign-currency line's base amount was worked out (examples FXB1-FXB11):
+ * - "rate": base = foreign amount x rate, rounded once (the database checks it);
+ * - "implied": the base amount is what moved (a transfer into a foreign
+ *   account); the rate is base / foreign, for information;
+ * - "carrying_value": money leaving a foreign account at its carrying value
+ *   (a transfer out); the rate is for information;
+ * - "revaluation": an FX revaluation line, foreign amount 0 at the closing rate;
+ * - "document": a foreign-currency invoice's, bill's or credit note's own line
+ *   on accounts receivable or payable (MC2): base = the document's lines
+ *   converted one by one; the rate is the document's.
+ * On accounts receivable and payable (base-currency accounts), a payment or
+ * credit clearing a foreign-currency document is "carrying_value": the
+ * document's carrying value of what's cleared (MC5-MC7).
+ */
+export type FxKind = "rate" | "implied" | "carrying_value" | "revaluation" | "document";
+
+/** A journal line's foreign-currency side, on the same side (debit or credit) as its base amount. */
+export type ForeignAmount = {
+  currencyCode: string;
+  amount: string;
+  rate: string;
+  kind: FxKind;
+};
+
+/** As parsed, before the account (and so the currency) is known. */
+export type ForeignInput = Omit<ForeignAmount, "currencyCode"> & { currencyCode: string | null };
+
+export const MAX_RATE_SCALE = 8;
+
+export type JournalLine = {
+  lineOrder: number;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  description: string | null;
+  debitAmount: string;
+  creditAmount: string;
+  /** Tracking categories (TC3-TC5): category id -> value id. */
+  tracking: TrackingTags;
+  /** Custom field values on a manual journal's lines (CF9). */
+  customFields: CustomValues;
+  /** On a foreign-currency account: the foreign amount and rate (FXB1-FXB11). Null otherwise. */
+  foreign: ForeignAmount | null;
+};
+
+export type Journal = {
+  id: string;
+  commandSource: string;
+  idempotencyKey: string;
+  origin: JournalOrigin;
+  postingDate: string;
+  reference: string;
+  description: string | null;
+  currencyCode: string;
+  totalDebit: string;
+  totalCredit: string;
+  relatedJournalId: string | null;
+  correctionKind: CorrectionKind | null;
+  createdByEmail: string | null;
+  createdAt: string;
+  /** Custom field values on a manual journal (CF9). */
+  customFields: CustomValues;
+};
+
+export type JournalWithLines = Journal & { lines: JournalLine[] };
+
+type JournalRow = {
+  id: string;
+  command_source: string;
+  idempotency_key: string;
+  request_hash: string;
+  origin: JournalOrigin;
+  posting_date: string;
+  reference: string;
+  description: string | null;
+  currency_code: string;
+  total_debit: string;
+  total_credit: string;
+  related_journal_id: string | null;
+  correction_kind: CorrectionKind | null;
+  created_by_email: string | null;
+  created_at: string;
+  custom_fields: CustomValues;
+};
+
+const JOURNAL_COLUMNS = `id, command_source, idempotency_key, request_hash, origin, posting_date,
+  reference, description, currency_code, total_debit, total_credit, related_journal_id,
+  correction_kind, created_by_email, created_at, custom_fields`;
+
+function toJournal(row: JournalRow): Journal {
+  return {
+    id: row.id,
+    commandSource: row.command_source,
+    idempotencyKey: row.idempotency_key,
+    origin: row.origin,
+    postingDate: row.posting_date,
+    reference: row.reference,
+    description: row.description,
+    currencyCode: row.currency_code,
+    totalDebit: row.total_debit,
+    totalCredit: row.total_credit,
+    relatedJournalId: row.related_journal_id,
+    correctionKind: row.correction_kind,
+    createdByEmail: row.created_by_email,
+    createdAt: row.created_at,
+    customFields: row.custom_fields ?? {},
+  };
+}
+
+export type JournalBody = {
+  postingDate: string;
+  reference: string;
+  description: string | null;
+  currencyCode: string;
+  lines: Array<{
+    accountCode: string;
+    debit: string;
+    credit: string;
+    description: string | null;
+    tracking: TrackingTags;
+    /** As sent; checked for manual journals only. */
+    customInput: Record<string, unknown> | undefined;
+    /** Checked values (CF9); system journals have none. */
+    customFields?: CustomValues;
+    /** The foreign amount and rate, for a line on a foreign-currency account. */
+    foreign: ForeignInput | null;
+  }>;
+  total: string;
+  customInput: Record<string, unknown> | undefined;
+  customFields?: CustomValues;
+};
+
+const MAX_LINES = 500;
+
+/**
+ * Validates a journal's content: base currency only, amounts limited to the
+ * currency's minor units (cents for NZD), each line either a debit or a
+ * credit, at least two lines, and debits equal to credits. Account codes are
+ * checked separately against the chart of accounts.
+ */
+export function parseJournalBody(
+  tx: Pick<OrgTx, "baseCurrency">,
+  input: {
+    postingDate: unknown;
+    reference: unknown;
+    description?: unknown;
+    currencyCode?: unknown;
+    lines: unknown;
+    customFields?: unknown;
+  },
+  options: { internal?: boolean } = {},
+): JournalBody {
+  const postingDate = parseIsoDate(input.postingDate, "postingDate");
+  const reference = requireString(input.reference, "reference", { maxLength: 100 });
+  const description = optionalString(input.description, "description", { maxLength: 500 });
+  const currencyCode =
+    input.currencyCode == null || input.currencyCode === ""
+      ? tx.baseCurrency
+      : parseCurrencyCode(input.currencyCode);
+  if (currencyCode !== tx.baseCurrency) {
+    throw new ValidationError(
+      `Journals are posted in this organisation's base currency (${tx.baseCurrency}). Foreign-currency transactions aren't supported yet; convert the amounts first.`,
+    );
+  }
+  const scale = currencyMinorUnits(currencyCode);
+
+  const rawLines = requireArray(input.lines, "lines", MAX_LINES);
+  if (rawLines.length < 2) {
+    throw new ValidationError("A journal needs at least two lines.");
+  }
+
+  let debitTotal = ZERO_DECIMAL;
+  let creditTotal = ZERO_DECIMAL;
+  const lines = rawLines.map((raw, index) => {
+    const label = `Line ${index + 1}`;
+    const line = asRecord(raw, label);
+    const accountCode = parseAccountCodeInput(line.accountCode, `${label} account`);
+    const debit =
+      line.debitAmount == null || line.debitAmount === ""
+        ? "0"
+        : parseDecimalInput(line.debitAmount, `${label} debit`, { maxScale: scale, allowZero: true });
+    const credit =
+      line.creditAmount == null || line.creditAmount === ""
+        ? "0"
+        : parseDecimalInput(line.creditAmount, `${label} credit`, { maxScale: scale, allowZero: true });
+    const hasDebit = isPositive(dec(debit));
+    const hasCredit = isPositive(dec(credit));
+    if (hasDebit === hasCredit) {
+      throw new ValidationError(`${label} needs either a debit or a credit amount (not both).`);
+    }
+    debitTotal = add(debitTotal, dec(debit));
+    creditTotal = add(creditTotal, dec(credit));
+    return {
+      accountCode,
+      // Stored with exactly the currency's minor units, e.g. "115.00".
+      debit: toFixedString(dec(debit), scale),
+      credit: toFixedString(dec(credit), scale),
+      description: optionalString(line.description, `${label} description`, { maxLength: 200 }),
+      tracking: sortedTags(parseTrackingInput(line.tracking, label)),
+      customInput: parseCustomInput(line.customFields, `${label}: `),
+      foreign: options.internal ? internalForeign(line.foreign) : parseForeignInput(line, label),
+    };
+  });
+
+  if (cmp(debitTotal, creditTotal) !== 0) {
+    throw new ValidationError(
+      `The journal doesn't balance: debits ${toPlainString(debitTotal)}, credits ${toPlainString(creditTotal)}.`,
+    );
+  }
+
+  return {
+    postingDate,
+    reference,
+    description,
+    currencyCode,
+    lines,
+    total: toFixedString(debitTotal, scale),
+    customInput: parseCustomInput(input.customFields, ""),
+  };
+}
+
+/**
+ * A foreign amount and rate typed on a manual journal line (`foreignAmount`,
+ * `exchangeRate`): posted at that rate, so the base amount must be the
+ * foreign amount x rate, rounded once (checked when the account is known).
+ */
+function parseForeignInput(line: Record<string, unknown>, label: string): ForeignInput | null {
+  const blank = (value: unknown) => value == null || value === "";
+  if (blank(line.foreignAmount) && blank(line.exchangeRate)) return null;
+  if (blank(line.foreignAmount)) throw new ValidationError(`${label} has an exchange rate but no foreign amount.`);
+  if (blank(line.exchangeRate)) throw new ValidationError(`${label} has a foreign amount but no exchange rate.`);
+  return {
+    currencyCode: null,
+    amount: parseDecimalInput(line.foreignAmount, `${label} foreign amount`, { maxScale: 4 }),
+    rate: parseExchangeRate(line.exchangeRate, `${label} exchange rate`),
+    kind: "rate",
+  };
+}
+
+/** An exchange rate: base currency per 1 unit of foreign currency, more than 0, up to 8 decimal places (D2). */
+export function parseExchangeRate(input: unknown, fieldName = "exchangeRate"): string {
+  return parseDecimalInput(input, fieldName, { maxScale: MAX_RATE_SCALE });
+}
+
+/** A foreign side built by Tohyee itself (bank transactions, transfers, revaluations, reversals). */
+function internalForeign(input: unknown): ForeignInput | null {
+  if (input == null) return null;
+  const value = input as ForeignAmount;
+  return { currencyCode: value.currencyCode, amount: value.amount, rate: value.rate, kind: value.kind };
+}
+
+/** A line's foreign side reversed (same amount and rate; the debit and credit swap around it). */
+export function sameForeign(line: { foreign: ForeignAmount | null }): { foreign?: ForeignAmount } {
+  return line.foreign ? { foreign: line.foreign } : {};
+}
+
+type PostOptions = {
+  origin: JournalOrigin;
+  relatedJournalId?: string | null;
+  correctionKind?: CorrectionKind | null;
+};
+
+function journalHash(body: JournalBody, options: PostOptions): string {
+  return requestHash("journal", {
+    postingDate: body.postingDate,
+    reference: body.reference,
+    description: body.description,
+    currencyCode: body.currencyCode,
+    lines: body.lines.map((line) => ({
+      account: line.accountCode.toLowerCase(),
+      debit: line.debit,
+      credit: line.credit,
+      description: line.description,
+      // Only when tagged, so journals from before tracking keep their hashes.
+      ...(Object.keys(line.tracking).length > 0 ? { tracking: line.tracking } : {}),
+      ...(line.customFields && Object.keys(line.customFields).length > 0 ? { customFields: line.customFields } : {}),
+      // Only for foreign-currency lines, so other journals keep their hashes.
+      ...(line.foreign ? { foreign: line.foreign } : {}),
+    })),
+    ...(body.customFields && Object.keys(body.customFields).length > 0 ? { customFields: body.customFields } : {}),
+    origin: options.origin,
+    relatedJournalId: options.relatedJournalId ?? null,
+    correctionKind: options.correctionKind ?? null,
+  });
+}
+
+async function findJournalByKey(
+  tx: OrgTx,
+  commandSource: string,
+  idempotencyKey: string,
+): Promise<JournalRow | null> {
+  const result = await tx.query<JournalRow>(
+    `select ${JOURNAL_COLUMNS} from ledger_journals
+      where command_source = $1 and idempotency_key = $2`,
+    [commandSource, idempotencyKey],
+  );
+  return result.rows[0] ?? null;
+}
+
+export async function getJournal(tx: OrgTx, journalId: string): Promise<JournalWithLines> {
+  const result = await tx.query<JournalRow>(
+    `select ${JOURNAL_COLUMNS} from ledger_journals where id = $1`,
+    [journalId],
+  );
+  const row = result.rows[0];
+  if (!row) {
+    throw new NotFoundError(`Journal #${journalId} not found.`);
+  }
+  const lines = await tx.query<{
+    line_order: number;
+    account_id: string;
+    code: string;
+    name: string;
+    description: string | null;
+    debit_amount: string;
+    credit_amount: string;
+    tracking: TrackingTags;
+    custom_fields: CustomValues;
+    foreign_currency_code: string | null;
+    foreign_amount: string | null;
+    exchange_rate: string | null;
+    fx_kind: FxKind | null;
+  }>(
+    `select l.line_order, l.account_id, a.code, a.name, l.description, l.debit_amount, l.credit_amount, l.tracking, l.custom_fields,
+            l.foreign_currency_code, l.foreign_amount::text, l.exchange_rate::text, l.fx_kind
+       from ledger_journal_lines l
+       join accounts a on a.id = l.account_id
+      where l.journal_id = $1
+      order by l.line_order`,
+    [journalId],
+  );
+  return {
+    ...toJournal(row),
+    lines: lines.rows.map((line) => ({
+      lineOrder: line.line_order,
+      accountId: line.account_id,
+      accountCode: line.code,
+      accountName: line.name,
+      description: line.description,
+      debitAmount: line.debit_amount,
+      creditAmount: line.credit_amount,
+      tracking: line.tracking ?? {},
+      customFields: line.custom_fields ?? {},
+      foreign:
+        line.foreign_currency_code && line.foreign_amount !== null && line.exchange_rate !== null && line.fx_kind
+          ? {
+              currencyCode: line.foreign_currency_code,
+              amount: toFixedString(dec(line.foreign_amount), currencyMinorUnits(line.foreign_currency_code)),
+              rate: toPlainString(dec(line.exchange_rate)),
+              kind: line.fx_kind,
+            }
+          : null,
+    })),
+  };
+}
+
+export type PostResult = { created: boolean; journal: JournalWithLines };
+
+/**
+ * Posts a validated journal exactly once per (commandSource, idempotencyKey).
+ * A retry with the same key and the same content returns the original journal;
+ * the same key with different content is refused. The existing-key check runs
+ * first, so a retry still succeeds after the period has since been locked.
+ */
+export async function postJournalBody(
+  tx: OrgTx,
+  commandSource: string,
+  idempotencyKey: string,
+  body: JournalBody,
+  options: PostOptions,
+): Promise<PostResult> {
+  const hash = journalHash(body, options);
+  const existing = await findJournalByKey(tx, commandSource, idempotencyKey);
+  if (existing) {
+    assertSameRequest(existing.request_hash, hash, "journal");
+    return { created: false, journal: await getJournal(tx, existing.id) };
+  }
+
+  const accounts = await resolveAccountsByCode(
+    tx,
+    body.lines.map((line) => line.accountCode),
+  );
+  await assertPostingDateAllowed(tx, body.postingDate);
+  const foreignSides = await checkForeignLines(tx, body, accounts);
+
+  const inserted = await tx.query<{ id: string }>(
+    `insert into ledger_journals (
+       command_source, idempotency_key, request_hash, origin, posting_date, reference,
+       description, currency_code, total_debit, total_credit, related_journal_id,
+       correction_kind, created_by_user_id, created_by_email, custom_fields
+     )
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $9::numeric, $10, $11, $12, $13, $14::jsonb)
+     on conflict (command_source, idempotency_key) do nothing
+     returning id`,
+    [
+      commandSource,
+      idempotencyKey,
+      hash,
+      options.origin,
+      body.postingDate,
+      body.reference,
+      body.description,
+      body.currencyCode,
+      body.total,
+      options.relatedJournalId ?? null,
+      options.correctionKind ?? null,
+      tx.actor.userId,
+      tx.actor.email,
+      JSON.stringify(body.customFields ?? {}),
+    ],
+  );
+  const journalId = inserted.rows[0]?.id;
+  if (!journalId) {
+    // Another request with the same key committed first.
+    const winner = await findJournalByKey(tx, commandSource, idempotencyKey);
+    if (!winner) {
+      throw new ConflictError("That journal is being posted by another request. Try again.");
+    }
+    assertSameRequest(winner.request_hash, hash, "journal");
+    return { created: false, journal: await getJournal(tx, winner.id) };
+  }
+
+  const values: unknown[] = [];
+  const tuples = body.lines.map((line, index) => {
+    const account = accounts.get(line.accountCode)!;
+    const foreign = foreignSides[index];
+    values.push(
+      journalId,
+      index + 1,
+      account.id,
+      line.description,
+      line.debit,
+      line.credit,
+      JSON.stringify(line.tracking ?? {}),
+      JSON.stringify(line.customFields ?? {}),
+      foreign?.currencyCode ?? null,
+      foreign?.amount ?? null,
+      foreign?.rate ?? null,
+      foreign?.kind ?? null,
+    );
+    const base = index * 12;
+    return `($${base + 1}, $${base + 2}, $${base + 3}, $${base + 4}, $${base + 5}::numeric, $${base + 6}::numeric, $${base + 7}::jsonb, $${base + 8}::jsonb, $${base + 9}, $${base + 10}::numeric, $${base + 11}::numeric, $${base + 12})`;
+  });
+  await tx.query(
+    `insert into ledger_journal_lines (journal_id, line_order, account_id, description, debit_amount, credit_amount, tracking, custom_fields,
+                                       foreign_currency_code, foreign_amount, exchange_rate, fx_kind)
+     values ${tuples.join(", ")}`,
+    values,
+  );
+
+  await writeAuditEvent(tx, {
+    eventType: "ledger.journal_posted",
+    entityType: "ledger_journal",
+    entityId: journalId,
+    details: {
+      origin: options.origin,
+      postingDate: body.postingDate,
+      reference: body.reference,
+      // A pay run's total can be one person's pay (PRUN9).
+      ...(options.origin === "payroll" ? {} : { total: body.total }),
+      commandSource,
+      idempotencyKey,
+    },
+  });
+
+  return { created: true, journal: await getJournal(tx, journalId) };
+}
+
+/**
+ * Checks each line's foreign side against its account (examples FXB1-FXB11):
+ * a line on a foreign-currency account needs one, in the account's
+ * currency; a line on a base-currency account can't have one. A line at a
+ * rate must have base = foreign x rate, rounded once. An account with
+ * postings from before Tohyee kept foreign amounts needs its opening foreign
+ * balance first, and then takes nothing dated on or before it. The database
+ * checks all of this again.
+ */
+async function checkForeignLines(
+  tx: OrgTx,
+  body: JournalBody,
+  accounts: Map<string, { id: string; code: string; name: string; currencyCode: string | null; systemKey: string | null }>,
+): Promise<Array<ForeignAmount | null>> {
+  const baseScale = currencyMinorUnits(tx.baseCurrency);
+  const checked = new Set<string>();
+  const sides: Array<ForeignAmount | null> = [];
+  for (const [index, line] of body.lines.entries()) {
+    const label = `Line ${index + 1}`;
+    const account = accounts.get(line.accountCode)!;
+    const accountLabel = `account ${account.code} (${account.name})`;
+    const currency = account.currencyCode && account.currencyCode !== tx.baseCurrency ? account.currencyCode : null;
+    if (!currency) {
+      if (line.foreign) {
+        // Accounts receivable and payable hold foreign-currency documents (MC2-MC8), from Tohyee itself only.
+        const control = account.systemKey === "accounts_receivable" || account.systemKey === "accounts_payable";
+        const kind = line.foreign.kind;
+        const currencyCode = line.foreign.currencyCode;
+        if (!control || !currencyCode || currencyCode === tx.baseCurrency || !(kind === "document" || kind === "carrying_value" || kind === "revaluation")) {
+          throw new ValidationError(`${label}: ${accountLabel} is in ${tx.baseCurrency}, so it takes no foreign amount or exchange rate.`);
+        }
+        const scale = currencyMinorUnits(currencyCode);
+        const amount = dec(line.foreign.amount);
+        if (significantScale(amount) > scale || (kind === "revaluation") !== isZero(amount)) {
+          throw new ValidationError(`${label}: the ${currencyCode} amount ${line.foreign.amount} isn't valid here.`);
+        }
+        sides.push({ currencyCode, amount: toFixedString(amount, scale), rate: toPlainString(dec(line.foreign.rate)), kind });
+        continue;
+      }
+      sides.push(null);
+      continue;
+    }
+    if (!line.foreign) {
+      throw new ValidationError(
+        `${label}: ${accountLabel} is in ${currency}. Give the ${currency} amount and the exchange rate as well as the ${tx.baseCurrency} amount.`,
+      );
+    }
+    if (line.foreign.currencyCode && line.foreign.currencyCode !== currency) {
+      throw new ValidationError(`${label}: ${accountLabel} is in ${currency}, not ${line.foreign.currencyCode}.`);
+    }
+    const scale = currencyMinorUnits(currency);
+    const amount = dec(line.foreign.amount);
+    if (significantScale(amount) > scale) {
+      throw new ValidationError(`${label}: the ${currency} amount can have at most ${scale} decimal places.`);
+    }
+    const base = add(dec(line.debit), dec(line.credit));
+    if (line.foreign.kind === "rate") {
+      const expected = roundHalfUp(mul(amount, dec(line.foreign.rate)), baseScale);
+      if (cmp(expected, base) !== 0) {
+        throw new ValidationError(
+          `${label}: ${currency} ${toFixedString(amount, scale)} at ${toPlainString(dec(line.foreign.rate))} is ${tx.baseCurrency} ${toFixedString(expected, baseScale)}, not ${toFixedString(base, baseScale)}.`,
+        );
+      }
+    }
+    if ((line.foreign.kind === "revaluation") !== isZero(amount)) {
+      throw new ValidationError(`${label}: the ${currency} amount must not be zero.`);
+    }
+    if (!checked.has(account.id)) {
+      checked.add(account.id);
+      await assertForeignPostingAllowed(tx, account, currency, body.postingDate, line.foreign.kind);
+    }
+    sides.push({ currencyCode: currency, amount: toFixedString(amount, scale), rate: toPlainString(dec(line.foreign.rate)), kind: line.foreign.kind });
+  }
+  return sides;
+}
+
+/** The opening foreign balance rules (FXB1), with the messages people see. */
+async function assertForeignPostingAllowed(
+  tx: OrgTx,
+  account: { id: string; code: string; name: string },
+  currency: string,
+  postingDate: string,
+  kind: FxKind,
+): Promise<void> {
+  const label = `Account ${account.code} (${account.name})`;
+  const opening = await tx.query<{ as_at_date: string }>(
+    "select as_at_date::text from ledger_foreign_opening_balances where account_id = $1",
+    [account.id],
+  );
+  if (opening.rows[0]) {
+    if (postingDate <= opening.rows[0].as_at_date) {
+      throw new ValidationError(
+        `${label} has an opening foreign balance as at ${opening.rows[0].as_at_date}, so nothing can be posted to it dated on or before then.`,
+      );
+    }
+    return;
+  }
+  // A revaluation only changes the base amount, so it doesn't need the opening foreign balance (its foreign balance is typed).
+  if (kind === "revaluation") return;
+  const baseOnly = await tx.query("select 1 from ledger_journal_lines where account_id = $1 and foreign_amount is null limit 1", [account.id]);
+  if ((baseOnly.rowCount ?? 0) > 0) {
+    throw new ValidationError(
+      `${label} has postings from before Tohyee kept foreign amounts. Enter its ${currency} balance as at a date (its opening foreign balance) first.`,
+    );
+  }
+}
+
+/** Manual journal from the API. */
+export async function postJournal(
+  tx: OrgTx,
+  command: {
+    source?: unknown;
+    idempotencyKey: unknown;
+    postingDate: unknown;
+    reference: unknown;
+    description?: unknown;
+    currencyCode?: unknown;
+    lines: unknown;
+    customFields?: unknown;
+  },
+): Promise<PostResult> {
+  const source = optionalSource(command.source);
+  const idempotencyKey = requireIdempotencyKey(command.idempotencyKey);
+  const body = parseJournalBody(tx, command);
+  await checkManualTags(tx, body);
+  return postJournalBody(tx, source, idempotencyKey, body, { origin: "manual" });
+}
+
+/**
+ * Tags and custom field values typed on a manual journal (or a correction's
+ * replacement): usable, and required ones present (TC5, TC6, CF9). Sets the
+ * checked custom field values on the body.
+ */
+async function checkManualTags(
+  tx: OrgTx,
+  body: JournalBody,
+  kept: ReadonlySet<string> = new Set(),
+  keptFields: ReadonlySet<string> = new Set(),
+): Promise<void> {
+  // The inventory account only moves with stock, so it always equals the stock's value (ST1-ST12).
+  const inventory = await tx.query<{ code: string }>("select code from accounts where system_key = 'inventory'");
+  const inventoryCode = inventory.rows[0]?.code.toLowerCase();
+  if (inventoryCode && body.lines.some((line) => line.accountCode.toLowerCase() === inventoryCode)) {
+    throw new ValidationError(
+      `Account ${inventory.rows[0].code} is the inventory account, which only moves with stock (so it always matches the stock's value). Use a stock movement or a bill for a stock item instead.`,
+    );
+  }
+  const ctx = await loadTrackingContext(tx);
+  body.lines.forEach((line, index) => checkNewTags(ctx, line.tracking, `Line ${index + 1}`, kept));
+  const custom = await resolveDocumentCustom(tx, "journal", body.customInput, body.lines.map((line) => line.customInput), keptFields);
+  body.customFields = custom.body;
+  body.lines.forEach((line, index) => {
+    line.customFields = custom.lines[index];
+  });
+  if (!ctx.advancedFeatures) return;
+  const accounts = await resolveAccountsByCode(
+    tx,
+    body.lines.map((line) => line.accountCode),
+  );
+  assertRequiredTags(
+    ctx,
+    body.lines.map((line) => ({ tags: line.tracking, accountClass: accounts.get(line.accountCode)!.accountClass })),
+  );
+  assertRequiredFields(
+    custom.ctx,
+    "journal",
+    custom.body,
+    body.lines.map((line, index) => ({ values: custom.lines[index], accountClass: accounts.get(line.accountCode)!.accountClass })),
+  );
+}
+
+export type JournalListFilters = {
+  postingDateFrom?: unknown;
+  postingDateTo?: unknown;
+  referenceQuery?: unknown;
+  kind?: unknown;
+  beforeId?: unknown;
+  limit?: unknown;
+  /** Page numbers instead of beforeId: 1 is the newest. */
+  page?: unknown;
+  /** With `page`: 1 to 200, default 100. */
+  pageSize?: unknown;
+  /** VP1: leave out journals that have been voided or corrected, and their reversals. */
+  hideVoided?: unknown;
+};
+
+/** With `page`: which page this is, how many there are, and how many journals match. */
+export type JournalListPage = { journals: Array<Journal & { voided?: "voided" | "corrected" }>; nextBeforeId: string | null; page?: number; pages?: number; total?: number };
+
+export async function listJournals(tx: OrgTx, filters: JournalListFilters = {}): Promise<JournalListPage> {
+  const from = parseOptionalIsoDate(filters.postingDateFrom, "postingDateFrom");
+  const to = parseOptionalIsoDate(filters.postingDateTo, "postingDateTo");
+  if (from && to && from > to) {
+    throw new ValidationError("postingDateFrom must be on or before postingDateTo.");
+  }
+  const referenceQuery = optionalString(filters.referenceQuery, "referenceQuery", { maxLength: 100 });
+  const kind = optionalString(filters.kind, "kind", { maxLength: 40 });
+  const origins = [
+    "manual",
+    "inventory",
+    "fx_revaluation",
+    "invoice",
+    "customer_payment",
+    "customer_payment_batch",
+    "bill",
+    "supplier_payment",
+    "supplier_payment_batch",
+    "sales_credit_note",
+    "sales_credit_note_refund",
+    "supplier_credit_note",
+    "supplier_credit_note_refund",
+    "customer_overpayment_refund",
+    "bank_transaction",
+    "bank_transfer",
+    "payroll",
+    "history",
+  ];
+  // "journals": manual journals and their replacements, without the reversals a correction makes.
+  const validKinds = ["primary", "reversal", "replacement", "journals", ...origins];
+  if (kind && !validKinds.includes(kind)) {
+    throw new ValidationError(`kind must be one of: ${validKinds.join(", ")}.`);
+  }
+  const beforeId = optionalId(filters.beforeId, "beforeId");
+  const limitRaw = Number(filters.limit ?? 50);
+  const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 200 ? limitRaw : 50;
+
+  const conditions: string[] = [];
+  const values: unknown[] = [];
+  const param = (value: unknown) => {
+    values.push(value);
+    return `$${values.length}`;
+  };
+  if (from) conditions.push(`posting_date >= ${param(from)}`);
+  if (to) conditions.push(`posting_date <= ${param(to)}`);
+  if (referenceQuery) {
+    conditions.push(`reference ilike ${param(`%${referenceQuery.replace(/[\\%_]/g, "\\$&")}%`)}`);
+  }
+  if (kind === "primary") conditions.push("correction_kind is null");
+  if (kind === "reversal" || kind === "replacement") conditions.push(`correction_kind = ${param(kind)}`);
+  if (kind && origins.includes(kind)) {
+    conditions.push(`origin = ${param(kind)}`);
+  }
+  // Corrections are only made to manual journals, so their replacements are journals too.
+  if (kind === "journals") conditions.push("(origin = 'manual' or (origin = 'correction' and correction_kind = 'replacement'))");
+  // History brought in from another system (IM23) is left out unless asked for: there can be thousands.
+  if (kind !== "history") conditions.push("origin <> 'history'");
+  // VP1: voided or corrected journals and their reversals cancel out, so they can be left out.
+  const hideVoided = filters.hideVoided === true || filters.hideVoided === "true" || filters.hideVoided === "1";
+  if (hideVoided) {
+    conditions.push("correction_kind is distinct from 'reversal'");
+    conditions.push("not exists (select 1 from ledger_journals reversal where reversal.related_journal_id = ledger_journals.id and reversal.correction_kind = 'reversal')");
+  }
+  // A "Voided" mark on journals that have a reversal (VP2).
+  const marked = async (journals: Journal[]): Promise<Array<Journal & { voided?: "voided" | "corrected" }>> => {
+    if (journals.length === 0) return journals;
+    const reversed = await tx.query<{ id: string; replaced: boolean }>(
+      `select related_journal_id::text as id, bool_or(correction_kind = 'replacement') as replaced from ledger_journals
+        where correction_kind in ('reversal', 'replacement') and related_journal_id = any($1::bigint[])
+        group by related_journal_id having bool_or(correction_kind = 'reversal')`,
+      [journals.map((journal) => journal.id)],
+    );
+    const how = new Map(reversed.rows.map((row) => [row.id, row.replaced ? ("corrected" as const) : ("voided" as const)]));
+    return journals.map((journal) => (how.has(journal.id) ? { ...journal, voided: how.get(journal.id) } : journal));
+  };
+  const paged = filters.page != null && filters.page !== "";
+  if (paged) {
+    const page = Number(filters.page);
+    if (!Number.isInteger(page) || page < 1 || page > 1_000_000) throw new ValidationError("page must be a whole number from 1.");
+    const sizeRaw = filters.pageSize == null || filters.pageSize === "" ? 100 : Number(filters.pageSize);
+    if (!Number.isInteger(sizeRaw) || sizeRaw < 1 || sizeRaw > 200) throw new ValidationError("pageSize must be 1 to 200.");
+    const where = conditions.length ? `where ${conditions.join(" and ")}` : "";
+    const counted = await tx.query<{ total: string }>(`select count(*)::text as total from ledger_journals ${where}`, values);
+    const total = Number(counted.rows[0].total);
+    const rows = await tx.query<JournalRow>(`select ${JOURNAL_COLUMNS} from ledger_journals ${where} order by id desc limit ${sizeRaw} offset ${(page - 1) * sizeRaw}`, values);
+    return { journals: await marked(rows.rows.map(toJournal)), nextBeforeId: null, page, pages: Math.max(1, Math.ceil(total / sizeRaw)), total };
+  }
+  if (beforeId) conditions.push(`id < ${param(beforeId)}`);
+
+  const result = await tx.query<JournalRow>(
+    `select ${JOURNAL_COLUMNS} from ledger_journals
+      ${conditions.length ? `where ${conditions.join(" and ")}` : ""}
+      order by id desc
+      limit ${limit + 1}`,
+    values,
+  );
+  const rows = result.rows.slice(0, limit);
+  return {
+    journals: await marked(rows.map(toJournal)),
+    nextBeforeId: result.rows.length > limit ? rows[rows.length - 1].id : null,
+  };
+}
+
+export async function getJournalDetails(tx: OrgTx, journalIdInput: unknown) {
+  const journalId = requireId(journalIdInput, "journalId");
+  const journal = await getJournal(tx, journalId);
+  const parent = journal.relatedJournalId
+    ? toJournal(
+        (
+          await tx.query<JournalRow>(`select ${JOURNAL_COLUMNS} from ledger_journals where id = $1`, [
+            journal.relatedJournalId,
+          ])
+        ).rows[0],
+      )
+    : null;
+  const corrections = await tx.query<JournalRow>(
+    `select ${JOURNAL_COLUMNS} from ledger_journals where related_journal_id = $1 order by id`,
+    [journalId],
+  );
+  const correctionJournals = corrections.rows.map(toJournal);
+  const reversedBy = correctionJournals.find((entry) => entry.correctionKind === "reversal") ?? null;
+  return {
+    journal,
+    parentJournal: parent,
+    correctionJournals,
+    canCorrect: canBeCorrected(journal, reversedBy !== null),
+  };
+}
+
+function canBeCorrected(journal: Journal, alreadyReversed: boolean): boolean {
+  return (
+    !alreadyReversed &&
+    journal.correctionKind !== "reversal" &&
+    journal.origin !== "inventory" &&
+    journal.origin !== "fx_revaluation" &&
+    journal.origin !== "invoice" &&
+    journal.origin !== "customer_payment" &&
+    journal.origin !== "customer_payment_batch" &&
+    journal.origin !== "supplier_payment_batch" &&
+    journal.origin !== "bill" &&
+    journal.origin !== "supplier_payment" &&
+    journal.origin !== "sales_credit_note" &&
+    journal.origin !== "sales_credit_note_refund" &&
+    journal.origin !== "supplier_credit_note" &&
+    journal.origin !== "supplier_credit_note_refund" &&
+    journal.origin !== "customer_overpayment_refund" &&
+    journal.origin !== "bank_transaction" &&
+    journal.origin !== "bank_transfer" &&
+    journal.origin !== "expense_claim" &&
+    journal.origin !== "expense_claim_payment" &&
+    journal.origin !== "fixed_asset_depreciation" &&
+    journal.origin !== "fixed_asset_disposal" &&
+    journal.origin !== "opening_balance" &&
+    journal.origin !== "payroll"
+  );
+}
+
+/**
+ * Corrects a posted journal without editing it: posts a reversal of the
+ * original and a replacement, both dated `postingDate` (which must be in an
+ * open period). A replacement can itself be corrected later. Journals created
+ * by stock movements, FX revaluations, sales invoices, customer payments,
+ * bills, supplier payments, sales credit notes, credit note refunds, supplier
+ * credit notes, refunds received from suppliers, refunds of customer
+ * overpayments, bank transactions and transfers, expense claims and their
+ * payments, depreciation runs, disposals, opening balances or payroll must be
+ * corrected at their
+ * source, so those records and the ledger stay in step.
+ */
+export async function correctJournal(
+  tx: OrgTx,
+  command: {
+    source?: unknown;
+    idempotencyKey: unknown;
+    originalJournalId: unknown;
+    postingDate: unknown;
+    reference: unknown;
+    description?: unknown;
+    lines: unknown;
+    customFields?: unknown;
+  },
+) {
+  const source = optionalSource(command.source);
+  const idempotencyKey = requireIdempotencyKey(command.idempotencyKey);
+  const originalId = requireId(command.originalJournalId, "originalJournalId");
+  const original = await getJournal(tx, originalId);
+
+  if (original.origin === "inventory") {
+    throw new ValidationError(
+      `Journal #${original.id} was created by a stock movement. Correct it with a stock adjustment or return, so the stock records stay in step with the ledger.`,
+    );
+  }
+  if (original.origin === "fx_revaluation") {
+    throw new ValidationError(
+      `Journal #${original.id} was created by an FX revaluation and can't be corrected here.`,
+    );
+  }
+  if (original.origin === "invoice") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a sales invoice (${original.reference}), so it can't be corrected in the ledger. To cancel an approved invoice, void it.`,
+    );
+  }
+  if (original.origin === "customer_payment") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a customer payment (${original.reference}), so it can't be corrected in the ledger. To undo a payment, void it from its invoice.`,
+    );
+  }
+  if (original.origin === "customer_payment_batch" || original.origin === "supplier_payment_batch") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a payment for several ${original.origin === "customer_payment_batch" ? "invoices" : "bills"} (${original.reference}), so it can't be corrected in the ledger. To undo it, void the payment.`,
+    );
+  }
+  if (original.origin === "bill") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a bill (${original.reference}), so it can't be corrected in the ledger. To cancel an approved bill, void it.`,
+    );
+  }
+  if (original.origin === "supplier_payment") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a supplier payment (${original.reference}), so it can't be corrected in the ledger. To undo a payment, void it from its bill.`,
+    );
+  }
+  if (original.origin === "sales_credit_note") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a sales credit note (${original.reference}), so it can't be corrected in the ledger. To cancel an approved credit note, void it.`,
+    );
+  }
+  if (original.origin === "sales_credit_note_refund") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a credit note refund (${original.reference}), so it can't be corrected in the ledger. To undo a refund, void it from its credit note.`,
+    );
+  }
+  if (original.origin === "supplier_credit_note") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a supplier credit note (${original.reference}), so it can't be corrected in the ledger. To cancel an approved supplier credit note, void it.`,
+    );
+  }
+  if (original.origin === "supplier_credit_note_refund") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a refund received from a supplier (${original.reference}), so it can't be corrected in the ledger. To undo a refund, void it from its supplier credit note.`,
+    );
+  }
+  if (original.origin === "customer_overpayment_refund") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a refund of a customer overpayment (${original.reference}), so it can't be corrected in the ledger. To undo a refund, void it from the overpayment.`,
+    );
+  }
+  if (original.origin === "bank_transaction") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a bank transaction (${original.reference}), so it can't be corrected in the ledger. To undo it, void the bank transaction.`,
+    );
+  }
+  if (original.origin === "payroll") {
+    const payment = await tx.query<{ reference: string }>(
+      `select 'WAGES-' || payment_number as reference from payroll_wage_payments where journal_id = $1 or void_journal_id = $1
+       union all
+       select 'IRD-' || payment_number from payroll_ird_payments where journal_id = $1 or void_journal_id = $1`,
+      [original.id],
+    );
+    if (payment.rows[0]) {
+      throw new ValidationError(
+        `Journal #${original.id} was posted by a payroll payment (${payment.rows[0].reference}), so it can't be corrected in the ledger. To undo it, void the payment under Payroll.`,
+      );
+    }
+    const liability = await tx.query<{ reference: string }>(
+      "select 'LEAVELIAB-' || posting_number as reference from payroll_leave_liability_postings where journal_id = $1 or void_journal_id = $1",
+      [original.id],
+    );
+    if (liability.rows[0]) {
+      throw new ValidationError(
+        `Journal #${original.id} was posted by a leave liability posting (${liability.rows[0].reference}), so it can't be corrected in the ledger. To undo it, void the posting under Payroll › Leave.`,
+      );
+    }
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a pay run (${original.reference}), so it can't be corrected in the ledger. To undo it, void the pay run.`,
+    );
+  }
+  if (original.origin === "bank_transfer") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a transfer between bank accounts (${original.reference}), so it can't be corrected in the ledger. To undo it, void the transfer.`,
+    );
+  }
+  // These match canBeCorrected: the screen hid the button, but the API let them through.
+  if (original.origin === "expense_claim" || original.origin === "expense_claim_payment") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by ${original.origin === "expense_claim" ? "an expense claim" : "an expense claim payment"} (${original.reference}), so it can't be corrected in the ledger (EC12). To undo it, void the ${original.origin === "expense_claim" ? "claim" : "payment"}.`,
+    );
+  }
+  if (original.origin === "fixed_asset_depreciation") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a depreciation run (${original.reference}), so it can't be corrected in the ledger. To undo it, roll back the depreciation run under Fixed assets.`,
+    );
+  }
+  if (original.origin === "fixed_asset_disposal") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by a fixed asset disposal (${original.reference}), so it can't be corrected in the ledger. To undo it, undo the disposal on the asset.`,
+    );
+  }
+  if (original.origin === "sales_when_sent") {
+    throw new ValidationError(
+      `Journal #${original.id} moved a Shopify sale out of Income in advance when it was sent (${original.reference}), so it can't be corrected in the ledger (SWS9).`,
+    );
+  }
+  if (original.origin === "opening_balance") {
+    throw new ValidationError(
+      `Journal #${original.id} posted the opening balances (${original.reference}), so it can't be corrected like a manual journal (IM6).`,
+    );
+  }
+  if (original.correctionKind === "reversal") {
+    throw new ValidationError("A reversal can't itself be corrected. Correct the replacement journal instead.");
+  }
+
+  const commandSource = `correction:${source}`;
+  const reversalKey = `${idempotencyKey}:reversal`;
+  const replacementKey = `${idempotencyKey}:replacement`;
+
+  const existingReversal = await tx.query<{ id: string; command_source: string; idempotency_key: string }>(
+    `select id, command_source, idempotency_key from ledger_journals
+      where related_journal_id = $1 and correction_kind = 'reversal'`,
+    [originalId],
+  );
+  const reversalRow = existingReversal.rows[0];
+  if (
+    reversalRow &&
+    (reversalRow.command_source !== commandSource || reversalRow.idempotency_key !== reversalKey)
+  ) {
+    throw new ConflictError(
+      `Journal #${original.id} has already been corrected (reversed by journal #${reversalRow.id}).`,
+    );
+  }
+
+  const reversalBody = parseJournalBody(tx, {
+    postingDate: command.postingDate,
+    reference: `REV-${original.reference}`.slice(0, 100),
+    description: `Reversal of journal #${original.id}`,
+    currencyCode: original.currencyCode,
+    lines: original.lines.map((line) => ({
+      accountCode: line.accountCode,
+      debitAmount: line.creditAmount,
+      creditAmount: line.debitAmount,
+      description: line.description,
+      tracking: line.tracking,
+      ...sameForeign(line),
+    })),
+  }, { internal: true });
+  const replacementBody = parseJournalBody(tx, {
+    postingDate: command.postingDate,
+    reference: command.reference,
+    description: command.description,
+    currencyCode: original.currencyCode,
+    lines: command.lines,
+    customFields: command.customFields,
+  });
+
+  await checkManualTags(
+    tx,
+    replacementBody,
+    keptValues(original.lines),
+    keptCustom(original.customFields, ...original.lines.map((line) => line.customFields)),
+  );
+  const reversal = await postJournalBody(tx, commandSource, reversalKey, reversalBody, {
+    origin: "correction",
+    relatedJournalId: originalId,
+    correctionKind: "reversal",
+  });
+  const replacement = await postJournalBody(tx, commandSource, replacementKey, replacementBody, {
+    origin: "correction",
+    relatedJournalId: originalId,
+    correctionKind: "replacement",
+  });
+
+  if (reversal.created || replacement.created) {
+    await writeAuditEvent(tx, {
+      eventType: "ledger.journal_corrected",
+      entityType: "ledger_journal",
+      entityId: originalId,
+      details: {
+        reversalJournalId: reversal.journal.id,
+        replacementJournalId: replacement.journal.id,
+        postingDate: replacementBody.postingDate,
+      },
+    });
+  }
+
+  return {
+    created: reversal.created || replacement.created,
+    originalJournal: original,
+    reversalJournal: reversal.journal,
+    replacementJournal: replacement.journal,
+  };
+}

@@ -1,0 +1,778 @@
+"use client";
+
+import { InfoTip } from "@/components/info-tip";
+import Link from "next/link";
+import { ConnectorPicker, type Connector, isDatabaseConnector } from "@/components/analytics/studio";
+import { DatabaseConnector, DatabaseSourceSetup } from "@/components/analytics-databases";
+import { useState } from "react";
+import { useApiData } from "@/components/hooks";
+import { useModules } from "@/components/modules";
+import { Badge, Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
+import { useConfirm } from "@/components/confirm-dialog";
+import { useWorkspace } from "@/components/workspace";
+import { ReportEmailsCard } from "@/components/analytics-report-emails";
+import { GoogleAnalyticsCard } from "@/components/analytics-google-analytics";
+import { SearchConsoleCard } from "@/components/analytics-search-console";
+import { MerchantCenterCard } from "@/components/analytics-merchant-center";
+import { BUSINESS_PROFILE, GOOGLE_ADS, GoogleSourceCard } from "@/components/analytics-google-source";
+import { MetaCard } from "@/components/analytics-meta";
+import { useSearchParams } from "next/navigation";
+import type { ColumnKind, InspectedColumn, SourceFile } from "@/lib/analytics/engine";
+import { tableLabel } from "@/lib/analytics/labels";
+import type { AnalyticsSource, LoadRun } from "@/lib/analytics/sources";
+import { api, errorMessage } from "@/lib/client/api";
+import { formatDateTime } from "@/lib/format";
+
+type Run = LoadRun & { requestedByName?: string | null };
+
+type Overview = {
+  enabled: boolean;
+  canManage: boolean;
+  folder: { chosen: boolean; readable: boolean };
+  files: SourceFile[];
+  sources: AnalyticsSource[];
+  books: Run | null;
+  shopify: { connected: boolean; lastLoad: Run | null };
+  loads: Run[];
+};
+
+const KINDS: Array<{ value: ColumnKind; label: string }> = [
+  { value: "text", label: "Text" },
+  { value: "money", label: "Money (2 decimals)" },
+  { value: "quantity", label: "Quantity (4 decimals)" },
+  { value: "decimal", label: "Number (6 decimals)" },
+  { value: "integer", label: "Whole number" },
+  { value: "date", label: "Date" },
+  { value: "timestamp", label: "Date and time" },
+  { value: "boolean", label: "Yes / no" },
+];
+
+function fileSize(bytes: number): string {
+  if (bytes >= 1024 * 1024) return `${(bytes / (1024 * 1024)).toFixed(1)} MB`;
+  if (bytes >= 1024) return `${Math.round(bytes / 1024)} KB`;
+  return `${bytes} bytes`;
+}
+
+function duration(ms: number | null): string {
+  if (ms === null) return "";
+  return ms >= 1000 ? `${(ms / 1000).toFixed(1)} s` : `${ms} ms`;
+}
+
+function rows(value: string | null): string {
+  return value === null ? "" : Number(value).toLocaleString("en-NZ");
+}
+
+function LoadBadge({ run }: { run: LoadRun | null }) {
+  if (!run) return <Badge>Not loaded yet</Badge>;
+  if (run.status === "running") return <Badge tone="blue">Loading…</Badge>;
+  if (run.status === "failed") return <Badge tone="red">Failed</Badge>;
+  return <Badge tone="green">Loaded</Badge>;
+}
+
+/** Analytics › Data sources: the folder's files, the sources set up from them, and every load. */
+export function DataSourcesPage({ organisationId }: { organisationId: string }) {
+  const modules = useModules(organisationId);
+  const { can } = useWorkspace();
+  const overview = useApiData<Overview>("/api/analytics", { organisationId });
+  // Back from signing in to Google Analytics: straight to its connector.
+  const params = useSearchParams();
+  const googleReturn = params.get("googleAnalytics");
+  const returned = googleReturn ? { ok: googleReturn === "connected", message: googleReturn === "connected" ? "Signed in with Google. Choose the property to load." : (params.get("message") ?? "Connecting didn't work.") } : null;
+  // Back from signing in to Search Console: the same, for its connector.
+  const searchReturn = params.get("googleSearchConsole");
+  const searchReturned = searchReturn
+    ? { ok: searchReturn === "connected", message: searchReturn === "connected" ? "Signed in with Google. Choose the Search Console property to load." : (params.get("message") ?? "Connecting didn't work.") }
+    : null;
+  // Back from signing in to Merchant Center.
+  const merchantReturn = params.get("googleMerchantCenter");
+  const merchantReturned = merchantReturn
+    ? { ok: merchantReturn === "connected", message: merchantReturn === "connected" ? "Signed in with Google. Choose the Merchant Center account to load." : (params.get("message") ?? "Connecting didn't work.") }
+    : null;
+  // Back from signing in to Business Profile or Google Ads.
+  const profileReturn = params.get("googleBusinessProfile");
+  const adsReturn = params.get("googleAds");
+  const backFrom = (value: string | null, what: string) =>
+    value ? { ok: value === "connected", message: value === "connected" ? `Signed in with Google. Choose the ${what} to load.` : (params.get("message") ?? "Connecting didn't work.") } : null;
+  // Back from signing in to Meta.
+  const metaReturn = params.get("meta");
+  const metaReturned = metaReturn
+    ? { ok: metaReturn === "connected", message: metaReturn === "connected" ? "Signed in with Facebook. Choose the Page to load." : (params.get("message") ?? "Connecting didn't work.") }
+    : null;
+  const [tab, setTab] = useState<"sources" | "connect" | "history">(googleReturn || searchReturn || merchantReturn || profileReturn || adsReturn || metaReturn ? "connect" : "sources");
+  const [connector, setConnector] = useState<Connector | null>(googleReturn ? "google-analytics" : searchReturn ? "google-search-console" : merchantReturn ? "google-merchant-center" : profileReturn ? "google-business-profile" : adsReturn ? "google-ads" : metaReturn ? "meta" : null);
+  const [search, setSearch] = useState("");
+  const [setUp, setSetUp] = useState<{ file: string; source?: AnalyticsSource } | null>(null);
+  const [databaseEdit, setDatabaseEdit] = useState<AnalyticsSource | null>(null);
+
+  if (!modules) return <p className={ui.muted}>Loading…</p>;
+  if (!modules.analytics) {
+    return (
+      <Notice tone="info">
+        Analytics is off.{" "}
+        {can("admin") ? (
+          <>
+            Turn it on in <Link href="/operations/modules">Modules</Link>.
+          </>
+        ) : (
+          "An admin can turn it on in Settings."
+        )}
+      </Notice>
+    );
+  }
+  if (overview.error) return <Notice tone="error">{overview.error}</Notice>;
+  const data = overview.data;
+  if (!data) return <p className={ui.muted}>Loading…</p>;
+
+  const visibleSources = data.sources.filter((source) => `${source.name} ${source.fileName} ${source.tableName}`.toLowerCase().includes(search.trim().toLowerCase()));
+  const visibleFiles = data.files.filter((file) => connector === "excel" ? /\.xlsx$/i.test(file.name) : !/\.xlsx$/i.test(file.name));
+  const usedFiles = new Set(data.sources.map((source) => source.fileName));
+  return (
+    <>
+      <div className={ui.rowButtons} style={{ marginBottom: 20, flexWrap: "wrap", gap: 8 }}>
+        <Button variant={tab === "sources" ? "primary" : "secondary"} aria-pressed={tab === "sources"} onClick={() => setTab("sources")}>Connected sources ({data.sources.length})</Button>
+        {data.canManage ? <Button variant={tab === "connect" ? "primary" : "secondary"} aria-pressed={tab === "connect"} onClick={() => setTab("connect")}>Add data source</Button> : null}
+        <Button variant={tab === "history" ? "primary" : "secondary"} aria-pressed={tab === "history"} onClick={() => setTab("history")}>Load history</Button>
+      </div>
+      {tab === "connect" && data.canManage ? <ConnectorPicker selected={connector} onSelect={(next) => { setConnector(next); setSetUp(null); setDatabaseEdit(null); }} /> : null}
+      {tab === "connect" && (connector === "csv" || connector === "excel" || connector === "email") && !data.folder.chosen ? (
+        <Notice tone="warning">
+          This organisation doesn&apos;t have an analytics folder yet. A server admin chooses it on the server computer, in the
+          server settings under Analytics folders. Tohyee only reads files in that folder.
+        </Notice>
+      ) : tab === "connect" && connector && connector !== "books" && connector !== "google-analytics" && connector !== "google-search-console" && connector !== "google-merchant-center" && connector !== "google-business-profile" && connector !== "google-ads" && connector !== "meta" && connector !== "shopify" && !isDatabaseConnector(connector) && !data.folder.readable ? (
+        <Notice tone="error">Tohyee can&apos;t open this organisation&apos;s analytics folder. A server admin needs to check it still exists.</Notice>
+      ) : null}
+
+      {tab !== "history" && setUp ? (
+        <SourceSetup
+          key={`${setUp.file}-${setUp.source?.id ?? "new"}`}
+          organisationId={organisationId}
+          file={setUp.file}
+          existing={setUp.source}
+          takenTables={data.sources.filter((source) => source.id !== setUp.source?.id).map((source) => source.tableName)}
+          onDone={() => {
+            setSetUp(null);
+            setTab("sources");
+            overview.reload();
+          }}
+          onCancel={() => setSetUp(null)}
+        />
+      ) : null}
+
+      {tab !== "history" && databaseEdit?.database && data.canManage ? (
+        <DatabaseSourceSetup
+          key={databaseEdit.id}
+          organisationId={organisationId}
+          connection={{ id: databaseEdit.database.connectionId, name: databaseEdit.database.connectionName, engine: databaseEdit.database.engine }}
+          existing={databaseEdit}
+          takenTables={data.sources.filter((source) => source.id !== databaseEdit.id).map((source) => source.tableName)}
+          onDone={() => {
+            setDatabaseEdit(null);
+            setTab("sources");
+            overview.reload();
+          }}
+          onCancel={() => setDatabaseEdit(null)}
+        />
+      ) : null}
+
+      {tab === "connect" && isDatabaseConnector(connector) && data.canManage ? (
+        <DatabaseConnector
+          key={`${organisationId}-${connector}`}
+          organisationId={organisationId}
+          engine={connector}
+          takenTables={data.sources.map((source) => source.tableName)}
+          onDone={() => {
+            setTab("sources");
+            overview.reload();
+          }}
+        />
+      ) : null}
+
+      {tab === "sources" || (tab === "connect" && connector === "books") ? <BooksCard organisationId={organisationId} data={data} onChanged={overview.reload} /> : null}
+      {(tab === "sources" && (data.shopify.connected || data.shopify.lastLoad)) || (tab === "connect" && connector === "shopify") ? <ShopifyCard organisationId={organisationId} data={data} onChanged={overview.reload} /> : null}
+
+      {tab === "sources" ? <>
+      <Field label="Search data sources"><input type="search" value={search} onChange={(event) => setSearch(event.target.value)} placeholder="Name, file or table…" /></Field>
+      {search && !visibleSources.length ? <p role="status">No sources match your search.</p> : null}
+      <SourcesCard organisationId={organisationId} data={{ ...data, sources: visibleSources }} onEdit={(source) => {
+        if (source.database) {
+          setSetUp(null);
+          setDatabaseEdit(source);
+        } else {
+          setDatabaseEdit(null);
+          setSetUp({ file: source.fileName, source });
+        }
+      }} onChanged={overview.reload} />
+      </> : null}
+
+      {tab === "connect" && connector === "google-analytics" ? <GoogleAnalyticsCard key={`ga-${organisationId}`} organisationId={organisationId} canManage={data.canManage} returned={returned} onChanged={overview.reload} /> : null}
+      {tab === "sources" ? <GoogleAnalyticsCard key={`ga-list-${organisationId}`} organisationId={organisationId} canManage={data.canManage} onlyIfConnected onChanged={overview.reload} /> : null}
+      {tab === "connect" && connector === "google-search-console" ? <SearchConsoleCard key={`gsc-${organisationId}`} organisationId={organisationId} canManage={data.canManage} returned={searchReturned} onChanged={overview.reload} /> : null}
+      {tab === "sources" ? <SearchConsoleCard key={`gsc-list-${organisationId}`} organisationId={organisationId} canManage={data.canManage} onlyIfConnected onChanged={overview.reload} /> : null}
+      {tab === "connect" && connector === "google-merchant-center" ? <MerchantCenterCard key={`gmc-${organisationId}`} organisationId={organisationId} canManage={data.canManage} returned={merchantReturned} onChanged={overview.reload} /> : null}
+      {tab === "sources" ? <MerchantCenterCard key={`gmc-list-${organisationId}`} organisationId={organisationId} canManage={data.canManage} onlyIfConnected onChanged={overview.reload} /> : null}
+      {tab === "connect" && connector === "google-business-profile" ? <GoogleSourceCard key={`gbp-${organisationId}`} spec={BUSINESS_PROFILE} organisationId={organisationId} canManage={data.canManage} returned={backFrom(profileReturn, "Business Profile")} onChanged={overview.reload} /> : null}
+      {tab === "sources" ? <GoogleSourceCard key={`gbp-list-${organisationId}`} spec={BUSINESS_PROFILE} organisationId={organisationId} canManage={data.canManage} onlyIfConnected onChanged={overview.reload} /> : null}
+      {tab === "connect" && connector === "google-ads" ? <GoogleSourceCard key={`gads-${organisationId}`} spec={GOOGLE_ADS} organisationId={organisationId} canManage={data.canManage} returned={backFrom(adsReturn, "Google Ads account")} onChanged={overview.reload} /> : null}
+      {tab === "sources" ? <GoogleSourceCard key={`gads-list-${organisationId}`} spec={GOOGLE_ADS} organisationId={organisationId} canManage={data.canManage} onlyIfConnected onChanged={overview.reload} /> : null}
+      {tab === "connect" && connector === "meta" ? <MetaCard key={`meta-${organisationId}`} organisationId={organisationId} canManage={data.canManage} returned={metaReturned} onChanged={overview.reload} /> : null}
+      {tab === "sources" ? <MetaCard key={`meta-list-${organisationId}`} organisationId={organisationId} canManage={data.canManage} onlyIfConnected onChanged={overview.reload} /> : null}
+
+      {tab === "connect" && connector === "email" && data.canManage ? <ReportEmailsCard key={organisationId} organisationId={organisationId} folderChosen={data.folder.chosen && data.folder.readable} onChanged={overview.reload} /> : null}
+
+      {tab === "connect" && (connector === "csv" || connector === "excel") && data.canManage && data.folder.readable ? (
+        <Card title="Files in the folder">
+          {visibleFiles.length === 0 ? (
+            <Empty>No data files yet. Save or copy CSV or .xlsx exports into the folder and they&apos;ll show here.</Empty>
+          ) : (
+            <div className={ui.tableWrap}>
+              <table className={ui.table}>
+                <thead>
+                  <tr>
+                    <th>File</th>
+                    <th className={ui.num}>Size</th>
+                    <th>Changed</th>
+                    <th />
+                  </tr>
+                </thead>
+                <tbody>
+                  {visibleFiles.map((file) => (
+                    <tr key={file.name}>
+                      <td>{file.name}</td>
+                      <td className={ui.num}>{fileSize(file.sizeBytes)}</td>
+                      <td>{formatDateTime(file.modifiedAt)}</td>
+                      <td className={ui.num}>
+                        {usedFiles.has(file.name) ? (
+                          <Badge tone="green">In use</Badge>
+                        ) : (
+                          <Button size="small" variant="secondary" onClick={() => setSetUp({ file: file.name })}>
+                            Set up
+                          </Button>
+                        )}
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
+          )}
+        </Card>
+      ) : null}
+
+      {tab === "history" ? <Card title="Load history">
+        {data.loads.length === 0 ? (
+          <Empty>Nothing has been loaded yet.</Empty>
+        ) : (
+          <div className={ui.tableWrap}>
+            <table className={ui.table}>
+              <thead>
+                <tr>
+                  <th>Started</th>
+                  <th>Source</th>
+                  <th>How</th>
+                  <th>Result</th>
+                  <th className={ui.num}>Rows</th>
+                  <th className={ui.num}>Took</th>
+                </tr>
+              </thead>
+              <tbody>
+                {data.loads.map((run) => (
+                  <tr key={run.id}>
+                    <td>{formatDateTime(run.startedAt)}</td>
+                    <td>
+                      {run.sourceName}
+                      <div className={ui.muted}>{run.fileName}</div>
+                    </td>
+                    <td>{run.trigger === "schedule" ? "Nightly" : `By ${run.requestedByName ?? run.requestedByEmail ?? "hand"}`}</td>
+                    <td>
+                      <LoadBadge run={run} />
+                      {run.error ? <div className={ui.muted}>{run.error}</div> : null}
+                    </td>
+                    <td className={ui.num}>{rows(run.rowsLoaded)}</td>
+                    <td className={ui.num}>{duration(run.milliseconds)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card> : null}
+    </>
+  );
+}
+
+/** The copy of this organisation's own books and CRM (analytics step 2, AB1-AB10). */
+function BooksCard({ organisationId, data, onChanged }: { organisationId: string; data: Overview; onChanged: () => void }) {
+  const tables = useApiData<{ tables: Array<{ name: string; columns: unknown[] }> }>("/api/analytics/tables", { organisationId });
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const copied = (tables.data?.tables ?? []).filter((table) => table.name.startsWith("tohyee_"));
+
+  async function refresh() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const { run } = await api<{ run: LoadRun }>("/api/analytics/books", { method: "POST", body: { organisationId } });
+      setMessage(
+        run.status === "ok"
+          ? { tone: "success", text: `Copied ${rows(run.rowsLoaded)} rows in ${duration(run.milliseconds)}.` }
+          : { tone: "error", text: `The books weren't copied: ${run.error}. The last copy is still there.` },
+      );
+      tables.reload();
+    } catch (caught) {
+      setMessage({ tone: "error", text: errorMessage(caught) });
+    } finally {
+      setBusy(false);
+      onChanged();
+    }
+  }
+
+  return (
+    <Card
+      title="Books and CRM"
+      description={<>A copy of this organisation&apos;s books, made every night after 4am. Pay runs are copied without names.{" "}<InfoTip label="The Tohyee copy">A copy of this organisation&apos;s ledger, invoices, bills, contacts, items and (with the CRM on) its leads, deals, deal products, activities, tasks, campaigns, sequences and sales emails. Amounts are as in the ledger (debit less credit); a dashboard value can be shown the other way round.</InfoTip></>}
+      actions={
+        data.canManage ? (
+          <Button size="small" onClick={() => void refresh()} disabled={busy}>
+            {busy ? "Copying…" : "Refresh now"}
+          </Button>
+        ) : null
+      }
+    >
+      {message ? <Notice tone={message.tone}>{message.text}</Notice> : null}
+      <p className={ui.muted}>
+        {data.books ? (
+          <>
+            <LoadBadge run={data.books} /> Last copied {formatDateTime(data.books.startedAt)}
+            {data.books.rowsLoaded ? ` · ${rows(data.books.rowsLoaded)} rows` : ""}
+            {data.books.error ? ` · ${data.books.error}` : ""}
+          </>
+        ) : (
+          "Not copied yet. It's copied tonight, or now with Refresh now."
+        )}
+      </p>
+      {copied.length ? (
+        <p className={ui.muted}>
+          Tables:{" "}
+          {copied.map((table, index) => (
+            <span key={table.name}>
+              {index ? ", " : ""}
+              <span title={table.name}>{tableLabel(table.name)}</span>
+            </span>
+          ))}
+        </p>
+      ) : null}
+    </Card>
+  );
+}
+
+/** Shopify: Tohyee's own copy of its connected stores' data; never calls Shopify. */
+function ShopifyCard({ organisationId, data, onChanged }: { organisationId: string; data: Overview; onChanged: () => void }) {
+  const tables = useApiData<{ tables: Array<{ name: string; columns: unknown[] }> }>("/api/analytics/tables", { organisationId });
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const copied = (tables.data?.tables ?? []).filter((table) => table.name.startsWith("shopify_"));
+  const run = data.shopify.lastLoad;
+
+  async function refresh() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const { run: done } = await api<{ run: LoadRun }>("/api/analytics/shopify", { method: "POST", body: { organisationId } });
+      setMessage(
+        done.status === "ok"
+          ? { tone: "success", text: `Copied ${rows(done.rowsLoaded)} rows in ${duration(done.milliseconds)}.` }
+          : { tone: "error", text: `The Shopify data wasn't copied: ${done.error}. The last copy is still there.` },
+      );
+      tables.reload();
+    } catch (caught) {
+      setMessage({ tone: "error", text: errorMessage(caught) });
+    } finally {
+      setBusy(false);
+      onChanged();
+    }
+  }
+
+  return (
+    <Card
+      title="Shopify"
+      description={<>Your Shopify stores&apos; data, copied from Tohyee every night after 4am.{" "}<InfoTip label="Where the Shopify data comes from">Tohyee&apos;s sales platform sync reads Shopify; this copies what it already holds. Analytics never calls Shopify. Orders, lines, refunds and payouts are the invoices, credit notes and transfers they became. Stock, shop stats, discounts, gift cards and shipments are what Shopify last said. Customers appear by contact ID only. Gift cards show only their last 4 characters.</InfoTip></>}
+      actions={
+        data.canManage && data.shopify.connected ? (
+          <Button size="small" onClick={() => void refresh()} disabled={busy}>
+            {busy ? "Copying…" : "Refresh now"}
+          </Button>
+        ) : null
+      }
+    >
+      {message ? <Notice tone={message.tone}>{message.text}</Notice> : null}
+      {!data.shopify.connected ? (
+        <p className={ui.muted}>
+          No Shopify store is connected. {data.canManage ? <>Connect one in <Link href="/operations/settings/sales-platforms">Settings › Sales platforms</Link>.</> : "An admin can connect one in Settings › Sales platforms."}
+        </p>
+      ) : (
+        <p className={ui.muted}>
+          {run ? (
+            <>
+              <LoadBadge run={run} /> Last copied {formatDateTime(run.startedAt)}
+              {run.rowsLoaded ? ` · ${rows(run.rowsLoaded)} rows` : ""}
+              {run.error ? ` · ${run.error}` : ""}
+            </>
+          ) : (
+            "Not copied yet. It's copied tonight, or now with Refresh now."
+          )}
+        </p>
+      )}
+      {copied.length ? (
+        <p className={ui.muted}>
+          Tables:{" "}
+          {copied.map((table, index) => (
+            <span key={table.name}>
+              {index ? ", " : ""}
+              <span title={table.name}>{tableLabel(table.name)}</span>
+            </span>
+          ))}
+        </p>
+      ) : null}
+    </Card>
+  );
+}
+
+function SourcesCard({
+  organisationId,
+  data,
+  onEdit,
+  onChanged,
+}: {
+  organisationId: string;
+  data: Overview;
+  onEdit: (source: AnalyticsSource) => void;
+  onChanged: () => void;
+}) {
+  const [busy, setBusy] = useState<string | null>(null);
+  const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const confirm = useConfirm();
+
+  async function load(source: AnalyticsSource) {
+    setBusy(source.id);
+    setMessage(null);
+    try {
+      const { run } = await api<{ run: LoadRun }>(`/api/analytics/sources/${source.id}/load`, { method: "POST", body: { organisationId } });
+      setMessage(
+        run.status === "ok"
+          ? { tone: "success", text: `${source.name}: loaded ${rows(run.rowsLoaded)} rows in ${duration(run.milliseconds)}.` }
+          : { tone: "error", text: `${source.name} didn't load: ${run.error}. Yesterday's data is still there.` },
+      );
+    } catch (caught) {
+      setMessage({ tone: "error", text: errorMessage(caught) });
+    } finally {
+      setBusy(null);
+      onChanged();
+    }
+  }
+
+  async function remove(source: AnalyticsSource) {
+    const ok = await confirm(source.database
+      ? "Its loaded data is removed too (nothing in the database changes). The load history stays."
+      : "Its loaded data is removed too (the file in the folder isn't touched). The load history stays.", {
+      title: `Remove ${source.name}?`,
+      confirmLabel: "Remove",
+      danger: true,
+    });
+    if (!ok) return;
+    setBusy(source.id);
+    setMessage(null);
+    try {
+      await api(`/api/analytics/sources/${source.id}`, { method: "DELETE", query: { organisationId } });
+      onChanged();
+    } catch (caught) {
+      setMessage({ tone: "error", text: errorMessage(caught) });
+    } finally {
+      setBusy(null);
+    }
+  }
+
+  return (
+    <Card title="Sources">
+      {message ? <Notice tone={message.tone}>{message.text}</Notice> : null}
+      {data.sources.length === 0 ? (
+        <Empty>{data.canManage ? "No sources yet. Choose Add data source to connect a file or a database." : "No sources yet. An admin sets them up."}</Empty>
+      ) : (
+        <div className={ui.tableWrap}>
+          <table className={ui.table}>
+            <thead>
+              <tr>
+                <th>Source</th>
+                <th>Table</th>
+                <th>Last load</th>
+                <th className={ui.num}>Rows</th>
+                {data.canManage ? <th /> : null}
+              </tr>
+            </thead>
+            <tbody>
+              {data.sources.map((source) => (
+                <tr key={source.id}>
+                  <td>
+                    <strong>{source.name}</strong>
+                    <details><summary>View {source.columns.length} fields</summary><dl>{source.columns.map((column) => <div key={column.name}><dt><code>{column.name}</code></dt><dd>{KINDS.find((kind) => kind.value === column.kind)?.label ?? column.kind} · from {column.source}</dd></div>)}</dl></details>
+                    <div className={ui.muted}>
+                      {source.fileName}{source.sheetName ? ` · ${source.sheetName}` : ""} · {source.columns.length} columns · {source.reloadDaily ? "loads nightly" : "loads by hand only"}
+                    </div>
+                  </td>
+                  <td>
+                    <code>{source.tableName}</code>
+                  </td>
+                  <td>
+                    <LoadBadge run={source.lastLoad} />
+                    {source.lastLoad ? <div className={ui.muted}>{formatDateTime(source.lastLoad.startedAt)}</div> : null}
+                  </td>
+                  <td className={ui.num}>{rows(source.lastLoad?.rowsLoaded ?? null)}</td>
+                  {data.canManage ? (
+                    <td className={ui.num}>
+                      <div className={ui.rowButtons}>
+                        <Button size="small" onClick={() => void load(source)} disabled={busy !== null}>
+                          {busy === source.id ? "Loading…" : "Load now"}
+                        </Button>
+                        <Button size="small" variant="secondary" onClick={() => onEdit(source)} disabled={busy !== null}>
+                          Edit
+                        </Button>
+                        <Button size="small" variant="danger" onClick={() => void remove(source)} disabled={busy !== null}>
+                          Remove
+                        </Button>
+                      </div>
+                    </td>
+                  ) : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+    </Card>
+  );
+}
+
+type Preview = { columns: InspectedColumn[]; rows: string[][]; delimiter: string; sheets?: string[]; hiddenSheets?: string[]; sheetName?: string };
+type ColumnChoice = { source: string; name: string; kind: ColumnKind; include: boolean; detected: string; examples: string[] };
+
+function tableNameFor(file: string, taken: string[]): string {
+  const base =
+    (file.split("/").pop() ?? file)
+      .replace(/\.[^.]+$/, "")
+      .toLowerCase()
+      .replace(/[^a-z0-9]+/g, "_")
+      .replace(/^_+|_+$/g, "")
+      .slice(0, 50) || "data";
+  const start = /^[a-z]/.test(base) ? base : `t_${base}`;
+  let name = start;
+  for (let n = 2; taken.includes(name); n += 1) name = `${start}_${n}`;
+  return name;
+}
+
+/** Setting up (or changing) a source: the file's columns, what each is called and how it loads. */
+function SourceSetup({
+  organisationId,
+  file,
+  existing,
+  takenTables,
+  onDone,
+  onCancel,
+}: {
+  organisationId: string;
+  file: string;
+  existing?: AnalyticsSource;
+  takenTables: string[];
+  onDone: () => void;
+  onCancel: () => void;
+}) {
+  const [delimiter, setDelimiter] = useState(existing?.delimiter ?? "");
+  const [sheetName, setSheetName] = useState(existing?.sheetName ?? "");
+  const isExcel = /\.(xlsx|xlsm|xls)$/i.test(file);
+  const preview = useApiData<Preview>("/api/analytics/files", {
+    organisationId,
+    file,
+    delimiter: isExcel ? undefined : delimiter || undefined,
+    sheetName: isExcel ? sheetName || undefined : undefined,
+  });
+  const selectedSheet = isExcel
+    ? sheetName && preview.data?.sheets?.includes(sheetName) ? sheetName : preview.data?.sheetName ?? sheetName
+    : null;
+  const [name, setName] = useState(existing?.name ?? (file.split("/").pop() ?? file).replace(/\.[^.]+$/, ""));
+  const [tableName, setTableName] = useState(existing?.tableName ?? tableNameFor(file, takenTables));
+  const [reloadDaily, setReloadDaily] = useState(existing?.reloadDaily ?? true);
+  const [choices, setChoices] = useState<ColumnChoice[] | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+
+  // The columns come from the preview the first time it arrives; after that they're the person's.
+  const columns: ColumnChoice[] | null =
+    choices ??
+    (preview.data
+      ? preview.data.columns.map((column) => {
+          const saved = existing?.columns.find((entry) => entry.source === column.source);
+          return {
+            source: column.source,
+            name: saved?.name ?? column.name,
+            kind: saved?.kind ?? column.kind,
+            include: existing ? Boolean(saved) : true,
+            detected: column.detected,
+            examples: column.examples,
+          };
+        })
+      : null);
+
+  function change(index: number, patch: Partial<ColumnChoice>) {
+    if (!columns) return;
+    setChoices(columns.map((column, at) => (at === index ? { ...column, ...patch } : column)));
+  }
+
+  async function save() {
+    if (!columns) return;
+    setBusy(true);
+    setError(null);
+    const body = {
+      organisationId,
+      name,
+      fileName: file,
+      sheetName: selectedSheet || null,
+      delimiter: delimiter || preview.data?.delimiter || ",",
+      reloadDaily,
+      columns: columns.filter((column) => column.include).map(({ source, name: columnName, kind }) => ({ source, name: columnName, kind })),
+    };
+    try {
+      let sourceId = existing?.id;
+      if (existing) {
+        await api(`/api/analytics/sources/${existing.id}`, { method: "PATCH", body });
+      } else {
+        const created = await api<{ source: AnalyticsSource }>("/api/analytics/sources", { method: "POST", body: { ...body, tableName } });
+        sourceId = created.source.id;
+      }
+      // Load it straight away, so there's data to look at.
+      await api(`/api/analytics/sources/${sourceId}/load`, { method: "POST", body: { organisationId } });
+      onDone();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card
+      title={existing ? `Change ${existing.name}` : "Set up a source"}
+      description={`From ${file}. Check each column's type: anything that's money should be Money, so totals are exact to the cent.`}
+    >
+      {error ? <Notice tone="error">{error}</Notice> : null}
+      {preview.error ? <Notice tone="error">{preview.error}</Notice> : null}
+      <div className={ui.grid3}>
+        <Field label="Name">
+          <input value={name} maxLength={100} onChange={(event) => setName(event.target.value)} />
+        </Field>
+        <Field label="Table" hint={existing ? "Reports use this name, so it can't change." : "Lower-case letters, digits and _."}>
+          <input value={tableName} disabled={Boolean(existing)} maxLength={63} onChange={(event) => setTableName(event.target.value)} />
+        </Field>
+        {isExcel ? (
+          <Field label="Sheet">
+            <select
+              value={selectedSheet || ""}
+              onChange={(event) => {
+                setSheetName(event.target.value);
+                setChoices(null);
+              }}
+            >
+              {(preview.data?.sheets ?? []).map((sheet) => (
+                <option key={sheet} value={sheet}>
+                  {preview.data?.hiddenSheets?.includes(sheet) ? `${sheet} (hidden)` : sheet}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : (
+          <Field label="Separator" hint={preview.data ? `Found "${preview.data.delimiter === "\t" ? "tab" : preview.data.delimiter}".` : undefined}>
+            <select
+              value={delimiter}
+              onChange={(event) => {
+                setDelimiter(event.target.value);
+                setChoices(null);
+              }}
+            >
+              <option value="">Work it out</option>
+              <option value=",">Comma</option>
+              <option value=";">Semicolon</option>
+              <option value={"\t"}>Tab</option>
+              <option value="|">Bar (|)</option>
+            </select>
+          </Field>
+        )}
+      </div>
+      <label className={ui.checkbox}>
+        <input type="checkbox" checked={reloadDaily} onChange={(event) => setReloadDaily(event.target.checked)} /> Load again every night after 4am
+      </label>
+
+      {!columns ? (
+        <p className={ui.muted}>{preview.loading ? "Reading the file…" : null}</p>
+      ) : (
+        <div className={ui.tableWrap}>
+          <table className={ui.table}>
+            <thead>
+              <tr>
+                <th>Load</th>
+                <th>Heading in the file</th>
+                <th>Column name</th>
+                <th>Type</th>
+                <th>First values</th>
+              </tr>
+            </thead>
+            <tbody>
+              {columns.map((column, index) => (
+                <tr key={column.source}>
+                  <td>
+                    <input
+                      type="checkbox"
+                      aria-label={`Load ${column.source}`}
+                      checked={column.include}
+                      onChange={(event) => change(index, { include: event.target.checked })}
+                    />
+                  </td>
+                  <td>{column.source}</td>
+                  <td>
+                    <input
+                      aria-label={`Name for ${column.source}`}
+                      value={column.name}
+                      maxLength={63}
+                      disabled={!column.include}
+                      onChange={(event) => change(index, { name: event.target.value })}
+                    />
+                  </td>
+                  <td>
+                    <select
+                      aria-label={`Type for ${column.source}`}
+                      value={column.kind}
+                      disabled={!column.include}
+                      onChange={(event) => change(index, { kind: event.target.value as ColumnKind })}
+                    >
+                      {KINDS.map((kind) => (
+                        <option key={kind.value} value={kind.value}>
+                          {kind.label}
+                        </option>
+                      ))}
+                    </select>
+                  </td>
+                  <td className={ui.muted}>{column.examples.filter(Boolean).join(", ")}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      )}
+      <div className={ui.rowButtons}>
+        <Button onClick={() => void save()} disabled={busy || !columns || !columns.some((column) => column.include)}>
+          {busy ? "Saving and loading…" : existing ? "Save and load" : "Set up and load"}
+        </Button>
+        <Button variant="secondary" onClick={onCancel} disabled={busy}>
+          Cancel
+        </Button>
+      </div>
+    </Card>
+  );
+}

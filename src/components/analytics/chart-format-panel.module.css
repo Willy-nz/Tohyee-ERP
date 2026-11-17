@@ -1,0 +1,231 @@
+.panel {
+  display: grid;
+  gap: 8px;
+  margin: 16px 0;
+}
+
+.heading {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.heading h3 {
+  margin: 0;
+  font-size: var(--text-base);
+}
+
+.section {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+}
+
+.section > summary {
+  cursor: pointer;
+  padding: 10px 12px;
+  font-weight: 600;
+  font-size: var(--text-sm);
+}
+
+.section > summary:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: -2px;
+}
+
+.body {
+  display: grid;
+  gap: 10px;
+  padding: 0 12px 12px;
+}
+
+.group {
+  display: grid;
+  gap: 8px;
+  margin: 0;
+  padding: 10px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  min-width: 0;
+}
+
+.group > legend {
+  padding: 0 4px;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.pair {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(130px, 1fr));
+  gap: 8px;
+  align-items: end;
+}
+
+.colourRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.colourRow > :last-child {
+  flex: 1;
+}
+
+.swatch {
+  flex: none;
+  width: 20px;
+  height: 20px;
+  margin-bottom: 10px;
+  border-radius: 4px;
+}
+
+.auto {
+  /* "Automatic": the first two colours of the set. */
+  background: linear-gradient(135deg, var(--chart-1) 0 50%, var(--chart-2) 50% 100%);
+}
+
+.savedList {
+  display: grid;
+  gap: 6px;
+  margin: 8px 0 0;
+  padding: 0;
+  list-style: none;
+}
+
+.savedList li {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+}
+
+.error {
+  color: var(--danger-text);
+  font-size: var(--text-sm);
+}
+
+.defaults {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  align-items: center;
+}
+
+.note {
+  flex-basis: 100%;
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.colourInput {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.colourLabel {
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.colourControls {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  min-width: 0;
+}
+
+.colourControls > input[type="color"] {
+  flex: none;
+  width: 34px;
+  height: 34px;
+  padding: 2px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  cursor: pointer;
+}
+
+.hexBox {
+  flex: 1;
+  min-width: 0;
+  max-width: 120px;
+}
+
+.inner {
+  display: grid;
+  gap: 8px;
+  padding: 8px 10px;
+  border: 1px dashed var(--border);
+  border-radius: 6px;
+}
+
+.inner > summary {
+  cursor: pointer;
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.list {
+  margin: 0;
+  padding-left: 18px;
+}
+
+/* A value's meaning and its currency and balance settings, folded under it. */
+.meaning { flex-basis: 100%; font-size: var(--text-sm); }
+.meaning summary { cursor: pointer; color: var(--text-muted); }
+.meaning dl { display: grid; grid-template-columns: minmax(8rem, max-content) 1fr; gap: 2px 12px; margin: 6px 0 0; }
+.meaning dt { color: var(--text-muted); }
+.meaning dd { margin: 0; }
+@media (max-width: 480px) { .meaning dl { grid-template-columns: 1fr; } .meaning dd { margin-bottom: 4px; } }
+/* Where a setting comes from: text as well as colour. */
+.source {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px 8px;
+  margin: 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+
+.source[data-source="chart"] .sourceText {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.sourceText::before {
+  content: "";
+  display: inline-block;
+  width: 8px;
+  height: 8px;
+  margin-right: 6px;
+  border-radius: 50%;
+  border: 1px solid currentColor;
+  vertical-align: 1px;
+}
+
+.source[data-source="chart"] .sourceText::before {
+  background: var(--accent);
+  border-color: var(--accent);
+}
+
+.changed {
+  font-weight: 400;
+  color: var(--text-muted);
+}
+
+.advancedToggle {
+  margin-top: 4px;
+}
+
+/* Calculated fields on a data source. */
+.fieldList { list-style: none; padding: 0; margin: 6px 0; display: grid; gap: 8px; }
+.fieldList li { display: flex; flex-wrap: wrap; gap: 4px 8px; align-items: baseline; border-bottom: 1px solid var(--border); padding-bottom: 6px; }
+.fieldFormula { flex-basis: 100%; font-size: var(--text-sm); overflow-wrap: anywhere; }
+.fieldActions { display: flex; gap: 6px; flex-wrap: wrap; }
+.fieldForm { display: grid; gap: 8px; margin-top: 8px; }
+.fieldForm textarea { width: 100%; font-family: var(--font-mono, monospace); }

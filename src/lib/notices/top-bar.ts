@@ -1,0 +1,129 @@
+import { countWaitingAiActions } from "@/lib/ai/action-approvals";
+import { businessTimeZone } from "@/lib/dates";
+import { aiKeysStoppingSoon } from "@/lib/ai/tokens";
+import { type Role, roleAtLeast } from "@/lib/auth/roles";
+import { waitingHandover } from "@/lib/organisations/handover";
+import { listFailedCollections } from "@/lib/payments/gocardless";
+import { accountingEnabled } from "@/lib/organisations/accounting-switch";
+import type { OrgTx } from "@/lib/db/org-transaction";
+import { STALE_FEED_HOURS } from "@/lib/bank/accounts";
+import { accessEndingNotices } from "@/lib/organisations/access";
+
+export type TopBarNotice = {
+  id: string;
+  message: string;
+  href: string;
+};
+
+/** Non-blocking top-bar notices for the current organisation. */
+export async function listTopBarNotices(tx: OrgTx, role: Role | null = null): Promise<TopBarNotice[]> {
+  // : a server admin is handing this organisation over; owners and admins can cancel it.
+  const handover = role && roleAtLeast(role, "admin") ? await waitingHandover(tx.organisationId) : null;
+  const handoverNotice: TopBarNotice[] = handover
+    ? [{ id: "organisation-handover", message: `A server admin is making ${handover.toEmail} an owner. Check or cancel it.`, href: "/operations/members" }]
+    : [];
+  // Time-limited access ending within 3 days: admins see everyone's, a member their own.
+  const accessNotices = await accessEndingNotices(tx, role);
+  return [...handoverNotice, ...accessNotices, ...(await aiKeyNotices(tx)), ...(await aiActionNotices(tx, role)), ...(await accountingNotices(tx)), ...(await analyticsNotices(tx, role))];
+}
+
+
+/** What the AI is waiting for a person to approve: for bookkeepers and up, who can. */
+async function aiActionNotices(tx: OrgTx, role: Role | null): Promise<TopBarNotice[]> {
+  if (!role || !roleAtLeast(role, "bookkeeper")) return [];
+  const waiting = await countWaitingAiActions(tx);
+  if (waiting === 0) return [];
+  return [{ id: "ai-actions-waiting", message: waiting === 1 ? "Your AI is waiting for a person to approve 1 change." : `Your AI is waiting for a person to approve ${waiting} changes.`, href: "/operations/ai" }];
+}
+
+/** The person's own AI keys that stop within a week, so an AI doesn't just stop working. */
+async function aiKeyNotices(tx: OrgTx): Promise<TopBarNotice[]> {
+  if (!tx.actor.userId) return [];
+  const keys = await aiKeysStoppingSoon(tx.organisationId, tx.actor.userId);
+  if (keys.length === 0) return [];
+  const KEY_DATE = new Intl.DateTimeFormat("en-NZ", { day: "numeric", month: "short", year: "numeric", timeZone: businessTimeZone() });
+  return keys.map((key, index) => ({
+    id: `ai-key-stopping-${index + 1}`,
+    message:
+      key.reason === "end_date"
+        ? `Your AI key "${key.name}" ends on ${KEY_DATE.format(new Date(key.stopsAt))}. Make a new one if you still use it.`
+        : `Your AI key "${key.name}" hasn't been used for a while and stops on ${KEY_DATE.format(new Date(key.stopsAt))} unless it's used.`,
+    href: "/operations/ai",
+  }));
+}
+
+/**
+ * Analytics data that has stopped refreshing: a source whose last two
+ * loads both failed, so reports are showing older figures. For owners and
+ * admins, who can fix it on Data sources; one failure alone is often a
+ * passing fault and shows on the reports themselves.
+ */
+async function analyticsNotices(tx: OrgTx, role: Role | null): Promise<TopBarNotice[]> {
+  if (!role || !roleAtLeast(role, "admin")) return [];
+  const on = await tx.query<{ analytics_enabled: boolean }>("select analytics_enabled from organisation_settings where id = true");
+  if (on.rows[0]?.analytics_enabled !== true) return [];
+  const stuck = await tx.query<{ count: string }>(
+    `with ranked as (
+       select table_name, status, row_number() over (partition by table_name order by started_at desc, id desc) as place
+         from analytics_load_runs where status <> 'running'
+     )
+     select count(*)::text as count from (
+       select table_name from ranked where place <= 2 group by table_name having count(*) = 2 and bool_and(status = 'failed')
+     ) failing`,
+  );
+  const count = Number(stuck.rows[0]?.count ?? "0");
+  if (count === 0) return [];
+  return [
+    {
+      id: "analytics-refresh-failing",
+      message: count === 1 ? "1 Analytics data source has failed to refresh twice in a row." : `${count} Analytics data sources have failed to refresh twice in a row.`,
+      href: "/analytics/sources",
+    },
+  ];
+}
+
+async function accountingNotices(tx: OrgTx): Promise<TopBarNotice[]> {
+  // Accounting's notices (bank feeds) aren't shown while it's off (MOD6).
+  if (!(await accountingEnabled(tx))) return [];
+  // Every feed provider: failed ones need new logins or tokens; ones that haven't tried for 2 days have stopped.
+  const feeds = await tx.query<{ failed: string; stale: string }>(
+    `with feeds as (
+       select s.last_sync_status as status, s.last_synced_at as at from bank_account_settings s join accounts a on a.id = s.account_id where a.is_active and s.feed_active
+       union all select l.last_sync_status, l.last_synced_at from simplefin_links l join accounts a on a.id = l.account_id where a.is_active and l.active
+       union all select l.last_sync_status, l.last_synced_at from stripe_links l join accounts a on a.id = l.account_id where a.is_active and l.active
+       union all select l.last_sync_status, l.last_synced_at from paypal_links l join accounts a on a.id = l.account_id where a.is_active and l.active
+       union all select l.last_sync_status, l.last_synced_at from wise_links l join accounts a on a.id = l.account_id where a.is_active and l.active
+     )
+     select count(*) filter (where status = 'failed')::text as failed,
+            count(*) filter (where status <> 'failed' and at < now() - make_interval(hours => $1))::text as stale
+       from feeds`,
+    [STALE_FEED_HOURS],
+  );
+  const reconnectCount = Number(feeds.rows[0]?.failed ?? "0");
+  const staleCount = Number(feeds.rows[0]?.stale ?? "0");
+  const notices: TopBarNotice[] = [];
+  if (reconnectCount > 0) {
+    notices.push({
+      id: "bank-feeds-reconnect",
+      message: reconnectCount === 1 ? "1 bank feed needs reconnecting." : `${reconnectCount} bank feeds need reconnecting.`,
+      href: "/operations/bank-accounts",
+    });
+  }
+  if (staleCount > 0) {
+    notices.push({
+      id: "bank-feeds-stale",
+      message: staleCount === 1 ? "1 bank feed hasn't synced for 2 days." : `${staleCount} bank feeds haven't synced for 2 days.`,
+      href: "/operations/bank-accounts",
+    });
+  }
+  // GC6: direct debit collections that failed and haven't been tried again.
+  const failedCount = (await listFailedCollections(tx)).length;
+  if (failedCount > 0) {
+    notices.push({
+      id: "gocardless-failed",
+      message: failedCount === 1 ? "1 direct debit collection failed." : `${failedCount} direct debit collections failed.`,
+      href: "/operations/settings/online-payments",
+    });
+  }
+  return notices;
+}

@@ -1,0 +1,379 @@
+/**
+ * Runs once when the server starts, before it accepts requests: brings the
+ * core database and every organisation database up to date.
+ *
+ * - A failed core migration stops the server from starting.
+ * - A failed organisation migration only blocks that organisation.
+ * - Skipped during `next build`, when DATABASE_URL isn't set, or when
+ *   TOHYEE_SKIP_STARTUP_MIGRATIONS=1.
+ *
+ * Then it starts the bank feed scheduler, which syncs linked Akahu accounts
+ * that are due (off with TOHYEE_BANK_FEEDS_SCHEDULER=off).
+ *
+ * Before that it opens the local-only address for server settings
+ * (127.0.0.1, TOHYEE_ADMIN_PORT; "off" turns it off).
+ *
+ * And the CRM mail sync, which syncs connected Gmail and Microsoft 365
+ * mailboxes every 15 minutes (off with TOHYEE_MAIL_SYNC_SCHEDULER=off).
+ *
+ * And the shared farm locations clean-up, which deletes positions whose
+ * sharing time is up every 10 minutes (always on).
+ *
+ * And the farm calendar's mailbox checks every 15 minutes (off with TOHYEE_FARM_MAIL_SCHEDULER=off).
+ *
+ * And satellite vegetation: one low-priority worker that checks each
+ * farm with pictures turned on about once a day and fetches new dates (off
+ * with TOHYEE_VEGETATION_SCHEDULER=off).
+ *
+ * And the farm security cameras: the hourly media clean-up (off with
+ * TOHYEE_CAMERA_CLEANUP=off) and, when TOHYEE_CAMERA_FTP_PORT is set, the
+ * camera upload receiver.
+ *
+ * And the sales platform sync, which catches up connected Shopify stores'
+ * customers and products every 15 minutes
+ * (off with TOHYEE_SALES_PLATFORM_SYNC_SCHEDULER=off).
+ *
+ * And the MetService weather forecast, which refreshes each organisation's
+ * forecast when due with its own key (off with TOHYEE_WEATHER_SCHEDULER=off).
+ *
+ * And the repeating invoices and bills job, which makes due invoices and
+ * bills every hour
+ * (off with TOHYEE_REPEATING_INVOICES_SCHEDULER=off).
+ *
+ * And the email job, which sends queued invoices, quotes, statements and
+ * other documents from each organisation's own email account and retries
+ * failures (off with TOHYEE_EMAIL_OUTBOX=off).
+ *
+ * And the backup scheduler, which backs up every organisation each night
+ * (off with TOHYEE_BACKUP_SCHEDULER=off; the time and folder are server settings).
+ *
+ * After the upgrades it records the start (version, previous version, what
+ * the upgrades did), checks GitHub for a new release a minute later and then
+ * daily (off with TOHYEE_UPDATE_CHECK=off), and samples the server's use for
+ * the server app's Stats page every minute (off with TOHYEE_SERVER_STATS=off).
+ *
+ * And the analytics loader, which reloads each organisation's daily data
+ * sources after 04:00 (off with TOHYEE_ANALYTICS_SCHEDULER=off).
+ *
+ * And the statement file feeds, which read new statement files from each
+ * bank account's folder or mailbox when due, every 6 hours by default
+ * (off with TOHYEE_FILE_FEEDS_SCHEDULER=off).
+ *
+ * And SimpleFIN bank feeds, which sync each organisation's SimpleFIN Bridge
+ * accounts when due (off with TOHYEE_SIMPLEFIN_SCHEDULER=off).
+ *
+ * And Stripe feeds, which bring each organisation's Stripe balance
+ * transactions in when due (off with TOHYEE_STRIPE_SCHEDULER=off).
+ *
+ * And European Central Bank exchange rates, added each working day to the
+ * exchange rates list of organisations that turned them on (off with
+ * TOHYEE_ECB_RATES_SCHEDULER=off).
+ *
+ * And PayPal feeds, which bring each organisation's PayPal transactions in
+ * when due (off with TOHYEE_PAYPAL_SCHEDULER=off).
+ *
+ * And Wise feeds, which bring each organisation's Wise balance statements
+ * in when due (off with TOHYEE_WISE_SCHEDULER=off).
+ *
+ * And bills inbox mailboxes, which bring PDF and picture attachments into
+ * each organisation's bills inbox when due (off with
+ * TOHYEE_BILL_INBOX_SCHEDULER=off).
+ *
+ * And online invoice payments, which ask Stripe for paid payment links and
+ * PayPal for paid invoices every 15 minutes (off with TOHYEE_ONLINE_PAYMENTS_SCHEDULER=off).
+ *
+ * And GoCardless direct debit, which asks for collections on invoices about to
+ * fall due, follows them and posts payouts every 15 minutes (off with
+ * TOHYEE_GOCARDLESS_SCHEDULER=off).
+ *
+ * It also starts the Cloudflare Tunnel connector if remote access is turned on
+ * (set TOHYEE_REMOTE_ACCESS=off to keep it off, e.g. on a test copy).
+ */
+export async function register() {
+  if (process.env.NEXT_RUNTIME !== "nodejs") {
+    return;
+  }
+  if (process.env.NEXT_PHASE === "phase-production-build") {
+    return;
+  }
+  // Server settings open only from this computer (see src/lib/server-admin/local.ts).
+  if (process.env.TOHYEE_ADMIN_PORT !== "off") {
+    const { startLocalAdminListener } = await import("@/lib/server-admin/listener");
+    startLocalAdminListener();
+  }
+  if (process.env.TOHYEE_SKIP_STARTUP_MIGRATIONS === "1") {
+    console.log("[tohyee] Skipping startup migrations (TOHYEE_SKIP_STARTUP_MIGRATIONS=1).");
+    return;
+  }
+  if (!process.env.DATABASE_URL) {
+    console.warn("[tohyee] DATABASE_URL is not set; skipping database migrations.");
+    return;
+  }
+
+  const { migrateEverything } = await import("@/lib/db/migrations");
+  const result = await migrateEverything();
+  if (result.core.applied.length > 0) {
+    console.log(`[tohyee] Core database migrated: ${result.core.applied.join(", ")}`);
+  }
+  for (const organisation of result.organisations) {
+    if (!organisation.ok) {
+      console.error(
+        `[tohyee] Organisation ${organisation.organisationId} could not be upgraded and is blocked: ${organisation.error}`,
+      );
+    } else if (organisation.applied.length > 0) {
+      console.log(
+        `[tohyee] Organisation ${organisation.organisationId} migrated: ${organisation.applied.join(", ")}`,
+      );
+    }
+  }
+
+  // A record of this start: the version and what the upgrades did.
+  try {
+    const { recordServerStart } = await import("@/lib/updates/server-starts");
+    await recordServerStart(result);
+  } catch (error) {
+    console.warn("[tohyee] Couldn't record this start:", error instanceof Error ? error.message : error);
+  }
+
+  if (process.env.TOHYEE_UPDATE_CHECK !== "off") {
+    const { startUpdateChecker } = await import("@/lib/updates/update-checker");
+    startUpdateChecker();
+  }
+
+  if (process.env.TOHYEE_SERVER_STATS !== "off") {
+    const { startStatsSampler } = await import("@/lib/server-stats/sampler");
+    startStatsSampler();
+  }
+
+  if (process.env.TOHYEE_BANK_FEEDS_SCHEDULER !== "off") {
+    const { startBankFeedScheduler } = await import("@/lib/bank/akahu/sync");
+    startBankFeedScheduler();
+  }
+
+  if (process.env.TOHYEE_MAIL_SYNC_SCHEDULER !== "off") {
+    const { startMailScheduler } = await import("@/lib/crm/mail/service");
+    startMailScheduler();
+  }
+
+  // Shared farm locations past their time are deleted every 10 minutes. Always on: it keeps the retention promise.
+  {
+    const { startLocationSweep } = await import("@/lib/farming/locations-sweep");
+    startLocationSweep();
+  }
+
+  // Farm security camera media past its farm's retention goes every hour; it keeps the retention promise.
+  if (process.env.TOHYEE_CAMERA_CLEANUP !== "off") {
+    const { startCameraCleanup } = await import("@/lib/security-cameras/cleanup");
+    startCameraCleanup();
+  }
+
+  // The camera upload receiver: off unless TOHYEE_CAMERA_FTP_PORT is set.
+  if (process.env.TOHYEE_CAMERA_FTP_PORT && process.env.TOHYEE_CAMERA_FTP_PORT !== "off") {
+    const { startCameraUploads } = await import("@/lib/security-cameras/receiver");
+    void startCameraUploads();
+  }
+
+  // Collecting from camera post boxes: every minute, only for organisations that paired one. Tohyee calls out; nothing is opened.
+  if (process.env.TOHYEE_CAMERA_POSTBOX !== "off") {
+    const { startPostboxCollector } = await import("@/lib/camera-postbox/collector");
+    startPostboxCollector();
+  }
+
+  if (process.env.TOHYEE_FARM_MAIL_SCHEDULER !== "off") {
+    const { startFarmMailScheduler } = await import("@/lib/farming/calendar");
+    startFarmMailScheduler();
+  }
+
+  // Satellite vegetation: one low-priority worker, only for organisations that connected an imagery account.
+  if (process.env.TOHYEE_VEGETATION_SCHEDULER !== "off") {
+    try {
+      const { startVegetationScheduler } = await import("@/lib/farming/vegetation/jobs");
+      startVegetationScheduler();
+    } catch (error) {
+      console.warn("[tohyee] Satellite vegetation couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  // Each farm's daily rain and temperature from kept MetService forecasts.
+  if (process.env.TOHYEE_FARM_WEATHER_SCHEDULER !== "off") {
+    try {
+      const { startFarmWeatherScheduler } = await import("@/lib/farming/weather-history");
+      startFarmWeatherScheduler();
+    } catch (error) {
+      console.warn("[tohyee] Farm weather history couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  // The farm safety records' weekly copy off the farm.
+  if (process.env.TOHYEE_SAFETY_COPY !== "off") {
+    const { startSafetyCopyScheduler } = await import("@/lib/safety/weekly-copy");
+    startSafetyCopyScheduler();
+  }
+
+  if (process.env.TOHYEE_SALES_PLATFORM_SYNC_SCHEDULER !== "off") {
+    const { startSalesPlatformScheduler } = await import("@/lib/sales-platforms/service");
+    startSalesPlatformScheduler();
+  }
+
+  // MetService forecasts with each organisation's own key: due refreshes every 10 minutes.
+  if (process.env.TOHYEE_WEATHER_SCHEDULER !== "off") {
+    const { startWeatherScheduler } = await import("@/lib/weather/scheduler");
+    startWeatherScheduler();
+  }
+
+  if (process.env.TOHYEE_REPEATING_INVOICES_SCHEDULER !== "off") {
+    const { startRepeatingInvoiceScheduler } = await import("@/lib/repeating/scheduler");
+    startRepeatingInvoiceScheduler();
+  }
+
+  if (process.env.TOHYEE_EMAIL_OUTBOX !== "off") {
+    const { startEmailOutbox } = await import("@/lib/email/outbox");
+    startEmailOutbox();
+  }
+
+  if (process.env.TOHYEE_BACKUP_SCHEDULER !== "off") {
+    const { startBackupScheduler } = await import("@/lib/backups/scheduler");
+    startBackupScheduler();
+  }
+
+  if (process.env.TOHYEE_AI_KEY_EMAILS !== "off") {
+    const { startAiKeyEndingEmails } = await import("@/lib/ai/key-ending-email");
+    startAiKeyEndingEmails();
+  }
+
+  if (process.env.TOHYEE_ANALYTICS_SCHEDULER !== "off") {
+    try {
+      const { startAnalyticsScheduler } = await import("@/lib/analytics/scheduler");
+      startAnalyticsScheduler();
+    } catch (error) {
+      console.warn("[tohyee] The analytics loader couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (process.env.TOHYEE_REPORT_EMAIL_SCHEDULER !== "off") {
+    try {
+      const { startReportEmailScheduler } = await import("@/lib/analytics/report-emails");
+      startReportEmailScheduler();
+    } catch (error) {
+      console.warn("[tohyee] Report email checks couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (process.env.TOHYEE_FILE_FEEDS_SCHEDULER !== "off") {
+    try {
+      const { startFileFeedScheduler } = await import("@/lib/bank/file-feeds");
+      startFileFeedScheduler();
+    } catch (error) {
+      console.warn("[tohyee] Statement file feeds couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (process.env.TOHYEE_SIMPLEFIN_SCHEDULER !== "off") {
+    try {
+      const { startSimpleFinScheduler } = await import("@/lib/bank/simplefin/service");
+      startSimpleFinScheduler();
+    } catch (error) {
+      console.warn("[tohyee] SimpleFIN syncs couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (process.env.TOHYEE_STRIPE_SCHEDULER !== "off") {
+    try {
+      const { startStripeScheduler } = await import("@/lib/bank/stripe/service");
+      startStripeScheduler();
+    } catch (error) {
+      console.warn("[tohyee] Stripe syncs couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (process.env.TOHYEE_ECB_RATES_SCHEDULER !== "off") {
+    try {
+      const { startEcbRatesScheduler } = await import("@/lib/fx/ecb");
+      startEcbRatesScheduler();
+    } catch (error) {
+      console.warn("[tohyee] ECB exchange rates couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (process.env.TOHYEE_PAYPAL_SCHEDULER !== "off") {
+    try {
+      const { startPayPalScheduler } = await import("@/lib/bank/paypal/service");
+      startPayPalScheduler();
+    } catch (error) {
+      console.warn("[tohyee] PayPal syncs couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (process.env.TOHYEE_WISE_SCHEDULER !== "off") {
+    try {
+      const { startWiseScheduler } = await import("@/lib/bank/wise/service");
+      startWiseScheduler();
+    } catch (error) {
+      console.warn("[tohyee] Wise syncs couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (process.env.TOHYEE_LEAD_MAILBOX_SCHEDULER !== "off") {
+    try {
+      const { startLeadMailboxScheduler } = await import("@/lib/crm/lead-intake");
+      startLeadMailboxScheduler();
+    } catch (error) {
+      console.warn("[tohyee] Lead mailboxes couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (process.env.TOHYEE_FOLLOW_UP_SCHEDULER !== "off") {
+    try {
+      const { startFollowUpScheduler } = await import("@/lib/crm/follow-ups");
+      startFollowUpScheduler();
+    } catch (error) {
+      console.warn("[tohyee] Follow-up rules couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (process.env.TOHYEE_BILL_INBOX_SCHEDULER !== "off") {
+    try {
+      const { startBillInboxScheduler } = await import("@/lib/bills/inbox-mailbox");
+      startBillInboxScheduler();
+    } catch (error) {
+      console.warn("[tohyee] Bills inbox mailboxes couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (process.env.TOHYEE_ONLINE_PAYMENTS_SCHEDULER !== "off") {
+    try {
+      const { startOnlinePaymentScheduler } = await import("@/lib/payments/stripe");
+      startOnlinePaymentScheduler();
+      const { startPayPalPaymentScheduler } = await import("@/lib/payments/paypal");
+      startPayPalPaymentScheduler();
+    } catch (error) {
+      console.warn("[tohyee] Online payments couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (process.env.TOHYEE_GOCARDLESS_SCHEDULER !== "off") {
+    try {
+      const { startGoCardlessScheduler } = await import("@/lib/payments/gocardless");
+      startGoCardlessScheduler();
+    } catch (error) {
+      console.warn("[tohyee] GoCardless direct debit couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+
+  if (process.env.TOHYEE_HANDOVER_SCHEDULER !== "off") {
+    // Organisation handovers whose 7-day wait is over.
+    const { startHandoverScheduler } = await import("@/lib/organisations/handover");
+    startHandoverScheduler();
+  }
+
+  if (process.env.TOHYEE_REMOTE_ACCESS !== "off") {
+    const { applyRemoteAccess } = await import("@/lib/remote/settings");
+    const { stopTunnelOnExit } = await import("@/lib/remote/tunnel");
+    stopTunnelOnExit();
+    try {
+      await applyRemoteAccess();
+    } catch (error) {
+      console.warn("[tohyee] Remote access couldn't start:", error instanceof Error ? error.message : error);
+    }
+  }
+}

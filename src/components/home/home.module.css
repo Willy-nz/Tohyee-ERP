@@ -1,0 +1,231 @@
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(268px, 1fr));
+  gap: 14px;
+  margin-bottom: 14px;
+}
+
+.tile {
+  display: flex;
+  flex-direction: column;
+  gap: 12px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  padding: 16px 18px 18px;
+  box-shadow: var(--shadow);
+  transition: border-color 140ms ease;
+}
+
+.tile:hover {
+  border-color: var(--border-strong);
+}
+
+.tileTitle {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 8px;
+  min-width: 0;
+  font-size: var(--text-base);
+  font-weight: 600;
+}
+
+.tileTitle a {
+  min-width: 0;
+  color: var(--text);
+  overflow-wrap: anywhere;
+}
+
+.kind {
+  flex-shrink: 0;
+  border-radius: var(--radius-pill);
+  background: var(--neutral-bg);
+  padding: 1px 8px;
+  color: var(--neutral-text);
+  font-size: var(--text-xs);
+  font-weight: 600;
+  white-space: nowrap;
+}
+
+.figure {
+  font-size: 1.75rem;
+  font-weight: 650;
+  line-height: 1.15;
+  letter-spacing: -0.03em;
+  font-variant-numeric: tabular-nums;
+}
+
+.rows {
+  display: grid;
+  gap: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.row {
+  display: flex;
+  justify-content: space-between;
+  gap: 12px;
+  border-top: 1px solid var(--border);
+  padding: 7px 0;
+}
+
+.row:last-child {
+  padding-bottom: 0;
+}
+
+.row span:last-child {
+  color: var(--text);
+  font-weight: 550;
+  font-variant-numeric: tabular-nums;
+  text-align: right;
+}
+
+/* Bank tiles: the balance in Tohyee is the headline figure. */
+.bankTile .row:first-child {
+  flex-direction: column;
+  gap: 2px;
+  border-top: 0;
+  padding-top: 0;
+}
+
+.bankTile .row:first-child span:last-child {
+  font-size: 1.5rem;
+  font-weight: 650;
+  letter-spacing: -0.03em;
+  text-align: left;
+}
+
+.overdue span:first-child {
+  color: var(--danger-text);
+}
+
+.overdue span:last-child {
+  color: var(--danger-text);
+  font-weight: 700;
+}
+
+.action {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  margin-top: auto;
+  align-self: flex-start;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  padding: 5px 12px;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  transition: background-color 120ms ease;
+}
+
+.action:hover {
+  background: var(--surface-hover);
+  color: var(--text);
+  text-decoration: none;
+}
+
+.quiet {
+  display: inline-flex;
+  align-items: center;
+  gap: 7px;
+  margin-top: auto;
+  color: var(--success-text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.quiet::before {
+  content: "";
+  width: 7px;
+  height: 7px;
+  border-radius: 50%;
+  background: currentColor;
+}
+
+.sectionTitle {
+  margin: 10px 0 12px;
+  font-size: var(--text-lg);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+/* Home: the profit chart and To do side by side. */
+.split {
+  display: grid;
+  grid-template-columns: minmax(0, 1.6fr) minmax(0, 1fr);
+  gap: var(--space-4);
+  align-items: start;
+}
+
+.bad {
+  color: var(--danger-text);
+}
+
+@media (max-width: 900px) {
+  .split {
+    grid-template-columns: 1fr;
+  }
+}
+
+/* Financial hierarchy: open metrics, working panels and a flat activity ledger. */
+.grid {
+  grid-template-columns: minmax(0, 1.5fr) repeat(3, minmax(0, 1fr));
+  gap: 24px;
+  margin-bottom: 0;
+  padding: 16px 0 24px;
+  border-bottom: 1px solid var(--border);
+}
+.grid > .tile { padding: 18px; border: 1px solid var(--border); border-radius: var(--radius); background: var(--surface); box-shadow: none; }
+.tile { padding: 24px; gap: 16px; box-shadow: none; }
+.tileTitle { flex-wrap: wrap; font-size: 18px; line-height: 26px; }
+.tileTitle h2 { font-size: inherit; font-weight: 600; }
+.grid .tileTitle { font-size: 14px; line-height: 22px; }
+.figure { font-size: 26px; font-weight: 600; line-height: 34px; overflow-wrap: anywhere; }
+.mainStat .figure { font-size: 28px; font-weight: 650; line-height: 36px; }
+.kind { border-radius: 4px; font-weight: 500; }
+.split { grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr); gap: 24px; }
+.row { padding: 12px 0; min-height: 44px; align-items: baseline; }
+.row > span:first-child { min-width: 0; overflow-wrap: anywhere; }
+.row > a { flex-shrink: 0; }
+.activity { min-width: 0; padding: 8px 0; }
+.activity > .tileTitle { margin-bottom: 16px; }
+.activityMeta { display: block; margin-top: 4px; color: var(--text-muted); font-size: 12px; line-height: 18px; font-weight: 400; }
+.banks { display: grid; }
+.bank { display: grid; gap: 8px; padding: 16px 0; border-top: 1px solid var(--border); }
+.bank .row { padding: 0; border: 0; }
+.chartMeta { color: var(--text-muted); font-size: 12px; font-weight: 400; }
+.unavailable { font-size: var(--text-base); line-height: 1.5; font-weight: 600; }
+.loading { display: grid; gap: 24px; color: var(--text-muted); }
+.skeleton { min-height: 100px; border-radius: 8px; background: var(--surface-sunken); }
+
+@media (max-width: 1439px) and (min-width: 1200px) {
+  /* 560px chart + 280px actions + gap need 864px of content. */
+  .split { grid-template-columns: 1fr; }
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mainStat .figure { font-size: 36px; line-height: 44px; }
+}
+@media (max-width: 1199px) {
+  .split { grid-template-columns: 1fr; }
+  .grid { grid-template-columns: repeat(2, minmax(0, 1fr)); }
+  .mainStat .figure { font-size: 36px; line-height: 44px; }
+}
+@media (max-width: 767px) {
+  .grid { grid-template-columns: 1fr; gap: 16px; }
+  .tile { padding: 16px; }
+  .grid > .tile:not(.mainStat) { display: grid; grid-template-columns: minmax(0, 1fr) minmax(0, 1fr); gap: 4px 12px; }
+  .grid > .tile:not(.mainStat) .figure { text-align: right; }
+  .grid > .tile:not(.mainStat) > :last-child { grid-column: 1 / -1; }
+  .row { flex-wrap: wrap; gap: 8px; }
+  .activity .row { display: grid; grid-template-columns: minmax(0, 1fr) auto; }
+}
+
+.figure > span { white-space: normal; overflow-wrap: anywhere; }
+
+.actionSplit { grid-template-columns: minmax(280px, 1fr) minmax(0, 2fr); }
+@media (max-width: 1439px) { .actionSplit { grid-template-columns: minmax(0, 1fr); } }

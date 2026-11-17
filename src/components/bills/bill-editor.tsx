@@ -1,0 +1,654 @@
+"use client";
+
+import { DateInput } from "@/components/date-input";
+import { onlyNoGstCodes, useDocumentTaxCodes } from "@/components/document-tax-codes";
+import { defaultsCheckers, withContactDefaults } from "@/lib/contacts/line-defaults";
+import { usualTaxCode } from "@/lib/accounts/types";
+import Link from "next/link";
+import { type Dispatch, type FormEvent, type SetStateAction, useState } from "react";
+import { AccountSelect, useAccounts } from "@/components/books";
+import { LineItemPicker, useItems } from "@/components/items";
+import type { ItemList } from "@/lib/items/service";
+import { useApiData } from "@/components/hooks";
+import { dueFromSupplierTerms, useCustomerSetup } from "@/components/customers";
+import { NEW_CONTACT, QuickContact } from "@/components/quick-contact";
+import { CustomFieldInputs, startingValues, useCustomFields } from "@/components/custom-fields";
+import { TrackingSelects, useTracking } from "@/components/tracking";
+import { formatRate, InvoiceStatusBadge } from "@/components/invoices/invoice-editor";
+import { Button, Field, Notice, Stat, ui } from "@/components/ui";
+import type { Account } from "@/lib/accounts/service";
+import { billLineAccountProblem } from "@/lib/bills/accounts";
+import type { Bill, BillStatus } from "@/lib/bills/service";
+import { api, errorMessage, newIdempotencyKey } from "@/lib/client/api";
+import type { Contact } from "@/lib/contacts/service";
+import { formatMoney, todayInBrowser } from "@/lib/format";
+import { AMOUNTS_MODE_LABELS, AMOUNTS_MODES, type AmountsMode, calculateInvoice } from "@/lib/invoices/amounts";
+import { currencyMinorUnits } from "@/lib/money/currency";
+import { isDecimalString } from "@/lib/money/decimal";
+import { ExchangeRateField, useLastRate } from "@/components/fx";
+import type { TaxCode } from "@/lib/tax/codes";
+import { codesForSide, unavailableNote } from "@/lib/tax/available-on";
+import { retaxLines, usualWithContact } from "@/lib/tax/exports";
+import { contactPurchaseTaxCode } from "@/lib/tax/purchase-defaults";
+import { type CustomFieldSetup, type CustomValues } from "@/lib/custom-fields/values";
+import type { TrackingSetup, TrackingTags } from "@/lib/tracking/service";
+
+/** Bills have the same statuses as invoices: draft, approved and voided. */
+export function BillStatusBadge({ status }: { status: BillStatus }) {
+  return <InvoiceStatusBadge status={status} />;
+}
+
+export type EditorLine = {
+  key: number;
+  itemId: string;
+  unitId: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  accountCode: string;
+  taxCode: string;
+  tracking: TrackingTags;
+  customFields: CustomValues;
+  /** A bill line copied from a purchase order line (PO3) keeps its link when edited. */
+  purchaseOrderLineId: string;
+  /** The code Tohyee's usual default gave (the item's, the account's or the organisation's), before the supplier's (EX17-EX19). */
+  usualTaxCode?: string;
+  /** Chosen by hand, or saved: the supplier's default leaves it alone (EX20, EX21). */
+  taxTyped?: boolean;
+};
+
+let lineKey = 0;
+function nextLineKey(): number {
+  lineKey += 1;
+  return lineKey;
+}
+
+/**
+ * New lines have no account, so each cost is put somewhere on purpose.
+ * `contactTaxCode` is the supplier's default purchase tax code (EX17); without
+ * one the line starts with the usual default.
+ */
+export function blankLine(taxCode: string, customFields: CustomValues = {}, contactTaxCode: string | null = null): EditorLine {
+  return {
+    key: nextLineKey(),
+    itemId: "",
+    unitId: "",
+    description: "",
+    quantity: "1",
+    unitPrice: "",
+    accountCode: "",
+    taxCode: contactTaxCode ?? taxCode,
+    usualTaxCode: taxCode,
+    tracking: {},
+    customFields,
+    purchaseOrderLineId: "",
+  };
+}
+
+export { contactPurchaseTaxCode, retaxLines };
+
+/** Saved purchase lines (a bill's or a purchase order's) as editor lines. */
+export function editorLines(lines: Bill["lines"], defaultTaxCode: string): EditorLine[] {
+  return lines.map((line) => ({
+    key: nextLineKey(),
+    itemId: line.itemId ?? "",
+    unitId: line.unitId ?? "",
+    description: line.description,
+    quantity: line.quantity,
+    unitPrice: line.unitPrice,
+    accountCode: line.accountCode,
+    taxCode: line.taxCode ?? defaultTaxCode,
+    tracking: line.tracking ?? {},
+    customFields: line.customFields ?? {},
+    purchaseOrderLineId: line.purchaseOrderLineId ?? "",
+    // Saved lines keep their tax codes whatever the supplier's default (EX21).
+    taxTyped: true,
+  }));
+}
+
+/** Editor lines as the API takes them. */
+export function linesForApi(lines: EditorLine[], hasTax: boolean) {
+  return lines.map((line) => ({
+    itemId: line.itemId || null,
+    unitId: line.unitId || null,
+    description: line.description,
+    quantity: line.quantity,
+    unitPrice: line.unitPrice,
+    accountCode: line.accountCode,
+    taxCode: hasTax ? line.taxCode || null : null,
+    tracking: line.tracking,
+    customFields: line.customFields,
+    ...(line.purchaseOrderLineId ? { purchaseOrderLineId: line.purchaseOrderLineId } : {}),
+  }));
+}
+
+/** The tax code new lines start with: the first active standard-rated one. */
+export function defaultPurchaseTaxCode(taxCodes: TaxCode[]): string {
+  const active = taxCodes.filter((taxCode) => taxCode.isActive);
+  return (active.find((taxCode) => taxCode.category === "standard") ?? active[0])?.code ?? "";
+}
+
+/** The accounts bill lines can go to, the same rule the server checks. */
+export function takesBillLines(account: Account): boolean {
+  return billLineAccountProblem(account) === null;
+}
+
+type FormProps = {
+  organisationId: string;
+  items: ItemList | null;
+  baseCurrency: string;
+  accounts: Account[];
+  contacts: Contact[];
+  taxCodes: TaxCode[];
+  tracking: TrackingSetup;
+  customSetup: CustomFieldSetup;
+  bill?: Bill;
+  /** A new bill made from this bills inbox item (BI3): its file is attached when it's saved. */
+  inboxItemId?: string;
+  onSaved: (bill: Bill) => void;
+  onCancel: () => void;
+};
+
+function BillForm({ organisationId, items, baseCurrency, accounts, contacts: givenContacts, taxCodes, tracking, customSetup, bill, inboxItemId, onSaved, onCancel }: FormProps) {
+  // Suppliers added here with "New supplier…" join the list straight away.
+  const [added, setAdded] = useState<Contact[]>([]);
+  const [addingSupplier, setAddingSupplier] = useState(false);
+  const contacts = [...givenContacts, ...added];
+  const activeTaxCodes = taxCodes.filter((taxCode) => taxCode.isActive);
+  const defaultTaxCode = defaultPurchaseTaxCode(taxCodes);
+  const [contactId, setContactId] = useState(bill?.contactId ?? "");
+  const [supplierInvoiceNumber, setSupplierInvoiceNumber] = useState(bill?.supplierInvoiceNumber ?? "");
+  const [billDate, setBillDate] = useState(bill?.billDate ?? todayInBrowser());
+  const [dueDate, setDueDate] = useState(bill?.dueDate ?? "");
+  // A new bill's due date follows the supplier's payment terms until it's typed over (SPT2).
+  const termsSetup = useCustomerSetup(organisationId).data;
+  const [dueTyped, setDueTyped] = useState(Boolean(bill));
+  const refillDue = (supplierId: string, date: string, known?: Contact) => {
+    if (dueTyped) return;
+    const fromTerms = dueFromSupplierTerms(termsSetup, known ?? contacts.find((contact) => contact.id === supplierId), date);
+    if (fromTerms) setDueDate(fromTerms);
+  };
+  const [amountsMode, setAmountsMode] = useState<AmountsMode>(bill?.amountsMode ?? (onlyNoGstCodes(taxCodes) ? "no_tax" : "exclusive"));
+  const lineDefaults = startingValues(customSetup, "line", ["bill"]);
+  const [customFields, setCustomFields] = useState<CustomValues>(
+    () => bill?.customFields ?? startingValues(customSetup, "document", ["bill"]),
+  );
+  const [lines, setLines] = useState<EditorLine[]>(() => (bill ? editorLines(bill.lines, defaultTaxCode) : [blankLine(defaultTaxCode, lineDefaults)]));
+  // One key per new bill, so a double click or a retry can't save it twice.
+  const [idempotencyKey] = useState(() => newIdempotencyKey("bill"));
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // A supplier in another currency gets bills in it, at a rate for the bill date (MC10).
+  const chosenSupplier = contacts.find((contact) => contact.id === contactId);
+  // New lines start with the supplier's default account and tracking (SD1).
+  const checkers = defaultsCheckers(accounts, tracking);
+  const purchaseDefaults = (current: EditorLine[], supplier: Contact | undefined) =>
+    withContactDefaults(current, supplier, "purchase", checkers.accountUsable, checkers.valueUsable);
+  const currencyCode = chosenSupplier ? (chosenSupplier.currencyCode ?? baseCurrency) : (bill?.currencyCode ?? baseCurrency);
+  const foreign = currencyCode !== baseCurrency;
+  const [typedRate, setTypedRate] = useState<string | null>(bill?.exchangeRate ?? null);
+  const suggestedRate = useLastRate(organisationId, currencyCode, baseCurrency, billDate);
+
+  const hasTax = amountsMode !== "no_tax";
+  const supplierOptions = contacts.filter((contact) => contact.isSupplier && !contact.isArchived);
+  function chooseSupplier(id: string, list: Contact[]) {
+    const next = list.find((contact) => contact.id === id);
+    if ((next?.currencyCode ?? baseCurrency) !== currencyCode) setTypedRate(null);
+    setContactId(id);
+    refillDue(id, billDate, next);
+    setLines((current) => retaxLines(purchaseDefaults(current, next), contactPurchaseTaxCode(next, taxCodes)));
+  }
+  const savedSupplier = bill && !supplierOptions.some((contact) => contact.id === bill.contactId) ? bill : null;
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    const fields = {
+      contactId,
+      supplierInvoiceNumber: supplierInvoiceNumber.trim() || null,
+      billDate,
+      dueDate,
+      amountsMode,
+      lines: linesForApi(lines, hasTax),
+      customFields,
+      ...(foreign && typedRate !== null ? { exchangeRate: typedRate } : {}),
+    };
+    try {
+      const result = bill
+        ? await api<{ bill: Bill }>(`/api/bills/${bill.id}`, {
+            method: "PATCH",
+            body: { organisationId, ...fields },
+          })
+        : await api<{ bill: Bill }>("/api/bills", {
+            method: "POST",
+            body: { organisationId, source: "ui", idempotencyKey, ...fields, ...(inboxItemId ? { inboxItemId } : {}) },
+          });
+      onSaved(result.bill);
+    } catch (caught) {
+      setError(errorMessage(caught));
+      setBusy(false);
+    }
+  }
+
+  return (
+    <form onSubmit={(event) => void submit(event)} autoComplete="off" style={{ display: "grid", gap: 14 }}>
+      {error ? <Notice tone="error">{error}</Notice> : null}
+      {supplierOptions.length === 0 ? (
+        <Notice tone="warning">
+          There are no suppliers yet. Choose &ldquo;+ New supplier…&rdquo; below, or add one in <Link href="/operations/contacts">Contacts</Link>.
+        </Notice>
+      ) : null}
+      {hasTax && activeTaxCodes.length === 0 ? (
+        <Notice tone="warning">
+          There are no active tax codes. An admin can add them in <Link href="/operations/tax">Tax codes</Link>, or set
+          the amounts to &quot;No tax&quot;.
+        </Notice>
+      ) : null}
+      <div className={ui.grid3}>
+        <Field label="Supplier">
+          <select
+            value={contactId}
+            onChange={(event) => {
+              if (event.target.value === NEW_CONTACT) {
+                setAddingSupplier(true);
+                return;
+              }
+              chooseSupplier(event.target.value, contacts);
+            }}
+            required
+          >
+            <option value="">Choose a supplier</option>
+            <option value={NEW_CONTACT}>+ New supplier…</option>
+            {savedSupplier ? (
+              <option value={savedSupplier.contactId}>{savedSupplier.contactName} (archived or not a supplier)</option>
+            ) : null}
+            {supplierOptions.map((contact) => (
+              <option key={contact.id} value={contact.id}>
+                {contact.name}
+                {contact.currencyCode && contact.currencyCode !== baseCurrency ? ` (${contact.currencyCode})` : ""}
+              </option>
+            ))}
+          </select>
+        </Field>
+        {addingSupplier ? (
+          <div style={{ gridColumn: "1 / -1" }}>
+            <QuickContact
+              organisationId={organisationId}
+              kind="supplier"
+              onCreated={(contact) => {
+                setAdded((current) => [...current, contact]);
+                setAddingSupplier(false);
+                chooseSupplier(contact.id, [...contacts, contact]);
+              }}
+              onCancel={() => setAddingSupplier(false)}
+            />
+          </div>
+        ) : null}
+        <Field
+          label="Supplier's invoice number"
+          hint="As it's shown on their invoice. A supplier can't have two bills with the same number. A draft can wait for it; approving needs it."
+        >
+          <input
+            value={supplierInvoiceNumber}
+            onChange={(event) => setSupplierInvoiceNumber(event.target.value)}
+            maxLength={100}
+          />
+        </Field>
+        <Field label="Amounts are">
+          <select value={amountsMode} onChange={(event) => setAmountsMode(event.target.value as AmountsMode)}>
+            {AMOUNTS_MODES.map((mode) => (
+              <option key={mode} value={mode}>
+                {AMOUNTS_MODE_LABELS[mode]}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Bill date" hint="The date on the supplier's invoice.">
+          <DateInput
+            value={billDate}
+            onChange={(event) => {
+              setBillDate(event.target.value);
+              refillDue(contactId, event.target.value);
+            }}
+            required
+          />
+        </Field>
+        <Field
+          label="Due date"
+          hint={
+            contactId && !dueDate
+              ? "This supplier has no payment terms: type the due date (or set default terms in Settings › Payment terms and customers)."
+              : "From the supplier's payment terms, or the organisation's default terms. You can change it."
+          }
+        >
+          <DateInput
+            value={dueDate}
+            base={billDate}
+            min={billDate || undefined}
+            onChange={(event) => {
+              setDueDate(event.target.value);
+              setDueTyped(true);
+            }}
+            required
+          />
+        </Field>
+        <ExchangeRateField currencyCode={currencyCode} baseCurrency={baseCurrency} suggested={suggestedRate} value={typedRate} onChange={setTypedRate} />
+      </div>
+      {foreign ? (
+        <Notice tone="info">
+          This bill is in {currencyCode}, and its GST is worked out in {currencyCode} as usual. Approving posts its {baseCurrency}{" "}
+          value, each line and its GST converted at the rate.
+        </Notice>
+      ) : null}
+      <CustomFieldInputs setup={customSetup} record="document" uses={["bill"]} value={customFields} onChange={setCustomFields} />
+      {bill?.purchaseOrderId ? (
+        <Notice tone="info">
+          From purchase order{" "}
+          <Link href={`/operations/purchase-orders/${bill.purchaseOrderId}`}>{bill.purchaseOrderNumber}</Link>. Lines marked
+          &quot;from the purchase order&quot; keep their item and can&apos;t add up to more than was ordered; add a line of
+          your own for anything extra.
+        </Notice>
+      ) : null}
+      <PurchaseLines
+        organisationId={organisationId}
+        items={items}
+        baseCurrency={currencyCode}
+        accounts={accounts}
+        taxCodes={taxCodes}
+        tracking={tracking}
+        customSetup={customSetup}
+        customUse="bill"
+        contactId={contactId}
+        amountsMode={amountsMode}
+        lines={lines}
+        setLines={setLines}
+        defaultTaxCode={defaultTaxCode}
+        lineDefaults={lineDefaults}
+        contactTaxCode={contactPurchaseTaxCode(chosenSupplier, taxCodes)}
+        withDefaults={(fresh) => purchaseDefaults(fresh, chosenSupplier)}
+      />
+      <div className={ui.actions}>
+        <Button type="submit" disabled={busy}>
+          {busy ? "Saving…" : "Save draft"}
+        </Button>
+        <Button variant="secondary" onClick={onCancel}>
+          Cancel
+        </Button>
+        <span className={ui.muted}>A draft posts nothing. Approve it to post it to the ledger.</span>
+      </div>
+    </form>
+  );
+}
+
+/**
+ * The lines table and live totals for purchase documents (bills and
+ * purchase orders): items fill the supplier's price (IT6), accounts are the
+ * ones bill lines can take, and totals use the same maths as the server.
+ */
+export function PurchaseLines({
+  organisationId,
+  items,
+  baseCurrency,
+  accounts,
+  taxCodes,
+  tracking,
+  customSetup,
+  customUse,
+  contactId,
+  amountsMode,
+  lines,
+  setLines,
+  defaultTaxCode,
+  lineDefaults,
+  contactTaxCode = null,
+  withDefaults,
+}: {
+  organisationId: string;
+  items: ItemList | null;
+  baseCurrency: string;
+  accounts: Account[];
+  taxCodes: TaxCode[];
+  tracking: TrackingSetup;
+  customSetup: CustomFieldSetup;
+  customUse: "bill";
+  contactId: string;
+  amountsMode: AmountsMode;
+  lines: EditorLine[];
+  setLines: Dispatch<SetStateAction<EditorLine[]>>;
+  defaultTaxCode: string;
+  lineDefaults: CustomValues;
+  /** The supplier's default purchase tax code, if it has an active one (EX17-EX19). */
+  contactTaxCode?: string | null;
+  /** Gives a new line the supplier's default account and tracking (SD1). */
+  withDefaults?: (lines: EditorLine[]) => EditorLine[];
+}) {
+  const scale = currencyMinorUnits(baseCurrency);
+  const hasTax = amountsMode !== "no_tax";
+  const rates = new Map(taxCodes.map((taxCode) => [taxCode.code, taxCode.rate]));
+  const usable = (value: string) => isDecimalString(value) && !value.trim().startsWith("-");
+  // Live totals use the same calculation the server does when it saves.
+  const complete = lines.map(
+    (line) => usable(line.quantity) && usable(line.unitPrice) && (!hasTax || rates.has(line.taxCode)),
+  );
+  const amounts = calculateInvoice(
+    amountsMode,
+    lines.map((line, index) =>
+      complete[index]
+        ? { quantity: line.quantity, unitPrice: line.unitPrice, taxRate: hasTax ? (rates.get(line.taxCode) ?? "0") : "0" }
+        : { quantity: "0", unitPrice: "0", taxRate: "0" },
+    ),
+    scale,
+  );
+  const money = (value: string) => formatMoney(value, scale);
+
+  function update(key: number, patch: Partial<EditorLine>) {
+    setLines((current) => current.map((line) => (line.key === key ? { ...line, ...patch } : line)));
+  }
+
+  return (
+    <>
+      <div className={ui.tableWrap}>
+        <table className={`${ui.table} ${ui.stackOnPhone}`}>
+          <thead>
+            <tr>
+              <th style={{ minWidth: 220 }}>Description</th>
+              <th className={ui.num} style={{ width: 100 }}>
+                Quantity
+              </th>
+              <th className={ui.num} style={{ width: 130 }}>
+                Unit price
+              </th>
+              <th style={{ width: "20%" }}>Account</th>
+              {hasTax ? <th style={{ width: "14%" }}>Tax code</th> : null}
+              {hasTax ? <th className={ui.num}>GST</th> : null}
+              <th className={ui.num}>
+                {amountsMode === "inclusive" ? "Amount (incl. GST)" : amountsMode === "exclusive" ? "Amount (excl. GST)" : "Amount"}
+              </th>
+              <th style={{ width: 44 }} />
+            </tr>
+          </thead>
+          <tbody>
+            {lines.map((line, index) => (
+              <tr key={line.key}>
+                <td data-label="Description">
+                  <input
+                    aria-label={`Line ${index + 1} description`}
+                    value={line.description}
+                    onChange={(event) => update(line.key, { description: event.target.value })}
+                    maxLength={500}
+                    required
+                  />
+                  {line.purchaseOrderLineId ? (
+                    <div className={ui.muted}>From the purchase order (keeps its item)</div>
+                  ) : (
+                    <LineItemPicker
+                      organisationId={organisationId}
+                      items={items}
+                      side="purchase"
+                      contactId={contactId}
+                      itemId={line.itemId}
+                      unitId={line.unitId}
+                      labelPrefix={`Line ${index + 1}`}
+                      onPick={(patch) => {
+                        const { taxCode, ...rest } = patch;
+                        update(line.key, { ...rest, ...usualWithContact(taxCode, contactTaxCode) });
+                      }}
+                    />
+                  )}
+                </td>
+                <td data-label="Quantity">
+                  <input
+                    aria-label={`Line ${index + 1} quantity`}
+                    inputMode="decimal"
+                    className={ui.num}
+                    value={line.quantity}
+                    onChange={(event) => update(line.key, { quantity: event.target.value })}
+                    required
+                  />
+                </td>
+                <td data-label="Unit price">
+                  <input
+                    aria-label={`Line ${index + 1} unit price`}
+                    inputMode="decimal"
+                    className={ui.num}
+                    value={line.unitPrice}
+                    onChange={(event) => update(line.key, { unitPrice: event.target.value })}
+                    required
+                  />
+                </td>
+                <td data-label="Account">
+                  <AccountSelect
+                    ariaLabel={`Line ${index + 1} account`}
+                    accounts={accounts}
+                    filter={takesBillLines}
+                    value={line.accountCode}
+                    onChange={(code) =>
+                      update(line.key, { accountCode: code, ...usualWithContact(usualTaxCode(accounts, taxCodes, code).taxCode, contactTaxCode) })
+                    }
+                    required
+                  />
+                  <TrackingSelects
+                    setup={tracking}
+                    labelPrefix={`Line ${index + 1}`}
+                    value={line.tracking}
+                    onChange={(tags) => update(line.key, { tracking: tags })}
+                  />
+                  <CustomFieldInputs
+                    compact
+                    setup={customSetup}
+                    record="line"
+                    uses={[customUse]}
+                    labelPrefix={`Line ${index + 1}`}
+                    value={line.customFields}
+                    onChange={(values) => update(line.key, { customFields: values })}
+                  />
+                </td>
+                {hasTax ? (
+                  <td data-label="Tax code">
+                    <select
+                      aria-label={`Line ${index + 1} tax code`}
+                      value={line.taxCode}
+                      onChange={(event) => update(line.key, { taxCode: event.target.value, taxTyped: true })}
+                      required
+                    >
+                      <option value="">Choose</option>
+                      {taxCodes
+                        .filter((taxCode) => taxCode.isActive || taxCode.code === line.taxCode)
+                        .map((taxCode) => (
+                          <option key={taxCode.id} value={taxCode.code}>
+                            {taxCode.code} ({formatRate(taxCode.rate)}){unavailableNote(taxCode)}
+                          </option>
+                        ))}
+                    </select>
+                  </td>
+                ) : null}
+                {hasTax ? <td data-label="GST" className={ui.num}>{complete[index] ? money(amounts.lines[index].taxAmount) : ""}</td> : null}
+                <td data-label="Amount" className={ui.num}>{complete[index] ? money(amounts.lines[index].lineAmount) : ""}</td>
+                <td data-label="">
+                  <Button
+                    variant="secondary"
+                    size="small"
+                    aria-label={`Remove line ${index + 1}`}
+                    disabled={lines.length <= 1}
+                    onClick={() => setLines((current) => current.filter((entry) => entry.key !== line.key))}
+                  >
+                    ×
+                  </Button>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={hasTax ? 8 : 6}>
+                <Button
+                  variant="secondary"
+                  size="small"
+                  onClick={() => setLines((current) => [...current, ...(withDefaults ?? ((fresh: EditorLine[]) => fresh))([blankLine(defaultTaxCode, lineDefaults, contactTaxCode)])])}
+                >
+                  Add line
+                </Button>
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+      <div className={ui.statRow} aria-live="polite">
+        <Stat label={hasTax ? "Subtotal (excl. GST)" : "Subtotal"} value={money(amounts.subtotal)} />
+        {hasTax ? <Stat label="GST" value={money(amounts.taxTotal)} /> : null}
+        <Stat label={`Total (${baseCurrency})`} value={money(amounts.total)} />
+      </div>
+    </>
+  );
+}
+
+/**
+ * Creates a draft bill, or edits one when `bill` is given. Loads the
+ * suppliers, the accounts bill lines can go to and the tax codes to choose from.
+ */
+export function BillEditor({
+  organisationId,
+  baseCurrency,
+  bill,
+  inboxItemId,
+  onSaved,
+  onCancel,
+}: {
+  organisationId: string;
+  baseCurrency: string;
+  bill?: Bill;
+  inboxItemId?: string;
+  onSaved: (bill: Bill) => void;
+  onCancel: () => void;
+}) {
+  const accounts = useAccounts(organisationId);
+  const items = useItems(organisationId);
+  const contacts = useApiData<{ contacts: Contact[] }>("/api/contacts", { organisationId });
+  const taxCodes = useDocumentTaxCodes(organisationId);
+  const tracking = useTracking(organisationId);
+  const customSetup = useCustomFields(organisationId);
+  const error = accounts.error ?? contacts.error ?? taxCodes.error ?? tracking.error ?? customSetup.error;
+  if (error) {
+    return <Notice tone="error">{error}</Notice>;
+  }
+  if (!accounts.data || !contacts.data || !taxCodes.data || !tracking.data || !customSetup.data) {
+    return <p className={ui.muted}>Loading…</p>;
+  }
+  return (
+    <BillForm
+      organisationId={organisationId}
+      baseCurrency={baseCurrency}
+      accounts={accounts.data.accounts}
+      items={items.data}
+      contacts={contacts.data.contacts}
+      taxCodes={codesForSide(taxCodes.data.taxCodes, "purchases")}
+      tracking={tracking.data}
+      customSetup={customSetup.data}
+      bill={bill}
+      inboxItemId={inboxItemId}
+      onSaved={onSaved}
+      onCancel={onCancel}
+    />
+  );
+}

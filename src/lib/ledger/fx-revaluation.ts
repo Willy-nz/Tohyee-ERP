@@ -1,0 +1,1011 @@
+import { parseAccountCodeInput, resolveAccountsByCode } from "@/lib/accounts/service";
+import { writeAuditEvent } from "@/lib/audit";
+import { RECEIVABLES_SQL } from "@/lib/customers/service";
+import { parseIsoDate, parseOptionalIsoDate } from "@/lib/dates";
+import type { OrgTx } from "@/lib/db/org-transaction";
+import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
+import { assertSameRequest, requestHash } from "@/lib/idempotency";
+import { foreignAccountState, RUN_NOT_VOIDED } from "@/lib/ledger/foreign";
+import { type ForeignAmount, getJournal, type JournalBody, parseJournalBody, postJournalBody, sameForeign } from "@/lib/ledger/journals";
+import { currencyMinorUnits, parseCurrencyCode } from "@/lib/money/currency";
+import { PAYABLES_SQL } from "@/lib/reports/aged-payables";
+import {
+  abs,
+  add,
+  type Decimal,
+  dec,
+  isNegative,
+  isZero,
+  mul,
+  neg,
+  parseDecimalInput,
+  roundHalfUp,
+  sub,
+  toFixedString,
+  toPlainString,
+  ZERO_DECIMAL,
+} from "@/lib/money/decimal";
+import {
+  asRecord,
+  optionalSource,
+  optionalString,
+  requireArray,
+  requireId,
+  requireIdempotencyKey,
+  requireString,
+} from "@/lib/validation";
+
+export type FxRevaluationItem = {
+  lineOrder: number;
+  accountId: string;
+  accountCode: string;
+  accountName: string;
+  balanceType: "asset" | "liability";
+  currencyCode: string;
+  foreignAmount: string;
+  carryingAmount: string;
+  revaluedAmount: string;
+  closingRate: string;
+  deltaAmount: string;
+  description: string | null;
+  /**
+   * For accounts receivable or payable (MC32-MC37): each open document revalued. Empty for a bank or other account, and for revaluations from
+   * before documents were revalued one by one.
+   */
+  documents: FxRevaluationDocument[];
+};
+
+export type RevaluedDocumentKind = "invoice" | "credit_note" | "overpayment" | "bill" | "supplier_credit_note";
+
+/**
+ * One open document in a revaluation (MC32): its open foreign amount and its
+ * base value at its own rate, both in the account's normal direction (credit
+ * notes and overpayments are negative), its own rate and its unrealised
+ * amount, (closing rate - its rate) x open foreign amount, rounded once.
+ */
+export type FxRevaluationDocument = {
+  lineOrder: number;
+  kind: RevaluedDocumentKind;
+  documentId: string;
+  documentNumber: string | null;
+  documentDate: string;
+  currencyCode: string;
+  foreignAmount: string;
+  carryingAmount: string;
+  documentRate: string;
+  closingRate: string;
+  deltaAmount: string;
+};
+
+export type FxRevaluationRun = {
+  id: string;
+  reference: string;
+  description: string | null;
+  baseCurrency: string;
+  revaluationDate: string;
+  reversalPostingDate: string;
+  rateDate: string;
+  rateSource: string;
+  operatorEmail: string;
+  gainAccountCode: string;
+  lossAccountCode: string;
+  revaluationJournalId: string;
+  reversalJournalId: string;
+  createdAt: string;
+  /** Set once the revaluation has been voided (FXB12): it then counts nowhere. */
+  voided: FxRevaluationVoid | null;
+  items: FxRevaluationItem[];
+};
+
+export type FxRevaluationVoid = {
+  /** Reverses the revaluation journal, dated the revaluation date. */
+  voidJournalId: string;
+  /** Reverses the automatic reversal journal, dated the reversal date. */
+  voidReversalJournalId: string;
+  voidedByEmail: string;
+  voidedAt: string;
+};
+
+type RunRow = {
+  id: string;
+  request_hash: string;
+  reference: string;
+  description: string | null;
+  base_currency: string;
+  revaluation_date: string;
+  reversal_posting_date: string;
+  rate_date: string;
+  rate_source: string;
+  operator_email: string;
+  gain_code: string;
+  loss_code: string;
+  revaluation_journal_id: string;
+  reversal_journal_id: string;
+  created_at: string;
+  void_journal_id: string | null;
+  void_reversal_journal_id: string | null;
+  voided_by_email: string | null;
+  voided_at: string | null;
+};
+
+const RUN_SELECT = `
+  select r.id, r.request_hash, r.reference, r.description, r.base_currency, r.revaluation_date,
+         r.reversal_posting_date, r.rate_date, r.rate_source, r.operator_email,
+         g.code as gain_code, l.code as loss_code,
+         r.revaluation_journal_id, r.reversal_journal_id, r.created_at,
+         v.void_journal_id::text, v.void_reversal_journal_id::text, v.voided_by_email, v.voided_at
+    from ledger_fx_revaluation_runs r
+    join accounts g on g.id = r.unrealised_gain_account_id
+    join accounts l on l.id = r.unrealised_loss_account_id
+    left join ledger_fx_revaluation_voids v on v.run_id = r.id`;
+
+async function loadRuns(tx: OrgTx, where: string, values: unknown[], limit = 50): Promise<FxRevaluationRun[]> {
+  const runs = await tx.query<RunRow>(`${RUN_SELECT} ${where} order by r.id desc limit ${limit}`, values);
+  if (runs.rows.length === 0) {
+    return [];
+  }
+  const items = await tx.query<{
+    run_id: string;
+    line_order: number;
+    account_id: string;
+    code: string;
+    name: string;
+    balance_type: "asset" | "liability";
+    currency_code: string;
+    foreign_amount: string;
+    carrying_amount: string;
+    revalued_amount: string;
+    closing_rate: string;
+    delta_amount: string;
+    description: string | null;
+  }>(
+    `select i.run_id, i.line_order, i.account_id, a.code, a.name, i.balance_type, i.currency_code,
+            i.foreign_amount, i.carrying_amount, i.revalued_amount, i.closing_rate,
+            i.delta_amount, i.description
+       from ledger_fx_revaluation_run_items i
+       join accounts a on a.id = i.account_id
+      where i.run_id = any($1::bigint[])
+      order by i.run_id, i.line_order`,
+    [runs.rows.map((run) => run.id)],
+  );
+  const documents = await tx.query<{
+    run_id: string;
+    item_line_order: number;
+    line_order: number;
+    document_kind: RevaluedDocumentKind;
+    document_id: string;
+    document_number: string | null;
+    document_date: string;
+    currency_code: string;
+    foreign_amount: string;
+    carrying_amount: string;
+    document_rate: string;
+    closing_rate: string;
+    delta_amount: string;
+  }>(
+    `select d.run_id, d.item_line_order, d.line_order, d.document_kind, d.document_id::text, d.document_number,
+            d.document_date::text, d.currency_code, d.foreign_amount::text, d.carrying_amount::text,
+            d.document_rate::text, d.closing_rate::text, d.delta_amount::text
+       from ledger_fx_revaluation_documents d
+      where d.run_id = any($1::bigint[])
+      order by d.run_id, d.line_order`,
+    [runs.rows.map((run) => run.id)],
+  );
+  const documentsOf = (runId: string, itemLineOrder: number): FxRevaluationDocument[] =>
+    documents.rows
+      .filter((row) => row.run_id === runId && row.item_line_order === itemLineOrder)
+      .map((row) => ({
+        lineOrder: row.line_order,
+        kind: row.document_kind,
+        documentId: row.document_id,
+        documentNumber: row.document_number,
+        documentDate: row.document_date,
+        currencyCode: row.currency_code,
+        foreignAmount: row.foreign_amount,
+        carryingAmount: row.carrying_amount,
+        documentRate: toPlainString(dec(row.document_rate)),
+        closingRate: toPlainString(dec(row.closing_rate)),
+        deltaAmount: row.delta_amount,
+      }));
+  return runs.rows.map((run) => ({
+    id: run.id,
+    reference: run.reference,
+    description: run.description,
+    baseCurrency: run.base_currency,
+    revaluationDate: run.revaluation_date,
+    reversalPostingDate: run.reversal_posting_date,
+    rateDate: run.rate_date,
+    rateSource: run.rate_source,
+    operatorEmail: run.operator_email,
+    gainAccountCode: run.gain_code,
+    lossAccountCode: run.loss_code,
+    revaluationJournalId: run.revaluation_journal_id,
+    reversalJournalId: run.reversal_journal_id,
+    createdAt: run.created_at,
+    voided:
+      run.void_journal_id === null
+        ? null
+        : {
+            voidJournalId: run.void_journal_id,
+            voidReversalJournalId: run.void_reversal_journal_id!,
+            voidedByEmail: run.voided_by_email!,
+            voidedAt: run.voided_at!,
+          },
+    items: items.rows
+      .filter((item) => item.run_id === run.id)
+      .map((item) => ({
+        lineOrder: item.line_order,
+        accountId: item.account_id,
+        accountCode: item.code,
+        accountName: item.name,
+        balanceType: item.balance_type,
+        currencyCode: item.currency_code,
+        foreignAmount: item.foreign_amount,
+        carryingAmount: item.carrying_amount,
+        revaluedAmount: item.revalued_amount,
+        closingRate: item.closing_rate,
+        deltaAmount: item.delta_amount,
+        description: item.description,
+        documents: documentsOf(run.id, item.line_order),
+      })),
+  }));
+}
+
+/**
+ * The foreign balance to revalue, in the account's normal direction: the
+ * ledger's (FXB7) when it's known, and then a typed one must agree; otherwise
+ * the typed one (F1-F7 for accounts with postings from before Tohyee kept
+ * foreign amounts and no opening foreign balance).
+ */
+async function revaluedForeignAmount(
+  tx: OrgTx,
+  account: { id: string; code: string; accountClass: string; currencyCode: string | null },
+  typed: string | null,
+  revaluationDate: string,
+): Promise<string> {
+  const state = await foreignAccountState(tx, account.id, revaluationDate);
+  const scale = currencyMinorUnits(account.currencyCode!);
+  if (state.foreignBalance === null) {
+    if (typed === null) {
+      throw new ValidationError(
+        `Account ${account.code} has postings from before Tohyee kept foreign amounts, so type its ${account.currencyCode} balance on ${revaluationDate} (or enter its opening foreign balance on the bank account first).`,
+      );
+    }
+    return typed;
+  }
+  const signed = dec(state.foreignBalance);
+  const normal = toFixedString(account.accountClass === "asset" ? signed : { units: -signed.units, scale: signed.scale }, scale);
+  if (typed !== null && toFixedString(dec(typed), scale) !== normal) {
+    throw new ValidationError(
+      `Account ${account.code}: the ledger has ${account.currencyCode} ${normal} on ${revaluationDate}, not ${toFixedString(dec(typed), scale)}. Leave the foreign amount blank to use the ledger's.`,
+    );
+  }
+  return normal;
+}
+
+/**
+ * Refuses revaluing an account in a currency while an earlier revaluation of
+ * it isn't reversed yet (MC8 for receivables and payables, FXB13 for bank and
+ * other accounts): Tohyee's reverse on a date the user picks, so
+ * revaluing from that revaluation's rate isn't supported. Voided
+ * revaluations don't count (FXB12).
+ */
+async function refuseOverlappingRevaluation(
+  tx: OrgTx,
+  account: { id: string; code: string },
+  currencyCode: string,
+  revaluationDate: string,
+): Promise<void> {
+  const unreversed = await tx.query<{ reference: string; revaluation_date: string; reversal_posting_date: string }>(
+    `select r.reference, r.revaluation_date::text, r.reversal_posting_date::text
+       from ledger_fx_revaluation_run_items i join ledger_fx_revaluation_runs r on r.id = i.run_id
+      where i.account_id = $1 and i.currency_code = $2 and i.revaluation_date < $3 and r.reversal_posting_date > $3
+        and ${RUN_NOT_VOIDED}
+      order by r.revaluation_date limit 1`,
+    [account.id, currencyCode, revaluationDate],
+  );
+  if (unreversed.rows[0]) {
+    const earlier = unreversed.rows[0];
+    throw new ValidationError(
+      `Account ${account.code} ${currencyCode} was revalued on ${earlier.revaluation_date} (${earlier.reference}), and that isn't reversed until ${earlier.reversal_posting_date}. Revaluing it again before then isn't supported yet.`,
+    );
+  }
+}
+
+/** Whether an account is accounts receivable or payable, which hold foreign-currency documents (MC8). */
+function isControlAccount(account: { systemKey: string | null }): boolean {
+  return account.systemKey === "accounts_receivable" || account.systemKey === "accounts_payable";
+}
+
+/**
+ * The open foreign-currency balance on accounts receivable or payable in one
+ * currency as at a date (MC8): the foreign amounts of its lines in that
+ * currency (debits less credits) and their base amounts, both in the
+ * account's normal direction (a credit balance on payables is positive).
+ */
+export async function openCurrencyBalance(
+  tx: OrgTx,
+  account: { id: string; accountClass: string },
+  currencyCode: string,
+  asAt: string,
+): Promise<{ foreign: string; base: string }> {
+  const totals = (
+    await tx.query<{ foreign: string; base: string }>(
+      `select coalesce(sum(l.account_amount), 0)::text as foreign, coalesce(sum(l.debit_amount - l.credit_amount), 0)::text as base
+         from ledger_journal_lines l join ledger_journals j on j.id = l.journal_id
+        where l.account_id = $1 and l.foreign_currency_code = $2 and j.posting_date <= $3`,
+      [account.id, currencyCode, asAt],
+    )
+  ).rows[0];
+  const flip = account.accountClass !== "asset";
+  const signed = (value: string) => (flip ? neg(dec(value)) : dec(value));
+  return {
+    foreign: toFixedString(signed(totals.foreign), currencyMinorUnits(currencyCode)),
+    base: toFixedString(signed(totals.base), currencyMinorUnits(tx.baseCurrency)),
+  };
+}
+
+export type OpenForeignDocument = {
+  kind: RevaluedDocumentKind;
+  documentId: string;
+  documentNumber: string | null;
+  documentDate: string;
+  /** Open, in the document's currency, in the account's normal direction (credit notes and overpayments are negative). */
+  foreign: string;
+  /** Its open base value at its own rate, the same way round. */
+  base: string;
+  rate: string;
+};
+
+/**
+ * The open foreign-currency documents on accounts receivable (invoices,
+ * credit notes and overpayments) or payable (bills and supplier credit
+ * notes) in one currency as at a date (MC32), from the same documents as
+ * aged receivables and payables.
+ */
+export async function openForeignDocuments(
+  tx: OrgTx,
+  systemKey: "accounts_receivable" | "accounts_payable",
+  currencyCode: string,
+  asAt: string,
+): Promise<OpenForeignDocument[]> {
+  const sql =
+    systemKey === "accounts_receivable"
+      ? `${RECEIVABLES_SQL}
+         select 'invoice' as kind, i.id::text, i.invoice_number as number, i.invoice_date::text as date,
+                i.amount_due::text as foreign, i.amount_due_base::text as base, s.exchange_rate::text as rate
+           from invoices i join sales_invoices s on s.id = i.id
+          where s.currency_code = $2 and s.exchange_rate is not null and (i.amount_due <> 0 or i.amount_due_base <> 0)
+         union all
+         select 'credit_note', n.id::text, n.credit_note_number, n.credit_note_date::text,
+                (-n.unused)::text, (-n.base_unused)::text, s.exchange_rate::text
+           from credit_notes_open n join sales_credit_notes s on s.id = n.id
+          where s.currency_code = $2 and s.exchange_rate is not null and (n.unused <> 0 or n.base_unused <> 0)
+         union all
+         select 'overpayment', o.id::text, 'Overpayment on ' || o.invoice_number, o.payment_date::text,
+                (-o.unused)::text, (-o.base_unused)::text, p.exchange_rate::text
+           from overpayments_open o join customer_payments p on p.id = o.id
+          where p.currency_code = $2 and p.exchange_rate is not null and (o.unused <> 0 or o.base_unused <> 0)
+         order by 4, 1, 2`
+      : `${PAYABLES_SQL}
+         select 'bill' as kind, b.id::text, b.supplier_invoice_number as number, b.bill_date::text as date,
+                b.amount_due::text as foreign, b.amount_due_base::text as base, d.exchange_rate::text as rate
+           from bills_due b join bills d on d.id = b.id
+          where d.currency_code = $2 and d.exchange_rate is not null and (b.amount_due <> 0 or b.amount_due_base <> 0)
+         union all
+         select 'supplier_credit_note', c.id::text, c.supplier_credit_note_number, c.credit_note_date::text,
+                (-c.unused)::text, (-c.unused_base)::text, n.exchange_rate::text
+           from credit c join supplier_credit_notes n on n.id = c.id
+          where n.currency_code = $2 and n.exchange_rate is not null and (c.unused <> 0 or c.unused_base <> 0)
+         order by 4, 1, 2`;
+  const rows = await tx.query<{ kind: RevaluedDocumentKind; id: string; number: string | null; date: string; foreign: string; base: string; rate: string }>(
+    sql,
+    [asAt, currencyCode],
+  );
+  return rows.rows.map((row) => ({
+    kind: row.kind,
+    documentId: row.id,
+    documentNumber: row.number,
+    documentDate: row.date,
+    foreign: toFixedString(dec(row.foreign), currencyMinorUnits(currencyCode)),
+    base: toFixedString(dec(row.base), currencyMinorUnits(tx.baseCurrency)),
+    rate: toPlainString(dec(row.rate)),
+  }));
+}
+
+/** Open foreign-currency balances on accounts receivable and payable as at a date, for the revaluation screen and period close (MC8), with their open documents (MC32). */
+export async function openCurrencyBalances(
+  tx: OrgTx,
+  asAt: string,
+): Promise<
+  Array<{ accountId: string; accountCode: string; accountName: string; currencyCode: string; foreign: string; base: string; documents: OpenForeignDocument[] }>
+> {
+  const rows = await tx.query<{ id: string; code: string; name: string; account_class: string; system_key: "accounts_receivable" | "accounts_payable"; currency: string }>(
+    `select distinct a.id::text, a.code, a.name, a.account_class, a.system_key, l.foreign_currency_code as currency
+       from ledger_journal_lines l join ledger_journals j on j.id = l.journal_id join accounts a on a.id = l.account_id
+      where a.system_key in ('accounts_receivable', 'accounts_payable') and l.foreign_currency_code is not null and j.posting_date <= $1
+      order by a.code, l.foreign_currency_code`,
+    [asAt],
+  );
+  const out = [];
+  for (const row of rows.rows) {
+    const balance = await openCurrencyBalance(tx, { id: row.id, accountClass: row.account_class }, row.currency, asAt);
+    if (isZero(dec(balance.foreign)) && isZero(dec(balance.base))) continue;
+    const documents = await openForeignDocuments(tx, row.system_key, row.currency, asAt);
+    out.push({ accountId: row.id, accountCode: row.code, accountName: row.name, currencyCode: row.currency, ...balance, documents });
+  }
+  return out;
+}
+
+/**
+ * Revalues the open documents on accounts receivable or payable in one
+ * currency (MC32-MC37): each open invoice, bill, credit note or overpayment on its own, by
+ * (closing rate - its own rate) x its open foreign amount, rounded once to
+ * cents (rounding each document is the choice made). The account and currency's total is the sum. Refused:
+ * nothing open; a typed foreign amount that doesn't agree; documents whose
+ * total doesn't agree with the ledger (period close's check); and an earlier
+ * revaluation of the same balance not yet reversed by the date (Tohyee's
+ * always reverse the next day, so revaluing from that revaluation's rate
+ * isn't supported).
+ */
+async function revalueOpenDocuments(
+  tx: OrgTx,
+  account: { id: string; code: string; name: string; accountClass: string; systemKey: string | null },
+  currencyCode: string,
+  typed: string | null,
+  closingRate: string,
+  revaluationDate: string,
+): Promise<{ foreignAmount: string; carrying: string; revalued: string; delta: Decimal; documents: Array<OpenForeignDocument & { delta: string }> }> {
+  const foreignScale = currencyMinorUnits(currencyCode);
+  const baseScale = currencyMinorUnits(tx.baseCurrency);
+  await refuseOverlappingRevaluation(tx, account, currencyCode, revaluationDate);
+  const systemKey = account.systemKey === "accounts_payable" ? "accounts_payable" : "accounts_receivable";
+  const documents = await openForeignDocuments(tx, systemKey, currencyCode, revaluationDate);
+  if (documents.length === 0) {
+    throw new ValidationError(`Account ${account.code} has nothing open in ${currencyCode} on ${revaluationDate}, so there's nothing to revalue.`);
+  }
+  const foreign = documents.reduce((total, document) => add(total, dec(document.foreign)), ZERO_DECIMAL);
+  const carrying = documents.reduce((total, document) => add(total, dec(document.base)), ZERO_DECIMAL);
+  const foreignAmount = toFixedString(foreign, foreignScale);
+  if (typed !== null && toFixedString(dec(typed), foreignScale) !== foreignAmount) {
+    throw new ValidationError(
+      `Account ${account.code}: the ledger has ${currencyCode} ${foreignAmount} open on ${revaluationDate}, not ${toFixedString(dec(typed), foreignScale)}. Leave the foreign amount blank to use the ledger's.`,
+    );
+  }
+  const ledger = await openCurrencyBalance(tx, account, currencyCode, revaluationDate);
+  if (ledger.foreign !== foreignAmount || ledger.base !== toFixedString(carrying, baseScale)) {
+    throw new ValidationError(
+      `Account ${account.code}'s ${currencyCode} balance on ${revaluationDate} (${currencyCode} ${ledger.foreign}, ${tx.baseCurrency} ${ledger.base}) doesn't agree with its open documents (${currencyCode} ${foreignAmount}, ${tx.baseCurrency} ${toFixedString(carrying, baseScale)}), so they can't be revalued one by one. Period close's check lists the difference.`,
+    );
+  }
+  if (isZero(foreign)) {
+    throw new ValidationError(
+      `Account ${account.code}'s open ${currencyCode} documents come to ${currencyCode} 0.00 on ${revaluationDate}; revaluing them isn't supported yet. Apply the credit to the invoices first.`,
+    );
+  }
+  let delta = ZERO_DECIMAL;
+  const revalued = documents.map((document) => {
+    const change = roundHalfUp(mul(sub(dec(closingRate), dec(document.rate)), dec(document.foreign)), baseScale);
+    delta = add(delta, change);
+    return { ...document, delta: toFixedString(change, baseScale) };
+  });
+  return {
+    foreignAmount,
+    carrying: toFixedString(carrying, baseScale),
+    revalued: toFixedString(add(carrying, delta), baseScale),
+    delta,
+    documents: revalued,
+  };
+}
+
+export async function listFxRevaluations(
+  tx: OrgTx,
+  filters: { revaluationDateFrom?: unknown; revaluationDateTo?: unknown } = {},
+): Promise<FxRevaluationRun[]> {
+  const from = parseOptionalIsoDate(filters.revaluationDateFrom, "revaluationDateFrom");
+  const to = parseOptionalIsoDate(filters.revaluationDateTo, "revaluationDateTo");
+  return loadRuns(
+    tx,
+    "where ($1::date is null or r.revaluation_date >= $1) and ($2::date is null or r.revaluation_date <= $2)",
+    [from, to],
+  );
+}
+
+/**
+ * Period-end revaluation of foreign-currency asset and liability accounts.
+ *
+ * For each account you give the foreign-currency balance and the closing
+ * rate (units of base currency per 1 unit of foreign currency). Tohyee then:
+ * - takes the carrying amount from the ledger (the account's base-currency
+ *   balance as at the revaluation date),
+ * - computes the revalued amount = foreign amount x rate, rounded to cents,
+ * - posts the difference to the unrealised gain/loss accounts, and
+ * - posts an automatic reversal on the reversal date, so unrealised
+ *   movements are never double counted across periods.
+ */
+export async function postFxRevaluation(
+  tx: OrgTx,
+  input: {
+    source?: unknown;
+    idempotencyKey: unknown;
+    reference: unknown;
+    description?: unknown;
+    revaluationDate: unknown;
+    reversalPostingDate: unknown;
+    rateDate: unknown;
+    rateSource: unknown;
+    unrealisedGainAccountCode: unknown;
+    unrealisedLossAccountCode: unknown;
+    balances: unknown;
+  },
+): Promise<{ created: boolean; run: FxRevaluationRun }> {
+  const source = optionalSource(input.source);
+  const idempotencyKey = requireIdempotencyKey(input.idempotencyKey);
+  const reference = requireString(input.reference, "reference", { maxLength: 100 });
+  const description = optionalString(input.description, "description", { maxLength: 500 });
+  const revaluationDate = parseIsoDate(input.revaluationDate, "revaluationDate");
+  const reversalPostingDate = parseIsoDate(input.reversalPostingDate, "reversalPostingDate");
+  if (reversalPostingDate <= revaluationDate) {
+    throw new ValidationError("The reversal date must be after the revaluation date.");
+  }
+  const rateDate = parseIsoDate(input.rateDate, "rateDate");
+  const rateSource = requireString(input.rateSource, "rateSource", { maxLength: 100 });
+  const gainCode = parseAccountCodeInput(input.unrealisedGainAccountCode, "unrealisedGainAccountCode");
+  const lossCode = parseAccountCodeInput(input.unrealisedLossAccountCode, "unrealisedLossAccountCode");
+
+  const rawBalances = requireArray(input.balances, "balances", 200);
+  if (rawBalances.length === 0) {
+    throw new ValidationError("Add at least one foreign-currency balance to revalue.");
+  }
+  const balances = rawBalances.map((raw, index) => {
+    const label = `Balance ${index + 1}`;
+    const record = asRecord(raw, label);
+    const accountCode = parseAccountCodeInput(record.accountCode, `${label} account`);
+    const currencyCode =
+      record.currencyCode == null || record.currencyCode === ""
+        ? null
+        : parseCurrencyCode(record.currencyCode, `${label} currency`);
+    return {
+      accountCode,
+      claimedCurrency: currencyCode,
+      foreignAmountRaw: record.foreignAmount,
+      closingRate: parseDecimalInput(record.closingRate, `${label} closing rate`, { maxScale: 8 }),
+      description: optionalString(record.description, `${label} description`, { maxLength: 200 }),
+    };
+  });
+  const seen = new Set<string>();
+  for (const balance of balances) {
+    const key = `${balance.accountCode.toLowerCase()}|${balance.claimedCurrency ?? ""}`;
+    if (seen.has(key)) {
+      throw new ValidationError(
+        `Account ${balance.accountCode}${balance.claimedCurrency ? ` (${balance.claimedCurrency})` : ""} is listed more than once.`,
+      );
+    }
+    seen.add(key);
+  }
+
+  const commandSource = `fx:${source}`;
+  const accounts = await resolveAccountsByCode(tx, [gainCode, lossCode, ...balances.map((b) => b.accountCode)]);
+  const gain = accounts.get(gainCode)!;
+  const loss = accounts.get(lossCode)!;
+  for (const [label, account] of [
+    ["gain", gain],
+    ["loss", loss],
+  ] as const) {
+    if (account.accountClass !== "revenue" && account.accountClass !== "expense") {
+      throw new ValidationError(`The unrealised ${label} account must be an income or expense account.`);
+    }
+  }
+
+  const baseScale = currencyMinorUnits(tx.baseCurrency);
+  const prepared = balances.map((balance) => {
+    const account = accounts.get(balance.accountCode)!;
+    if (account.accountClass !== "asset" && account.accountClass !== "liability") {
+      throw new ValidationError(`Account ${account.code} isn't an asset or liability account.`);
+    }
+    // Accounts receivable and payable: their open balance in one foreign currency (MC8).
+    if (isControlAccount(account) && (!account.currencyCode || account.currencyCode === tx.baseCurrency)) {
+      if (!balance.claimedCurrency || balance.claimedCurrency === tx.baseCurrency) {
+        throw new ValidationError(
+          `Account ${account.code} (${account.name}) holds documents in several currencies. Say which currency to revalue (e.g. USD).`,
+        );
+      }
+      const typed =
+        balance.foreignAmountRaw == null || balance.foreignAmountRaw === ""
+          ? null
+          : parseDecimalInput(balance.foreignAmountRaw, `${account.code} foreign amount`, {
+              maxScale: currencyMinorUnits(balance.claimedCurrency),
+              allowNegative: true,
+            });
+      return { balance, account, typed, currencyCode: balance.claimedCurrency, control: true };
+    }
+    if (!account.currencyCode) {
+      throw new ValidationError(
+        `Account ${account.code} (${account.name}) is a ${tx.baseCurrency} account. Set its currency in the chart of accounts before revaluing it.`,
+      );
+    }
+    if (balance.claimedCurrency && balance.claimedCurrency !== account.currencyCode) {
+      throw new ValidationError(`Account ${account.code} is in ${account.currencyCode}, not ${balance.claimedCurrency}.`);
+    }
+    // With a known foreign balance (FXB7) it needn't be typed; otherwise it must be.
+    const typed =
+      balance.foreignAmountRaw == null || balance.foreignAmountRaw === ""
+        ? null
+        : parseDecimalInput(balance.foreignAmountRaw, `${account.code} foreign amount`, {
+            maxScale: currencyMinorUnits(account.currencyCode),
+          });
+    return { balance, account, typed, currencyCode: account.currencyCode, control: false };
+  });
+
+  const hash = requestHash("fx_revaluation", {
+    reference,
+    description,
+    revaluationDate,
+    reversalPostingDate,
+    rateDate,
+    rateSource,
+    gain: gainCode.toLowerCase(),
+    loss: lossCode.toLowerCase(),
+    balances: prepared.map((item) => ({
+      account: item.balance.accountCode.toLowerCase(),
+      // Only for accounts receivable and payable, so earlier revaluations hash the same.
+      ...(item.control ? { currencyCode: item.currencyCode } : {}),
+      foreignAmount: item.typed,
+      closingRate: item.balance.closingRate,
+      description: item.balance.description,
+    })),
+  });
+
+  const existing = await tx.query<{ id: string; request_hash: string }>(
+    `select id, request_hash from ledger_fx_revaluation_runs
+      where command_source = $1 and idempotency_key = $2`,
+    [commandSource, idempotencyKey],
+  );
+  if (existing.rows[0]) {
+    assertSameRequest(existing.rows[0].request_hash, hash, "FX revaluation");
+    const [run] = await loadRuns(tx, "where r.id = $1", [existing.rows[0].id], 1);
+    return { created: false, run };
+  }
+
+  // Revaluing and voiding the same accounts wait for each other.
+  await tx.query("select id from accounts where id = any($1::bigint[]) order by id for update", [prepared.map((item) => item.account.id)]);
+  // F5: once per account, currency and date; a voided revaluation doesn't count (FXB12).
+  const already = await tx.query<{ code: string; currency_code: string }>(
+    `select a.code, i.currency_code from ledger_fx_revaluation_run_items i
+       join ledger_fx_revaluation_runs r on r.id = i.run_id
+       join accounts a on a.id = i.account_id
+      where i.revaluation_date = $1 and (i.account_id, i.currency_code) in (select * from unnest($2::bigint[], $3::text[]))
+        and ${RUN_NOT_VOIDED}`,
+    [revaluationDate, prepared.map((item) => item.account.id), prepared.map((item) => item.currencyCode)],
+  );
+  if (already.rows.length > 0) {
+    throw new ConflictError(
+      `${already.rows.map((row) => `${row.code} (${row.currency_code})`).join(", ")} already revalued on ${revaluationDate}.`,
+    );
+  }
+
+  type Computed = (typeof prepared)[number] & {
+    foreignAmount: string;
+    carrying: string;
+    revalued: string;
+    delta: Decimal;
+    documents: Array<OpenForeignDocument & { delta: string }>;
+  };
+  const computed: Computed[] = [];
+  for (const item of prepared) {
+    if (item.control) {
+      computed.push({ ...item, ...(await revalueOpenDocuments(tx, item.account, item.currencyCode, item.typed, item.balance.closingRate, revaluationDate)) });
+      continue;
+    }
+    // FXB13: as for receivables and payables, not while an earlier revaluation isn't reversed yet.
+    await refuseOverlappingRevaluation(tx, item.account, item.currencyCode, revaluationDate);
+    const totals = await tx.query<{ debits: string; credits: string }>(
+      `select coalesce(sum(l.debit_amount), 0)::text as debits,
+              coalesce(sum(l.credit_amount), 0)::text as credits
+         from ledger_journal_lines l
+         join ledger_journals j on j.id = l.journal_id
+        where l.account_id = $1 and j.posting_date <= $2`,
+      [item.account.id, revaluationDate],
+    );
+    const debits = dec(totals.rows[0].debits);
+    const credits = dec(totals.rows[0].credits);
+    const carrying = item.account.accountClass === "asset" ? sub(debits, credits) : sub(credits, debits);
+    if (isNegative(carrying)) {
+      throw new ValidationError(
+        `Account ${item.account.code} has a ${item.account.accountClass === "asset" ? "credit" : "debit"} balance on ${revaluationDate}, which this revaluation can't handle. Post the adjustment as a manual journal.`,
+      );
+    }
+    const foreignAmount = await revaluedForeignAmount(tx, item.account, item.typed, revaluationDate);
+    const revalued = roundHalfUp(mul(dec(foreignAmount), dec(item.balance.closingRate)), baseScale);
+    const delta = sub(revalued, carrying);
+    computed.push({
+      ...item,
+      foreignAmount,
+      carrying: toFixedString(carrying, baseScale),
+      revalued: toFixedString(revalued, baseScale),
+      delta,
+      documents: [],
+    });
+  }
+
+  const lines: Array<{ accountCode: string; debitAmount: string; creditAmount: string; description: string; foreign?: ForeignAmount }> = [];
+  const addPair = (item: Computed, delta: Decimal, label: string) => {
+    if (isZero(delta)) return;
+    const amount = toFixedString(abs(delta), baseScale);
+    const increases = !isNegative(delta);
+    // An asset worth more, or a liability worth less, is a gain.
+    const isGain = item.account.accountClass === "asset" ? increases : !increases;
+    const accountSide = item.account.accountClass === "asset" ? increases : !increases; // debit the account?
+    lines.push({
+      accountCode: item.account.code,
+      debitAmount: accountSide ? amount : "0",
+      creditAmount: accountSide ? "0" : amount,
+      description: `FX revaluation ${label}`,
+      // Only the base value changes: a foreign amount of 0 at the closing rate (FXB7, MC8).
+      foreign: {
+        currencyCode: item.currencyCode!,
+        amount: toFixedString(dec("0"), currencyMinorUnits(item.currencyCode!)),
+        rate: toPlainString(dec(item.balance.closingRate)),
+        kind: "revaluation",
+      },
+    });
+    lines.push({
+      accountCode: isGain ? gain.code : loss.code,
+      debitAmount: accountSide ? "0" : amount,
+      creditAmount: accountSide ? amount : "0",
+      description: `Unrealised FX ${isGain ? "gain" : "loss"} ${label}`,
+    });
+  };
+  for (const item of computed) {
+    const label = item.balance.description ?? `${item.account.code} ${item.currencyCode}`;
+    if (item.control) {
+      // One pair of lines per open document (MC32).
+      for (const document of item.documents) {
+        addPair(item, dec(document.delta), `${label} ${document.documentNumber ?? `#${document.documentId}`}`.slice(0, 200));
+      }
+    } else {
+      addPair(item, item.delta, label);
+    }
+  }
+  if (lines.length === 0) {
+    throw new ValidationError("Nothing to revalue: every balance already matches the closing rate.");
+  }
+
+  const revaluationBody: JournalBody = parseJournalBody(
+    tx,
+    {
+      postingDate: revaluationDate,
+      reference,
+      description: description ?? `FX revaluation ${reference}`,
+      lines,
+    },
+    { internal: true },
+  );
+  const reversalBody: JournalBody = parseJournalBody(tx, {
+    postingDate: reversalPostingDate,
+    reference: `REV-${reference}`.slice(0, 100),
+    description: `Automatic reversal of FX revaluation ${reference}`,
+    lines: lines.map((line) => ({
+      accountCode: line.accountCode,
+      debitAmount: line.creditAmount,
+      creditAmount: line.debitAmount,
+      description: line.description,
+      foreign: line.foreign,
+    })),
+  }, { internal: true });
+
+  const revaluationJournal = await postJournalBody(tx, commandSource, `${idempotencyKey}:journal`, revaluationBody, {
+    origin: "fx_revaluation",
+  });
+  const reversalJournal = await postJournalBody(tx, commandSource, `${idempotencyKey}:reversal`, reversalBody, {
+    origin: "fx_revaluation",
+  });
+
+  const run = await tx.query<{ id: string }>(
+    `insert into ledger_fx_revaluation_runs (
+       command_source, idempotency_key, request_hash, operator_user_id, operator_email,
+       reference, description, base_currency, revaluation_date, reversal_posting_date,
+       rate_date, rate_source, unrealised_gain_account_id, unrealised_loss_account_id,
+       revaluation_journal_id, reversal_journal_id
+     ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14, $15, $16)
+     returning id`,
+    [
+      commandSource,
+      idempotencyKey,
+      hash,
+      tx.actor.userId,
+      tx.actor.email,
+      reference,
+      description,
+      tx.baseCurrency,
+      revaluationDate,
+      reversalPostingDate,
+      rateDate,
+      rateSource,
+      gain.id,
+      loss.id,
+      revaluationJournal.journal.id,
+      reversalJournal.journal.id,
+    ],
+  );
+  const runId = run.rows[0].id;
+  for (const [index, item] of computed.entries()) {
+    await tx.query(
+      `insert into ledger_fx_revaluation_run_items (
+         run_id, line_order, account_id, balance_type, currency_code, foreign_amount,
+         carrying_amount, revalued_amount, closing_rate, delta_amount, description, revaluation_date
+       ) values ($1, $2, $3, $4, $5, $6::numeric, $7::numeric, $8::numeric, $9::numeric, $10::numeric, $11, $12)`,
+      [
+        runId,
+        index + 1,
+        item.account.id,
+        item.account.accountClass,
+        item.currencyCode,
+        item.foreignAmount,
+        item.carrying,
+        item.revalued,
+        item.balance.closingRate,
+        toFixedString(item.delta, baseScale),
+        item.balance.description,
+        revaluationDate,
+      ],
+    );
+  }
+  let documentLine = 0;
+  for (const [index, item] of computed.entries()) {
+    for (const document of item.documents) {
+      documentLine += 1;
+      await tx.query(
+        `insert into ledger_fx_revaluation_documents (
+           run_id, item_line_order, line_order, document_kind, document_id, document_number, document_date, currency_code,
+           foreign_amount, carrying_amount, document_rate, closing_rate, delta_amount
+         ) values ($1, $2, $3, $4, $5, $6, $7, $8, $9::numeric, $10::numeric, $11::numeric, $12::numeric, $13::numeric)`,
+        [
+          runId,
+          index + 1,
+          documentLine,
+          document.kind,
+          document.documentId,
+          document.documentNumber,
+          document.documentDate,
+          item.currencyCode,
+          document.foreign,
+          document.base,
+          document.rate,
+          item.balance.closingRate,
+          document.delta,
+        ],
+      );
+    }
+  }
+
+  await writeAuditEvent(tx, {
+    eventType: "ledger.fx_revaluation_posted",
+    entityType: "ledger_fx_revaluation_run",
+    entityId: runId,
+    details: {
+      reference,
+      revaluationDate,
+      reversalPostingDate,
+      rateDate,
+      rateSource,
+      revaluationJournalId: revaluationJournal.journal.id,
+      reversalJournalId: reversalJournal.journal.id,
+      balances: computed.map((item) => ({
+        account: item.account.code,
+        currency: item.currencyCode,
+        foreignAmount: item.foreignAmount,
+        closingRate: item.balance.closingRate,
+        carrying: item.carrying,
+        revalued: item.revalued,
+        delta: toFixedString(item.delta, baseScale),
+        ...(item.control
+          ? { documents: item.documents.map((document) => ({ kind: document.kind, id: document.documentId, foreign: document.foreign, rate: document.rate, delta: document.delta })) }
+          : {}),
+      })),
+    },
+  });
+
+  const [created] = await loadRuns(tx, "where r.id = $1", [runId], 1);
+  return { created: true, run: created };
+}
+
+/**
+ * Voids a revaluation, the whole run (FXB12): posts the exact reversal of its
+ * journal, dated the revaluation date, and of its automatic reversal journal,
+ * dated the reversal date (period locks apply to both). Refused once a later
+ * revaluation of any of its accounts exists, and when it's already voided.
+ * The run is kept, shown as voided; it then counts nowhere (FXB12, FXB13, F5,
+ * the rate shown on statement lines).
+ */
+export async function voidFxRevaluation(
+  tx: OrgTx,
+  runIdInput: unknown,
+  command: { source?: unknown; idempotencyKey: unknown },
+): Promise<{ created: boolean; run: FxRevaluationRun }> {
+  const id = requireId(runIdInput, "revaluationId");
+  const source = optionalSource(command.source);
+  const idempotencyKey = requireIdempotencyKey(command.idempotencyKey);
+  const hash = requestHash("fx_revaluation_void", { id });
+  const replay = async () => {
+    const earlier = await tx.query<{ run_id: string; request_hash: string }>(
+      "select run_id::text, request_hash from ledger_fx_revaluation_voids where command_source = $1 and idempotency_key = $2",
+      [source, idempotencyKey],
+    );
+    if (!earlier.rows[0]) return null;
+    assertSameRequest(earlier.rows[0].request_hash, hash, "FX revaluation void");
+    const [run] = await loadRuns(tx, "where r.id = $1", [earlier.rows[0].run_id], 1);
+    return { created: false, run };
+  };
+  const earlier = await replay();
+  if (earlier) return earlier;
+  const [run] = await loadRuns(tx, "where r.id = $1", [id], 1);
+  if (!run) throw new NotFoundError("Revaluation not found.");
+  // Revaluing and voiding the same accounts wait for each other.
+  await tx.query("select id from accounts where id = any($1::bigint[]) order by id for update", [run.items.map((item) => item.accountId)]);
+  const meanwhile = await replay();
+  if (meanwhile) return meanwhile;
+  const voided = await tx.query("select 1 from ledger_fx_revaluation_voids where run_id = $1", [id]);
+  if ((voided.rowCount ?? 0) > 0) throw new ConflictError(`${run.reference} has already been voided.`);
+  const later = await tx.query<{ reference: string; revaluation_date: string; code: string; currency_code: string }>(
+    `select r.reference, r.revaluation_date::text, a.code, i.currency_code
+       from ledger_fx_revaluation_run_items i join ledger_fx_revaluation_runs r on r.id = i.run_id join accounts a on a.id = i.account_id
+      where (i.account_id, i.currency_code) in (select * from unnest($1::bigint[], $2::text[]))
+        and r.id <> $3 and (i.revaluation_date > $4 or (i.revaluation_date = $4 and r.id > $3)) and ${RUN_NOT_VOIDED}
+      order by i.revaluation_date desc, r.id desc limit 1`,
+    [run.items.map((item) => item.accountId), run.items.map((item) => item.currencyCode), id, run.revaluationDate],
+  );
+  if (later.rows[0]) {
+    const row = later.rows[0];
+    throw new ConflictError(
+      `${row.code} ${row.currency_code} was revalued again on ${row.revaluation_date} (${row.reference}), after ${run.reference}. Void that revaluation first.`,
+    );
+  }
+  const reverse = async (journalId: string, key: string, label: string) => {
+    const original = await getJournal(tx, journalId);
+    return postJournalBody(
+      tx,
+      "fx_revaluation:void",
+      `${id}:${key}`,
+      parseJournalBody(
+        tx,
+        {
+          postingDate: original.postingDate,
+          reference: `VOID-${original.reference}`.slice(0, 100),
+          description: `Void of ${label} ${run.reference}`.slice(0, 500),
+          lines: original.lines.map((line) => ({
+            accountCode: line.accountCode,
+            debitAmount: line.creditAmount,
+            creditAmount: line.debitAmount,
+            description: line.description,
+            ...sameForeign(line),
+          })),
+        },
+        { internal: true },
+      ),
+      { origin: "fx_revaluation", relatedJournalId: original.id, correctionKind: "reversal" },
+    );
+  };
+  const voidJournal = await reverse(run.revaluationJournalId, "journal", "FX revaluation");
+  const voidReversal = await reverse(run.reversalJournalId, "reversal", "the automatic reversal of FX revaluation");
+  await tx.query(
+    `insert into ledger_fx_revaluation_voids (run_id, command_source, idempotency_key, request_hash, void_journal_id, void_reversal_journal_id,
+                                              voided_by_user_id, voided_by_email)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)`,
+    [id, source, idempotencyKey, hash, voidJournal.journal.id, voidReversal.journal.id, tx.actor.userId, tx.actor.email],
+  );
+  await writeAuditEvent(tx, {
+    eventType: "ledger.fx_revaluation_voided",
+    entityType: "ledger_fx_revaluation_run",
+    entityId: id,
+    details: {
+      reference: run.reference,
+      revaluationDate: run.revaluationDate,
+      reversalPostingDate: run.reversalPostingDate,
+      voidJournalId: voidJournal.journal.id,
+      voidReversalJournalId: voidReversal.journal.id,
+    },
+  });
+  const [updated] = await loadRuns(tx, "where r.id = $1", [id], 1);
+  return { created: true, run: updated };
+}

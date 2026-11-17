@@ -1,0 +1,24 @@
+.git
+.github
+node_modules
+.next
+dist
+coverage
+tests
+docs
+deploy
+.env
+.env.*
+*.log
+relay
+# Data a local copy writes at run time: backups, analytics' DuckDB
+# copies of the books, and data. Never part of an image.
+analytics
+backups
+data
+# Coding agents' working copies (.claude/worktrees).
+.claude
+# The Android app is built by its own workflow, never in the server image.
+android
+android-shell
+capacitor.config.json

@@ -1,0 +1,24 @@
+import { defineConfig, globalIgnores } from "eslint/config";
+import nextVitals from "eslint-config-next/core-web-vitals";
+import nextTs from "eslint-config-next/typescript";
+
+const eslintConfig = defineConfig([
+  ...nextVitals,
+  ...nextTs,
+  // Override default ignores of eslint-config-next.
+  globalIgnores([
+    // Default ignores of eslint-config-next:
+    ".next/**",
+    "out/**",
+    "build/**",
+    "dist/**",
+    "next-env.d.ts",
+    // The Tohyee address Worker has its own tools and checks (see relay/README.md).
+    "relay/**",
+    // The Android app: Gradle's project, and the bundled page's built script.
+    "android/**",
+    "android-shell/www/**",
+  ]),
+]);
+
+export default eslintConfig;

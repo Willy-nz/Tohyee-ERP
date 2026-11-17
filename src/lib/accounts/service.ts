@@ -1,0 +1,357 @@
+import { writeAuditEvent } from "@/lib/audit";
+import {
+  ACCOUNT_TYPES,
+  type AccountClass,
+  type AccountType,
+  classOfType,
+  isAccountType,
+  type SystemKey,
+} from "@/lib/accounts/types";
+import type { OrgTx } from "@/lib/db/org-transaction";
+import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
+import { parseCurrencyCode } from "@/lib/money/currency";
+import { optionalBoolean, optionalString, requireId, requireString } from "@/lib/validation";
+
+export type Account = {
+  id: string;
+  code: string;
+  name: string;
+  accountClass: AccountClass;
+  accountType: AccountType;
+  description: string | null;
+  /** The name shown on financial reports and statements instead of `name`, if set (RN1). */
+  reportingName: string | null;
+  currencyCode: string | null;
+  systemKey: SystemKey | null;
+  isActive: boolean;
+  hasPostings: boolean;
+  /** The GST code usually used on this account (e.g. GST for sales), or null. */
+  defaultTaxCode: string | null;
+};
+
+type AccountRow = {
+  id: string;
+  code: string;
+  name: string;
+  account_class: AccountClass;
+  account_type: AccountType;
+  description: string | null;
+  reporting_name: string | null;
+  currency_code: string | null;
+  system_key: SystemKey | null;
+  is_active: boolean;
+  has_postings: boolean;
+  default_tax_code: string | null;
+};
+
+const ACCOUNT_SELECT = `
+  select a.id, a.code, a.name, a.account_class, a.account_type, a.description, a.reporting_name,
+         a.currency_code, a.system_key, a.is_active,
+         exists (select 1 from ledger_journal_lines l where l.account_id = a.id) as has_postings,
+         (select t.code from tax_codes t where t.id = a.default_tax_code_id) as default_tax_code
+    from accounts a`;
+
+function toAccount(row: AccountRow): Account {
+  return {
+    id: row.id,
+    code: row.code,
+    name: row.name,
+    accountClass: row.account_class,
+    accountType: row.account_type,
+    description: row.description,
+    reportingName: row.reporting_name,
+    currencyCode: row.currency_code,
+    systemKey: row.system_key,
+    isActive: row.is_active,
+    hasPostings: row.has_postings,
+    defaultTaxCode: row.default_tax_code,
+  };
+}
+
+export const ACCOUNT_CODE_PATTERN = /^[A-Za-z0-9][A-Za-z0-9._-]{0,19}$/;
+
+function parseAccountCode(input: unknown, fieldName = "code"): string {
+  return requireString(input, fieldName, {
+    maxLength: 20,
+    pattern: ACCOUNT_CODE_PATTERN,
+    patternHint: `${fieldName} must be 1-20 letters, numbers, dots, dashes or underscores.`,
+  });
+}
+
+function parseAccountType(input: unknown): AccountType {
+  if (!isAccountType(input)) {
+    throw new ValidationError(`accountType must be one of: ${Object.keys(ACCOUNT_TYPES).join(", ")}.`);
+  }
+  return input;
+}
+
+/**
+ * An account's usual GST code: blank for none, else an active tax code
+ * (matched ignoring case). Returns its id.
+ */
+async function resolveDefaultTaxCode(tx: OrgTx, input: unknown, keptCode: string | null): Promise<string | null> {
+  const code = optionalString(input, "defaultTaxCode", { maxLength: 20 });
+  if (code === null) return null;
+  const found = await tx.query<{ id: string; code: string; is_active: boolean }>(
+    "select id, code, is_active from tax_codes where upper(code) = upper($1)",
+    [code],
+  );
+  const row = found.rows[0];
+  if (!row) throw new ValidationError(`There's no tax code ${code}.`);
+  if (!row.is_active && row.code !== keptCode) throw new ValidationError(`Tax code ${row.code} is inactive.`);
+  return row.id;
+}
+
+export async function listAccounts(
+  tx: OrgTx,
+  options: { includeArchived?: boolean } = {},
+): Promise<Account[]> {
+  const result = await tx.query<AccountRow>(
+    `${ACCOUNT_SELECT}
+      where ($1::boolean or a.is_active)
+      order by a.code`,
+    [options.includeArchived ?? false],
+  );
+  return result.rows.map(toAccount);
+}
+
+async function getAccountById(tx: OrgTx, id: string): Promise<Account> {
+  const result = await tx.query<AccountRow>(`${ACCOUNT_SELECT} where a.id = $1`, [id]);
+  if (!result.rows[0]) {
+    throw new NotFoundError("Account not found.");
+  }
+  return toAccount(result.rows[0]);
+}
+
+function parseAccountCurrency(tx: OrgTx, input: unknown): string | null {
+  if (input == null || input === "") {
+    return null;
+  }
+  const code = parseCurrencyCode(input, "currencyCode");
+  // Base-currency accounts leave the currency blank.
+  return code === tx.baseCurrency ? null : code;
+}
+
+export async function createAccount(
+  tx: OrgTx,
+  input: {
+    code: unknown;
+    name: unknown;
+    accountType: unknown;
+    description?: unknown;
+    reportingName?: unknown;
+    currencyCode?: unknown;
+    defaultTaxCode?: unknown;
+  },
+): Promise<Account> {
+  const code = parseAccountCode(input.code);
+  const name = requireString(input.name, "name", { maxLength: 150 });
+  const accountType = parseAccountType(input.accountType);
+  const description = optionalString(input.description, "description", { maxLength: 500 });
+  const reportingName = optionalString(input.reportingName, "reportingName", { maxLength: 200 });
+  const currencyCode = parseAccountCurrency(tx, input.currencyCode);
+  const accountClass = classOfType(accountType);
+  if (currencyCode && accountClass !== "asset" && accountClass !== "liability") {
+    throw new ValidationError("Only asset and liability accounts can hold a foreign currency.");
+  }
+
+  const defaultTaxCodeId = await resolveDefaultTaxCode(tx, input.defaultTaxCode, null);
+
+  const inserted = await tx.query<{ id: string }>(
+    `insert into accounts (code, name, account_class, account_type, description, currency_code, default_tax_code_id, reporting_name)
+     values ($1, $2, $3, $4, $5, $6, $7, $8)
+     on conflict do nothing
+     returning id`,
+    [code, name, accountClass, accountType, description, currencyCode, defaultTaxCodeId, reportingName],
+  );
+  const id = inserted.rows[0]?.id;
+  if (!id) {
+    throw new ConflictError(`An account with the code ${code} already exists.`);
+  }
+  await writeAuditEvent(tx, {
+    eventType: "account.created",
+    entityType: "account",
+    entityId: id,
+    details: { code, name, accountType, currencyCode, ...(defaultTaxCodeId ? { defaultTaxCode: input.defaultTaxCode } : {}) },
+  });
+  return getAccountById(tx, id);
+}
+
+/**
+ * Admins can rename, re-code, archive or re-type accounts. Lines point at the
+ * account's id, so posted history follows the account. Once an account has
+ * postings its class (asset/liability/...) and currency are fixed, because
+ * changing them would silently rewrite past reports.
+ */
+export async function updateAccount(
+  tx: OrgTx,
+  accountIdInput: unknown,
+  input: {
+    code?: unknown;
+    name?: unknown;
+    accountType?: unknown;
+    description?: unknown;
+    reportingName?: unknown;
+    currencyCode?: unknown;
+    isActive?: unknown;
+    defaultTaxCode?: unknown;
+  },
+): Promise<Account> {
+  const accountId = requireId(accountIdInput, "accountId");
+  const existing = await getAccountById(tx, accountId);
+
+  const code = input.code === undefined ? existing.code : parseAccountCode(input.code);
+  const name =
+    input.name === undefined ? existing.name : requireString(input.name, "name", { maxLength: 150 });
+  const accountType =
+    input.accountType === undefined ? existing.accountType : parseAccountType(input.accountType);
+  const description =
+    input.description === undefined
+      ? existing.description
+      : optionalString(input.description, "description", { maxLength: 500 });
+  const reportingName =
+    input.reportingName === undefined ? existing.reportingName : optionalString(input.reportingName, "reportingName", { maxLength: 200 });
+  const currencyCode =
+    input.currencyCode === undefined ? existing.currencyCode : parseAccountCurrency(tx, input.currencyCode);
+  const isActive = optionalBoolean(input.isActive, "isActive") ?? existing.isActive;
+  const accountClass = classOfType(accountType);
+
+  if (existing.hasPostings && accountClass !== existing.accountClass) {
+    throw new ValidationError(
+      `This account has postings, so it has to stay a ${existing.accountClass} account. Create a new account instead.`,
+    );
+  }
+  if (existing.hasPostings && currencyCode !== existing.currencyCode) {
+    throw new ValidationError("This account has postings, so its currency can't change.");
+  }
+  if (currencyCode && accountClass !== "asset" && accountClass !== "liability") {
+    throw new ValidationError("Only asset and liability accounts can hold a foreign currency.");
+  }
+  const defaultTaxCodeId = await resolveDefaultTaxCode(
+    tx,
+    input.defaultTaxCode === undefined ? existing.defaultTaxCode : input.defaultTaxCode,
+    existing.defaultTaxCode,
+  );
+  if (!isActive && existing.systemKey) {
+    throw new ValidationError(
+      "This account is used by Tohyee for automatic postings, so it can't be archived. Rename it instead.",
+    );
+  }
+
+  try {
+    await tx.query(
+      `update accounts
+          set code = $2, name = $3, account_class = $4, account_type = $5,
+              description = $6, currency_code = $7, is_active = $8, default_tax_code_id = $9, reporting_name = $10, updated_at = now()
+        where id = $1`,
+      [accountId, code, name, accountClass, accountType, description, currencyCode, isActive, defaultTaxCodeId, reportingName],
+    );
+  } catch (error) {
+    if ((error as { code?: string }).code === "23505") {
+      throw new ConflictError(`An account with the code ${code} already exists.`);
+    }
+    throw error;
+  }
+  await writeAuditEvent(tx, {
+    eventType: "account.updated",
+    entityType: "account",
+    entityId: accountId,
+    details: { code, name, accountType, currencyCode, isActive, defaultTaxCodeId },
+  });
+  return getAccountById(tx, accountId);
+}
+
+export type ResolvedAccount = {
+  id: string;
+  code: string;
+  name: string;
+  accountClass: AccountClass;
+  currencyCode: string | null;
+  /** Set on accounts Tohyee uses itself (e.g. accounts_receivable). */
+  systemKey: string | null;
+};
+
+/**
+ * Looks up accounts by code for a posting. Every code must exist and be active.
+ * Codes match case-insensitively.
+ */
+export async function resolveAccountsByCode(
+  tx: OrgTx,
+  codes: readonly string[],
+): Promise<Map<string, ResolvedAccount>> {
+  const wanted = [...new Set(codes.map((code) => code.toLowerCase()))];
+  const result = await tx.query<{
+    id: string;
+    code: string;
+    name: string;
+    account_class: AccountClass;
+    currency_code: string | null;
+    system_key: string | null;
+    is_active: boolean;
+  }>(
+    `select id, code, name, account_class, currency_code, system_key, is_active
+       from accounts where lower(code) = any($1::text[])`,
+    [wanted],
+  );
+  const byCode = new Map(result.rows.map((row) => [row.code.toLowerCase(), row]));
+  const resolved = new Map<string, ResolvedAccount>();
+  for (const code of codes) {
+    const row = byCode.get(code.toLowerCase());
+    if (!row) {
+      throw new ValidationError(`There's no account with the code ${code}.`);
+    }
+    if (!row.is_active) {
+      throw new ValidationError(`Account ${row.code} (${row.name}) is archived and can't take new postings.`);
+    }
+    resolved.set(code, {
+      id: row.id,
+      code: row.code,
+      name: row.name,
+      accountClass: row.account_class,
+      currencyCode: row.currency_code,
+      systemKey: row.system_key,
+    });
+  }
+  return resolved;
+}
+
+export function parseAccountCodeInput(input: unknown, fieldName: string): string {
+  return parseAccountCode(input, fieldName);
+}
+
+/**
+ * The account opening balances are cleared through (IM1): the accounts
+ * receivable, accounts payable and inventory lines of the trial balance go
+ * here instead, and the open invoices, open bills and opening stock post
+ * against it, so it ends at 0.00. It's equity, "Opening balance", 3900 in the
+ * starting chart; an organisation without one gets it at 3900 or the next
+ * free code up to 3999 the first time it's needed.
+ */
+export async function conversionClearingAccount(tx: OrgTx): Promise<{ id: string; code: string; name: string }> {
+  const existing = await tx.query<{ id: string; code: string; name: string }>(
+    "select id, code, name from accounts where system_key = 'conversion_clearing'",
+  );
+  if (existing.rows[0]) return existing.rows[0];
+  const inserted = await tx.query<{ id: string; code: string; name: string }>(
+    `insert into accounts (code, name, account_class, account_type, system_key, description)
+     select c::text, 'Opening balance', 'equity', 'equity', 'conversion_clearing',
+            'Opening balances from invoices, bills and stock clear through here; it should always be 0.00.'
+       from generate_series(3900, 3999) c
+      where not exists (select 1 from accounts where lower(code) = c::text)
+      order by c limit 1
+     returning id, code, name`,
+  );
+  const row = inserted.rows[0];
+  if (!row) {
+    throw new ValidationError(
+      "Codes 3900 to 3999 are all taken, so there's nowhere to put the Opening balance account opening balances clear through. Free one of them first.",
+    );
+  }
+  await writeAuditEvent(tx, {
+    eventType: "account.created",
+    entityType: "account",
+    entityId: row.id,
+    details: { code: row.code, name: row.name, accountType: "equity", systemKey: "conversion_clearing" },
+  });
+  return row;
+}

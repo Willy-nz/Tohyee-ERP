@@ -1,0 +1,126 @@
+import ExcelJS from "exceljs";
+import { describe, expect, it } from "vitest";
+import { REPORT_EXPORTS, type ReportExportData } from "@/lib/reports/export-types";
+import { parseReportExport, reportCsv, reportPdf, reportXlsx } from "@/lib/reports/export-files";
+
+const report = (name: ReportExportData["report"]): ReportExportData => ({
+  report: name,
+  organisationName: "Kōwhai Trust",
+  title: "Profit and loss",
+  period: "1 Apr 2026 to 30 Apr 2026",
+  basis: "Accrual",
+  filters: ["Location: Otago"],
+  producedAt: "2026-10-03T01:30:00.000Z",
+  tables: [
+    {
+      columns: ["Account", "Amount", "Count"],
+      rows: [
+        { kind: "section", cells: [{ text: "Trading income" }, { text: "" }, { text: "" }] },
+        { cells: [{ text: "4000 · Sales" }, { text: "$1,234.56", value: "1234.56", numeric: true }, { text: "1", value: "1", numeric: true }] },
+        { kind: "total", cells: [{ text: "Total trading income" }, { text: "$1,234.56", value: "1234.56", numeric: true }, { text: "1", value: "1", numeric: true }] },
+      ],
+    },
+  ],
+});
+
+describe("standard report exports", () => {
+  it.each(REPORT_EXPORTS)("%s CSV keeps the report's decimal total", (name) => {
+    const csv = reportCsv(report(name));
+
+    expect(csv).toContain("Kōwhai Trust");
+    expect(csv).toContain("Location: Otago");
+    expect(csv).toContain("4000 · Sales,1234.56");
+    expect(csv).toContain("Total trading income,1234.56");
+  });
+
+  it("writes decimal money into numeric Excel cells", async () => {
+    const bytes = await reportXlsx(report("profit-and-loss"));
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(bytes) as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+    const sheet = workbook.getWorksheet("Report")!;
+    const row = sheet.getRows(1, sheet.rowCount)!.find((candidate) => candidate.getCell(1).value === "Total trading income")!;
+
+    expect(row.getCell(2).type).toBe(ExcelJS.ValueType.Number);
+    expect(row.getCell(2).value).toBe(1234.56);
+    expect(row.getCell(3).type).toBe(ExcelJS.ValueType.Number);
+    expect(row.getCell(3).value).toBe(1);
+  });
+
+  it("keeps a value too long for an Excel number as its exact decimal text", async () => {
+    const data = report("analytics-pivot");
+    data.tables[0].rows.push({ kind: "total", cells: [{ text: "Grand total" }, { text: "$1,000,000,000,000,000.90", value: "1000000000000000.90", numeric: true }] });
+    expect(reportCsv(data)).toContain("Grand total,1000000000000000.90");
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(await reportXlsx(data)) as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+    const rows = workbook.getWorksheet("Report")!.getRows(1, 40)!;
+    const grand = rows.find((candidate) => candidate.getCell(1).value === "Grand total")!;
+    expect(grand.getCell(2).value).toBe("1000000000000000.90");
+    const total = rows.find((candidate) => candidate.getCell(1).value === "Total trading income")!;
+    expect(total.getCell(2).value).toBe(1234.56);
+  });
+
+  it("allows a wide pivot but not a wide standard report", () => {
+    const wide = (name: string) => ({
+      ...report(name as (typeof REPORT_EXPORTS)[number]),
+      tables: [{ columns: Array.from({ length: 60 }, (_, index) => `C${index}`), rows: [] }],
+    });
+    expect(parseReportExport(wide("analytics-pivot")).tables[0].columns).toHaveLength(60);
+    expect(() => parseReportExport(wide("profit-and-loss"))).toThrow(/too many columns/);
+  });
+
+  it("exports an empty report with its heading block", () => {
+    const csv = reportCsv({ ...report("profit-and-loss"), tables: [] });
+
+    expect(csv).toContain("Kōwhai Trust");
+    expect(csv).toContain("Period,1 Apr 2026 to 30 Apr 2026");
+    expect(csv).toContain("Location: Otago");
+  });
+
+  it("writes an Excel workbook for an empty report", async () => {
+    const bytes = await reportXlsx({ ...report("profit-and-loss"), tables: [] });
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(bytes) as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+
+    expect(workbook.getWorksheet("Report")?.getCell(1, 1).value).toBe("Kōwhai Trust");
+  });
+
+  it("writes PDF reports with the same heading and a readable table", async () => {
+    const bytes = await reportPdf(report("profit-and-loss"));
+
+    expect(Buffer.from(bytes).subarray(0, 4).toString()).toBe("%PDF");
+    expect(bytes.length).toBeGreaterThan(1000);
+  });
+
+  it("keeps statement row kinds and style, and says when it was produced in NZ time", async () => {
+    const data = report("profit-and-loss");
+    data.style = "statement";
+    data.tables[0].rows.splice(1, 1, { kind: "account", cells: data.tables[0].rows[1].cells });
+    data.tables[0].rows.push({ kind: "grand", cells: [{ text: "Net profit" }, { text: "1,234.56", value: "1234.56", numeric: true }] });
+    const parsed = parseReportExport(JSON.parse(JSON.stringify({ ...data, tables: [{ ...data.tables[0], rows: [...data.tables[0].rows, { kind: "bogus", cells: [] }] }] })));
+    expect(parsed.style).toBe("statement");
+    expect(parsed.tables[0].rows.map((row) => row.kind)).toEqual(["section", "account", "total", "grand", undefined]);
+    expect(reportCsv(parsed)).toContain("Produced,\"3 Oct 2026, 2:30 pm\"");
+    const bytes = await reportPdf(parsed);
+    expect(Buffer.from(bytes).subarray(0, 4).toString()).toBe("%PDF");
+
+    const workbook = new ExcelJS.Workbook();
+    await workbook.xlsx.load(Buffer.from(await reportXlsx(parsed)) as unknown as Parameters<typeof workbook.xlsx.load>[0]);
+    const rows = workbook.getWorksheet("Report")!.getRows(1, 40)!;
+    const net = rows.find((candidate) => candidate.getCell(1).value === "Net profit")!;
+    expect(net.getCell(2).border?.bottom?.style).toBe("double");
+    const sales = rows.find((candidate) => candidate.getCell(1).value === "4000 · Sales")!;
+    expect(sales.getCell(1).alignment?.indent).toBe(1);
+  });
+
+  it("starts a new PDF page after a custom report's page break", async () => {
+    const data = report("custom-report");
+    data.tables[0].rows[0] = { ...data.tables[0].rows[0], pageBreakAfter: true };
+    const parsed = parseReportExport(JSON.parse(JSON.stringify(data)));
+    expect(parsed.tables[0].rows[0].pageBreakAfter).toBe(true);
+    expect(parsed.tables[0].rows[1].pageBreakAfter).toBeUndefined();
+    const { PDFDocument } = await import("pdf-lib");
+    const pages = (await PDFDocument.load(await reportPdf(parsed))).getPageCount();
+    const without = (await PDFDocument.load(await reportPdf(report("custom-report")))).getPageCount();
+    expect(pages).toBe(without + 1);
+  });
+});

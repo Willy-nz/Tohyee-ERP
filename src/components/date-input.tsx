@@ -1,0 +1,152 @@
+"use client";
+
+import { type InputHTMLAttributes, useEffect, useId, useRef, useState } from "react";
+import { isIsoDate, parseDateEntry, showDateEntry } from "@/lib/date-entry";
+import { todayInBrowser } from "@/lib/format";
+
+type DateInputProps = Omit<InputHTMLAttributes<HTMLInputElement>, "type" | "value" | "onChange" | "defaultValue"> & {
+  /** An ISO date (YYYY-MM-DD), or "". */
+  value: string;
+  /** Called with an ISO date or "", shaped like an input's change event so it drops in for `<input type="date">`. */
+  onChange: (event: { target: { value: string } }) => void;
+  /** What +14 and +20m count from (a due date's document date); today when not given. */
+  base?: string | null;
+};
+
+const HELP = "Type a date like 14/10/2026, 1410, +14 (days) or +20m (20th of next month)";
+const PICKER_KEYS = "Alt+Down opens the calendar";
+
+/**
+ * A date field for fast keyboard entry: type it day first or in
+ * shorthand, and it's read when you leave the field or press Enter. The
+ * calendar button opens the browser's own date picker; from the keyboard,
+ * Alt+Down does (the button stays out of the tab order so typing dates stays
+ * fast). A date that can't be read says so under the field once you leave
+ * it.
+ */
+export function DateInput({ value, onChange, base, onBlur, onKeyDown, style, className, disabled, required, min, max, ...rest }: DateInputProps) {
+  const [text, setText] = useState<string | null>(null);
+  const [focused, setFocused] = useState(false);
+  const hintId = useId();
+  const errorId = useId();
+  const picker = useRef<HTMLInputElement | null>(null);
+  const field = useRef<HTMLInputElement | null>(null);
+  const shown = text ?? showDateEntry(value);
+  const unreadable = text !== null && text.trim() !== "" && parseDateEntry(text, todayInBrowser(), base) === null;
+  const problem = dateProblem(unreadable, value, min, max);
+  const invalid = problem !== "";
+  // The browser's date field refused a form with a date outside min/max; this keeps that.
+  useEffect(() => {
+    field.current?.setCustomValidity(problem);
+  }, [problem]);
+  const openPicker = () => {
+    const input = picker.current;
+    if (!input) return;
+    try {
+      input.showPicker();
+    } catch {
+      input.focus();
+    }
+  };
+  // Shown under the field once it's left (while typing, only the border says so).
+  const showProblem = invalid && !focused;
+  const commit = () => {
+    if (text === null) return;
+    if (text.trim() === "") {
+      setText(null);
+      if (value !== "") onChange({ target: { value: "" } });
+      return;
+    }
+    const parsed = parseDateEntry(text, todayInBrowser(), base);
+    if (!parsed) return;
+    setText(null);
+    if (parsed !== value) onChange({ target: { value: parsed } });
+  };
+  return (
+    <span style={{ display: "inline-flex", flexDirection: "column", gap: 2, maxWidth: "100%", ...style }} className={className}>
+    <span style={{ display: "inline-flex", alignItems: "stretch", gap: 4, maxWidth: "100%" }}>
+      <input
+        {...rest}
+        ref={field}
+        type="text"
+        inputMode="text"
+        autoComplete="off"
+        spellCheck={false}
+        placeholder={rest.placeholder ?? "dd/mm/yyyy"}
+        title={problem || HELP}
+        aria-invalid={invalid || undefined}
+        aria-describedby={[rest["aria-describedby"], hintId, showProblem ? errorId : null].filter(Boolean).join(" ")}
+        disabled={disabled}
+        required={required}
+        value={shown}
+        size={11}
+        style={{ minWidth: 0, flex: "1 1 auto", ...(invalid ? { borderColor: "var(--danger, #b42318)" } : {}) }}
+        onChange={(event) => setText(event.target.value)}
+        onFocus={(event) => {
+          setFocused(true);
+          rest.onFocus?.(event);
+        }}
+        onBlur={(event) => {
+          setFocused(false);
+          commit();
+          onBlur?.(event);
+        }}
+        onKeyDown={(event) => {
+          if (event.key === "Enter") commit();
+          if (event.key === "ArrowDown" && event.altKey && !disabled) {
+            event.preventDefault();
+            openPicker();
+          }
+          if (event.key === "Escape" && text !== null) {
+            setText(null);
+            event.preventDefault();
+          }
+          onKeyDown?.(event);
+        }}
+      />
+      <button
+        type="button"
+        tabIndex={-1}
+        aria-label="Choose a date"
+        title="Choose a date"
+        disabled={disabled}
+        style={{ position: "relative", padding: "0 8px", borderRadius: 8, border: "1px solid var(--border, #c4ccd8)", background: "var(--surface, #fff)", color: "inherit", cursor: "pointer" }}
+        onClick={openPicker}
+      >
+        <span aria-hidden="true">📅</span>
+        <input
+          ref={picker}
+          type="date"
+          tabIndex={-1}
+          aria-hidden="true"
+          value={isIsoDate(value) ? value : ""}
+          min={min}
+          max={max}
+          onChange={(event) => {
+            setText(null);
+            onChange({ target: { value: event.target.value } });
+          }}
+          style={{ position: "absolute", inset: 0, opacity: 0, width: "100%", height: "100%", pointerEvents: "none", border: 0, padding: 0 }}
+        />
+      </button>
+    </span>
+      <span id={hintId} style={{ position: "absolute", width: 1, height: 1, overflow: "hidden", clip: "rect(0 0 0 0)", whiteSpace: "nowrap" }}>
+        {HELP}. {PICKER_KEYS}.
+      </span>
+      {showProblem ? (
+        <span id={errorId} role="alert" style={{ color: "var(--danger-text, #b42318)", fontSize: "var(--text-sm, 0.875rem)" }}>
+          {problem}
+        </span>
+      ) : null}
+    </span>
+  );
+}
+
+/** Why a date field can't be submitted, or "" when it can (min and max are ISO dates). */
+export function dateProblem(unreadable: boolean, value: string, min: unknown, max: unknown): string {
+  if (unreadable) return "That isn't a date. " + HELP + ".";
+  if (!isIsoDate(value)) return "";
+  if (typeof min === "string" && isIsoDate(min) && value < min) return `The date can't be before ${showDateEntry(min)}.`;
+  if (typeof max === "string" && isIsoDate(max) && value > max) return `The date can't be after ${showDateEntry(max)}.`;
+  return "";
+}

@@ -1,0 +1,367 @@
+"use client";
+
+import { type FormEvent, useState } from "react";
+import { GoogleButton, useAddressParam } from "@/components/auth/google-button";
+import { PasskeysCard } from "@/components/auth/passkeys-card";
+import { BackupCodes } from "@/components/auth/two-step";
+import { useApiData } from "@/components/hooks";
+import { Badge, Button, Card, Field, Notice, Page, PageHeader, ui } from "@/components/ui";
+import { useWorkspace } from "@/components/workspace";
+import { ROLE_LABELS } from "@/lib/auth/roles";
+import { api, errorMessage } from "@/lib/client/api";
+import { googleSignInMessage } from "@/lib/auth/google-messages";
+import type { GoogleSignInStatus } from "@/lib/auth/google-sign-in";
+import type { SignedInSession } from "@/lib/auth/session-list";
+import type { TwoStepStatus } from "@/lib/auth/two-step";
+import { formatDateTime } from "@/lib/format";
+import { useConfirm } from "@/components/confirm-dialog";
+
+/**
+ * Sign in with Google: link a Google account (with your password
+ * again), see which one is linked, and unlink it while you still have
+ * another way in.
+ */
+function GoogleCard({ google, reload }: { google: GoogleSignInStatus; reload: () => void }) {
+  const confirm = useConfirm();
+  const [password, setPassword] = useState("");
+  const [message, setStatus] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const [busy, setBusy] = useState(false);
+  // Back from Google: only a fixed message for a known code.
+  const code = useAddressParam("google");
+  const returned = googleSignInMessage(code);
+  const status = message ?? (returned ? { tone: code === "linked" ? ("success" as const) : ("error" as const), text: returned } : null);
+
+  async function unlink() {
+    if (!google.linked) return;
+    if (!(await confirm(`Unlink ${google.linked.email}? You'll sign in with your password and authenticator app only, and other sessions signed in with Google end. Apps and keys you've connected keep working.`))) return;
+    setBusy(true);
+    setStatus(null);
+    try {
+      await api("/api/auth/google/unlink", { method: "POST" });
+      setStatus({ tone: "success", text: "Google sign-in unlinked." });
+      reload();
+    } catch (caught) {
+      setStatus({ tone: "error", text: errorMessage(caught) });
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  return (
+    <Card title="Sign in with Google">
+      {status ? <Notice tone={status.tone}>{status.text}</Notice> : null}
+      {google.linked ? (
+        <div style={{ display: "grid", gap: 12 }}>
+          <p>
+            <Badge tone="green">Linked</Badge> {google.linked.email} · since {formatDateTime(google.linked.linkedAt)}
+            {google.linked.lastUsedAt ? ` · last used ${formatDateTime(google.linked.lastUsedAt)}` : ""}
+          </p>
+          {google.canUnlink ? (
+            <div>
+              <Button variant="secondary" onClick={() => void unlink()} disabled={busy}>
+                Unlink Google account
+              </Button>
+            </div>
+          ) : (
+            <p className={ui.muted}>
+              {google.googleOnly
+                ? "You sign in with Google only, so it can't be unlinked. To have a password as well, ask your server admin for a setup link."
+                : "It can't be unlinked until your password sign-in (with two-step) is set up."}
+            </p>
+          )}
+        </div>
+      ) : google.available ? (
+        <form
+          onSubmit={(event) => event.preventDefault()}
+          style={{ display: "grid", gap: 12, maxWidth: 420 }}
+          autoComplete="off"
+        >
+          <Field label="Your password" hint="To check it's you before adding another way to sign in.">
+            <input type="password" autoComplete="current-password" value={password} onChange={(event) => setPassword(event.target.value)} />
+          </Field>
+          <div>
+            <GoogleButton
+              purpose="link"
+              extra={{ password }}
+              label="Link a Google account"
+              disabled={!password}
+              onError={(message) => setStatus(message ? { tone: "error", text: message } : null)}
+            />
+          </div>
+          <p className={ui.muted}>Google must say the account&apos;s email address is verified. You can still sign in with your password.</p>
+        </form>
+      ) : (
+        <p className={ui.muted}>Sign in with Google isn&apos;t turned on on this server.</p>
+      )}
+    </Card>
+  );
+}
+
+/** Two-step sign-in status, and new backup codes (which need a current authenticator code). */
+function TwoStepCard() {
+  const status = useApiData<{ status: TwoStepStatus }>("/api/auth/two-step");
+  const [codes, setCodes] = useState<string[] | null>(null);
+  const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+
+  async function regenerate(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const code = new FormData(formElement).get("code");
+    setBusy(true);
+    setError(null);
+    try {
+      const result = await api<{ backupCodes: string[] }>("/api/auth/two-step/backup-codes", { method: "POST", body: { code } });
+      formElement.reset();
+      setCodes(result.backupCodes);
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+
+  const current = status.data?.status;
+  return (
+    <Card title="Two-step sign-in">
+      {status.error ? <Notice tone="error">{status.error}</Notice> : null}
+      {current ? (
+        current.enabled ? (
+          <p>
+            <Badge tone="green">On</Badge> since {formatDateTime(current.enabledAt)} · {current.backupCodesLeft} backup{" "}
+            {current.backupCodesLeft === 1 ? "code" : "codes"} left
+          </p>
+        ) : (
+          <Notice tone="warning">
+            {current.required
+              ? "Two-step sign-in isn't set up yet. You'll be asked to set it up the next time you sign in."
+              : "Two-step sign-in is off on this server because TOHYEE_SECRET_KEY isn't set. A server admin needs to set it."}
+          </Notice>
+        )
+      ) : null}
+      {codes ? (
+        <BackupCodes codes={codes} doneLabel="Done" onDone={() => {
+          setCodes(null);
+          status.reload();
+        }} />
+      ) : current?.enabled ? (
+        <form onSubmit={(event) => void regenerate(event)} style={{ display: "grid", gap: 12, maxWidth: 420 }} autoComplete="off">
+          {error ? <Notice tone="error">{error}</Notice> : null}
+          <Field label="New backup codes" hint="Enter the code your authenticator app shows now. Your old backup codes stop working.">
+            <input name="code" inputMode="numeric" autoComplete="one-time-code" maxLength={7} required placeholder="6-digit code" />
+          </Field>
+          <div>
+            <Button type="submit" variant="secondary" disabled={busy}>
+              {busy ? "Checking…" : "Make new backup codes"}
+            </Button>
+          </div>
+          <p className={ui.muted}>
+            New phone? Ask a server admin to reset your two-step sign-in, then set it up on the new phone at your next sign-in.
+          </p>
+        </form>
+      ) : null}
+    </Card>
+  );
+}
+
+/** Where you're signed in: sign out a lost phone, or everywhere else. */
+function SessionsCard() {
+  const sessions = useApiData<{ sessions: SignedInSession[] }>("/api/auth/sessions");
+  const [status, setStatus] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  async function end(id: string, text: string) {
+    try {
+      await api("/api/auth/sessions", { method: "DELETE", body: { id } });
+      setStatus({ tone: "success", text });
+      sessions.reload();
+    } catch (caught) {
+      setStatus({ tone: "error", text: errorMessage(caught) });
+    }
+  }
+  const list = sessions.data?.sessions ?? [];
+  return (
+    <Card title="Where you're signed in" description="If you don't recognise one, sign it out and change your password.">
+      {status ? <Notice tone={status.tone}>{status.text}</Notice> : null}
+      {sessions.error ? <Notice tone="error">{sessions.error}</Notice> : null}
+      <div className={ui.tableWrap}>
+        <table className={ui.table}>
+          <thead>
+            <tr>
+              <th>Browser</th>
+              <th>Address</th>
+              <th>Last used</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((session) => (
+              <tr key={session.id}>
+                <td style={{ overflowWrap: "anywhere" }}>
+                  {session.userAgent ?? "Unknown"} {session.current ? <Badge tone="blue">This one</Badge> : null}
+                </td>
+                <td>{session.address ?? ""}</td>
+                <td>{formatDateTime(session.lastSeenAt)}</td>
+                <td className={ui.num}>
+                  {session.current ? null : (
+                    <Button variant="secondary" size="small" onClick={() => void end(session.id, "Signed out.")}>
+                      Sign out
+                    </Button>
+                  )}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+      {list.length > 1 ? (
+        <Button variant="secondary" onClick={() => void end("others", "Signed out everywhere else.")}>
+          Sign out everywhere else
+        </Button>
+      ) : null}
+    </Card>
+  );
+}
+
+type ConnectedApp = { id: string; name: string; createdAt: string; lastUsedAt: string | null; expired: boolean; revokedAt: string | null };
+
+/**
+ * Apps signed in to Tohyee as you that aren't tied to one organisation: the
+ * PowerPoint add-in, one row per computer or browser.
+ * AI apps are on each organisation's AI page. Shown once there is one.
+ */
+function ConnectedAppsCard() {
+  const loaded = useApiData<{ connections: ConnectedApp[] }>("/api/auth/connected-apps");
+  const [status, setStatus] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  const list = loaded.data?.connections ?? [];
+  if (list.length === 0 && !loaded.error) return null;
+  const working = list.filter((entry) => !entry.revokedAt && !entry.expired);
+  const ended = list.length - working.length;
+  async function end(id: string) {
+    try {
+      await api("/api/auth/connected-apps", { method: "DELETE", body: { id } });
+      setStatus({ tone: "success", text: "Signed out. The add-in on that computer asks you to sign in again." });
+      loaded.reload();
+    } catch (caught) {
+      setStatus({ tone: "error", text: errorMessage(caught) });
+    }
+  }
+  return (
+    <Card title="Connected apps" description="The PowerPoint add-in signs in as you on each computer or browser you use it in. It only reads Analytics. AI apps are on each organisation's AI page.">
+      {status ? <Notice tone={status.tone}>{status.text}</Notice> : null}
+      {loaded.error ? <Notice tone="error">{loaded.error}</Notice> : null}
+      {working.length ? (
+        <div className={ui.tableWrap}>
+          <table className={ui.table}>
+            <thead>
+              <tr>
+                <th>App</th>
+                <th>Signed in</th>
+                <th>Last used</th>
+                <th />
+              </tr>
+            </thead>
+            <tbody>
+              {working.map((entry) => (
+                <tr key={entry.id}>
+                  <td>{entry.name}</td>
+                  <td>{formatDateTime(entry.createdAt)}</td>
+                  <td>{entry.lastUsedAt ? formatDateTime(entry.lastUsedAt) : "Not yet"}</td>
+                  <td className={ui.num}>
+                    <Button variant="secondary" size="small" aria-label={`Sign out ${entry.name}, signed in ${formatDateTime(entry.createdAt)}`} onClick={() => void end(entry.id)}>
+                      Sign out
+                    </Button>
+                  </td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      ) : (
+        <p className={ui.muted}>Nothing is signed in now.</p>
+      )}
+      {ended ? <p className={ui.muted}>{ended === 1 ? "1 earlier sign-in has ended." : `${ended} earlier sign-ins have ended.`}</p> : null}
+    </Card>
+  );
+}
+
+export default function ProfilePage() {
+  const { user, organisations } = useWorkspace();
+  const google = useApiData<{ google: GoogleSignInStatus }>("/api/auth/google");
+  const googleOnly = google.data?.google.googleOnly ?? false;
+  const [status, setStatus] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const formElement = event.currentTarget;
+    const form = new FormData(formElement);
+    if (form.get("newPassword") !== form.get("confirmPassword")) {
+      setStatus({ tone: "error", text: "The new passwords don't match." });
+      return;
+    }
+    try {
+      await api("/api/auth/password", {
+        method: "POST",
+        body: { currentPassword: form.get("currentPassword"), newPassword: form.get("newPassword") },
+      });
+      formElement.reset();
+      setStatus({ tone: "success", text: "Password changed. Your other sessions have been signed out, and any passkeys removed: add them again if you use them." });
+    } catch (caught) {
+      setStatus({ tone: "error", text: errorMessage(caught) });
+    }
+  }
+
+  return (
+    <Page>
+      <PageHeader title="Your account" actions={<span className={ui.muted}>{`${user.displayName} · ${user.email}${user.isServerAdmin ? " · server admin" : ""}`}</span>} />
+      <Card title="Organisations you can open">
+        <div className={ui.tableWrap}>
+          <table className={ui.table}>
+            <thead>
+              <tr>
+                <th>Organisation</th>
+                <th>Your role</th>
+                <th>Base currency</th>
+              </tr>
+            </thead>
+            <tbody>
+              {organisations.map((organisation) => (
+                <tr key={organisation.id}>
+                  <td>{organisation.displayName}</td>
+                  <td>{ROLE_LABELS[organisation.role]}</td>
+                  <td>{organisation.baseCurrency}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
+      </Card>
+      {google.data && (google.data.google.available || google.data.google.linked) ? <GoogleCard google={google.data.google} reload={google.reload} /> : null}
+      <PasskeysCard />
+      {googleOnly ? null : <TwoStepCard />}
+      <SessionsCard />
+      <ConnectedAppsCard />
+      {googleOnly ? (
+        <Card title="Password">
+          <p className={ui.muted}>You sign in with Google, so there&apos;s no password to change. To have a password as well, ask your server admin for a setup link.</p>
+        </Card>
+      ) : (
+      <Card title="Change password">
+        {status ? <Notice tone={status.tone}>{status.text}</Notice> : null}
+        <form onSubmit={(event) => void submit(event)} style={{ display: "grid", gap: 12, maxWidth: 420 }}>
+          <Field label="Current password">
+            <input name="currentPassword" type="password" autoComplete="current-password" required />
+          </Field>
+          <Field label="New password" hint="At least 10 characters.">
+            <input name="newPassword" type="password" autoComplete="new-password" minLength={10} required />
+          </Field>
+          <Field label="Confirm new password">
+            <input name="confirmPassword" type="password" autoComplete="new-password" minLength={10} required />
+          </Field>
+          <div>
+            <Button type="submit">Change password</Button>
+          </div>
+        </form>
+      </Card>
+      )}
+    </Page>
+  );
+}

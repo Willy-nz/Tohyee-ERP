@@ -1,0 +1,632 @@
+import { boundedLimit, CURSOR, limitInput, pageByPosition } from "@/lib/ai/limits";
+import { type AiTool, DATE, type JsonSchema, schema } from "@/lib/ai/tools";
+import { addNotebookEntry, listNotebook, NOTEBOOK_CATEGORIES, updateNotebookEntry } from "@/lib/ai-workspace/notebook";
+import { aiFileText, listAiFiles, READ_CHUNK } from "@/lib/ai-workspace/files";
+import { addDatasetRows, AGGREGATES, COLUMN_TYPES, GRAINS, listDatasets, OPERATORS, queryDataset, saveDataset } from "@/lib/ai-workspace/datasets";
+import { getAiDashboard, listAiDashboards } from "@/lib/ai-workspace/dashboards";
+import { roleAtLeast } from "@/lib/auth/roles";
+import { todayIsoDate } from "@/lib/dates";
+import type { OrgTx } from "@/lib/db/org-transaction";
+import { farmBenchmarks } from "@/lib/farming/benchmarks";
+import { getPlanReport, listPlans, listProducts } from "@/lib/farming/fertiliser";
+import { fertiliserWhatIf, parseWhatIf } from "@/lib/farming/fertiliser-what-if";
+import { listGrazings, listReadings, listSupplements, pastureSummary } from "@/lib/farming/pasture";
+import { listSoilTests, soilSummary } from "@/lib/farming/soil";
+import { farmStocking, listMobs } from "@/lib/farming/mobs";
+import { getAnimal } from "@/lib/farming/animal-detail";
+import { listAnimals } from "@/lib/farming/animals";
+import { mobBcs } from "@/lib/farming/bcs";
+import { farmTimeline } from "@/lib/farming/timeline";
+import { listTreatments } from "@/lib/farming/treatments";
+import { listRainReadings, rainfallOverview } from "@/lib/farming/rainfall";
+import { listForecastRecords } from "@/lib/weather/service";
+import { getFarmVegetation, getPaddockTrend, type PaddockObservation } from "@/lib/farming/vegetation/service";
+import { FLAG_WORDS, QUALITY_WORDS } from "@/lib/farming/vegetation/rules";
+import { ValidationError } from "@/lib/errors";
+import { getPaddock, listFarms, listPaddocks } from "@/lib/farming/paddocks";
+import { financialYearEnd } from "@/lib/financial-year";
+import { headCount, listMovements, MOVEMENT_TYPES, requireLivestock } from "@/lib/livestock/movements";
+import { listLivestockSuggestions, suggestLivestockMovements } from "@/lib/livestock/suggestions";
+import { listElections, listValuations } from "@/lib/livestock/valuation";
+import { hasPayrollAccess, PAYROLL_MINIMUM_ROLE } from "@/lib/payroll/access";
+import { listEmployees } from "@/lib/payroll/employees";
+
+/*
+ * The AI's farm tools (examples AIW1-AIW9):
+ * - the farm notebook (history, goals, people, how it's farmed), which the AI
+ *   reads to answer questions and adds to when it learns something;
+ * - files people drop in, however they're laid out, which the AI reads and
+ *   organises into its own tables, then queries and lays out as dashboards;
+ * - livestock (head counts, movements, valuations) and farms and paddocks,
+ *   read only; movements the AI finds are suggestions a person accepts;
+ * - the staff list, with pay only for someone who may see payroll.
+ * The writing tools need a "Make drafts" key: they touch only the AI's own
+ * workspace and suggestions, never the books or official livestock records.
+ */
+
+const LONG_TEXT = (what: string, max: number): JsonSchema => ({ type: "string", maxLength: max, description: what });
+
+const FILTERS: JsonSchema = {
+  type: "array",
+  maxItems: 20,
+  description: "Only rows matching every filter.",
+  items: {
+    type: "object",
+    properties: {
+      field: { type: "string" },
+      op: { type: "string", enum: [...OPERATORS] },
+      value: { description: "Compared as the column's type; null to test for empty. contains is a case-insensitive text match." },
+    },
+    required: ["field", "op"],
+  },
+};
+const GROUP_BY: JsonSchema = {
+  type: "array",
+  maxItems: 3,
+  description: "Columns to total by: a name, or { field, grain } for a date column by day, month or year.",
+  items: { oneOf: [{ type: "string" }, { type: "object", properties: { field: { type: "string" }, grain: { type: "string", enum: [...GRAINS] } }, required: ["field"] }] },
+};
+const MEASURES: JsonSchema = {
+  type: "array",
+  maxItems: 10,
+  description: "What to work out per group. Leave out to get the rows themselves.",
+  items: {
+    type: "object",
+    properties: {
+      aggregate: { type: "string", enum: [...AGGREGATES] },
+      field: { type: "string", description: "Not needed for count." },
+      label: { type: "string" },
+    },
+    required: ["aggregate"],
+  },
+};
+const SORT: JsonSchema = {
+  type: "object",
+  properties: { by: { type: "string", description: "A groupBy column or measure label." }, direction: { type: "string", enum: ["asc", "desc"] } },
+};
+export const MOVEMENT: JsonSchema = {
+  type: "object",
+  description: "As for a livestock movement: movementType, movementDate, kind, classCode, head, and where needed toClassCode, amount (purchases and sales only, excl. GST; the owner's rations are valued once a year by the accountant), heldFor, rationsFor, note.",
+  properties: {
+    movementType: { type: "string", enum: [...MOVEMENT_TYPES] },
+    movementDate: DATE,
+    kind: { type: "string", description: "e.g. dairy_cattle, beef_cattle, sheep, deer_red, deer_other, goats_angora, goats_cashmere, goats_dairy." },
+    classCode: { type: "string", description: "The class, e.g. ma_cows, r1_heifers. livestock_overview shows the classes in use." },
+    toClassCode: { type: "string" },
+    head: { type: "integer", minimum: 1 },
+    amount: { type: "string" },
+    heldFor: { type: "string" },
+    rationsFor: { type: "string", enum: ["owner", "staff"] },
+    note: { type: "string" },
+  },
+  required: ["movementType", "movementDate", "kind", "classCode", "head"],
+};
+
+export async function currentLivestockYearEnd(tx: OrgTx): Promise<string> {
+  const settings = await requireLivestock(tx);
+  return financialYearEnd(todayIsoDate(), settings.financialYearEndMonth);
+}
+
+/** The staff list for this person (AIW9): pay only with payroll access, never IRD or bank numbers or dates of birth. */
+async function staffList(tx: OrgTx, role: Parameters<typeof roleAtLeast>[0], includeFormer: boolean) {
+  if (roleAtLeast(role, PAYROLL_MINIMUM_ROLE) && (await hasPayrollAccess(tx))) {
+    const employees = await listEmployees(tx, { includeArchived: includeFormer });
+    return {
+      includesPay: true,
+      staff: employees.map((employee) => ({
+        name: `${employee.firstName} ${employee.lastName}`,
+        jobTitle: employee.jobTitle,
+        email: employee.email,
+        phone: employee.phone,
+        startDate: employee.startDate,
+        finishDate: employee.finishDate,
+        reportsTo: employee.reportsToName,
+        group: employee.employeeGroupName,
+        department: employee.primaryDepartment?.name ?? null,
+        payFrequency: employee.payFrequency,
+        payBasis: employee.payBasis,
+        annualSalary: employee.annualSalary,
+        hourlyRate: employee.hourlyRate,
+        ordinaryHoursPerWeek: employee.ordinaryHoursPerWeek,
+        archived: employee.isArchived,
+      })),
+    };
+  }
+  const rows = await tx.query<{ name: string; job_title: string | null; start_date: string; finish_date: string | null; reports_to: string | null; group_name: string | null; is_archived: boolean }>(
+    `select e.first_name || ' ' || e.last_name as name, e.job_title, e.start_date::text, e.finish_date::text, m.first_name || ' ' || m.last_name as reports_to,
+            eg.name as group_name, e.is_archived
+       from payroll_employees e
+       left join payroll_employees m on m.id = e.reports_to_id
+       left join payroll_employee_groups eg on eg.id = e.employee_group_id
+      where ($1::boolean or not e.is_archived)
+      order by lower(e.last_name), lower(e.first_name)`,
+    [includeFormer],
+  );
+  return {
+    includesPay: false,
+    payNote: "Pay details are left out: the person using this AI doesn't have payroll access in Tohyee.",
+    staff: rows.rows.map((row) => ({ name: row.name, jobTitle: row.job_title, startDate: row.start_date, finishDate: row.finish_date, reportsTo: row.reports_to, group: row.group_name, archived: row.is_archived })),
+  };
+}
+
+
+/** The farm a tool is about: the one given, or the only active farm (AIW10). */
+async function farmFor(tx: OrgTx, farmId: unknown): Promise<string> {
+  if (farmId !== undefined && farmId !== null && farmId !== "") return String(farmId);
+  const farms = (await listFarms(tx)).filter((farm) => farm.isActive);
+  if (farms.length === 1) return farms[0].id;
+  if (farms.length === 0) throw new ValidationError("There are no farms yet.");
+  throw new ValidationError(`There are ${farms.length} farms: give farmId (list_farms_and_paddocks lists them).`);
+}
+
+const FARM_ID: JsonSchema = { type: "string", description: "The farm, from list_farms_and_paddocks. Leave out when there's only one." };
+const PADDOCK_ID: JsonSchema = { type: "string", description: "One paddock only, from list_farms_and_paddocks." };
+const LIMIT = (fallback: number): JsonSchema => ({ type: "integer", minimum: 1, description: `At most this many a page, newest first (default ${fallback}).` });
+/** limit and cursor for a list the service gives whole. */
+const PAGE = { limit: limitInput(100, 500), cursor: CURSOR };
+
+/** One page of a list the service gives whole, under its own name. */
+function paged<T>(field: string, rows: readonly T[], args: Record<string, unknown>, fallback = 100, max = 500) {
+  const page = pageByPosition(rows, args.cursor, boundedLimit(args.limit, fallback, max));
+  return { [field]: page.rows, more: page.more, nextCursor: page.nextCursor };
+}
+
+/** A page of farm history as every list answers: rows, more and nextCursor. */
+function historyPage<T>(page: { rows: T[]; next: string | null }) {
+  return { rows: page.rows, more: page.next !== null, nextCursor: page.next };
+}
+
+export const FARM_READ_TOOLS: AiTool[] = [
+  {
+    name: "farm_notebook",
+    title: "Read the farm notebook",
+    description:
+      "The farm's own notes: its history, goals, people, how it's farmed, places and paddocks. Read this before answering questions about the farm, and to understand files. Newest first; filter by category or words.",
+    level: "read",
+    inputSchema: schema({
+      category: { type: "string", enum: [...NOTEBOOK_CATEGORIES] },
+      search: { type: "string", description: "Words to look for in titles and text." },
+      limit: { type: "integer", minimum: 1, maximum: 500 },
+    }),
+    run: async (tx, args) => ({ notes: await listNotebook(tx, { category: args.category, search: args.search, limit: boundedLimit(args.limit, 200, 500) }) }),
+  },
+  {
+    name: "list_ai_uploads",
+    title: "List files left for the AI",
+    description: "Files people have dropped in for you to read and organise (spreadsheets, exports, notes), however they're laid out.",
+    level: "read",
+    inputSchema: schema(PAGE),
+    run: async (tx, args) => paged("files", await listAiFiles(tx), args),
+  },
+  {
+    name: "read_ai_upload",
+    title: "Read a file left for the AI",
+    description: `A file's content as text; Excel workbooks come as "## Sheet: name" then CSV. Long files come in parts of ${READ_CHUNK.toLocaleString("en-NZ")} characters: pass offset to read on.`,
+    level: "read",
+    inputSchema: schema({ fileId: { type: "string" }, offset: { type: "integer", minimum: 0 } }, ["fileId"]),
+    run: async (tx, args) => {
+      const { file, text } = await aiFileText(tx, args.fileId);
+      const offset = Math.max(Number(args.offset ?? 0) || 0, 0);
+      const part = text.slice(offset, offset + READ_CHUNK);
+      const next = offset + part.length;
+      return { file, offset, length: text.length, text: part, nextOffset: next < text.length ? next : null };
+    },
+  },
+  {
+    name: "list_datasets",
+    title: "List your tables",
+    description: "The tables you've made in your workspace, with their columns and row counts.",
+    level: "read",
+    inputSchema: schema(PAGE),
+    run: async (tx, args) => paged("datasets", await listDatasets(tx), args),
+  },
+  {
+    name: "query_dataset",
+    title: "Query one of your tables",
+    description: "Rows of one of your tables, or with measures, totals grouped by up to three columns. Numbers come back as exact text.",
+    level: "read",
+    inputSchema: schema({ name: { type: "string" }, groupBy: GROUP_BY, measures: MEASURES, filters: FILTERS, sort: SORT, limit: { type: "integer", minimum: 1, maximum: 1000 } }, ["name"]),
+    run: (tx, args) => queryDataset(tx, { ...args, name: args.name }),
+  },
+  {
+    name: "list_ai_dashboards",
+    title: "List dashboards",
+    description: "Older dashboards over your tables, from before reports were made in Analytics. Read-only: new reports are Analytics reports (create_analytics_dashboard), and people move these there.",
+    level: "read",
+    inputSchema: schema(PAGE),
+    run: async (tx, args) => paged("dashboards", await listAiDashboards(tx), args),
+  },
+  {
+    name: "get_ai_dashboard",
+    title: "Get a dashboard with its figures",
+    description: "A dashboard's tiles and each tile's figures.",
+    level: "read",
+    inputSchema: schema({ dashboardId: { type: "string" } }, ["dashboardId"]),
+    run: (tx, args) => getAiDashboard(tx, args.dashboardId),
+  },
+  {
+    name: "livestock_overview",
+    title: "Livestock head count",
+    description:
+      "Livestock settings and the head count reconciliation for a year (opening, born, bought, sold, died, rations, missing, class changes, ageing, closing, counted), by class. Defaults to the current year. Includes the year-end valuations done so far.",
+    level: "read",
+    inputSchema: schema({ yearEnd: DATE }),
+    run: async (tx, args) => {
+      const yearEnd = typeof args.yearEnd === "string" ? args.yearEnd : await currentLivestockYearEnd(tx);
+      return { headCount: await headCount(tx, { yearEnd }), valuations: await listValuations(tx) };
+    },
+  },
+  {
+    name: "list_livestock_elections",
+    title: "Livestock valuation methods",
+    description: "The valuation method recorded for each kind of livestock and the income year it's from (herd scheme or national standard cost, with any herd value ratio), newest first for each kind, as Livestock › Valuation shows. A record in Tohyee only: it files nothing with IRD.",
+    level: "read",
+    inputSchema: schema({ limit: limitInput(100, 500), cursor: CURSOR }),
+    run: async (tx, args) => {
+      await requireLivestock(tx);
+      return paged("elections", await listElections(tx), args, 100, 500);
+    },
+  },
+  {
+    name: "list_livestock_movements",
+    title: "List livestock movements",
+    description: "Recorded livestock movements between two dates, newest first.",
+    level: "read",
+    inputSchema: schema({ from: DATE, to: DATE, includeVoided: { type: "boolean" }, limit: limitInput(500, 2000), cursor: CURSOR }),
+    run: async (tx, args) => {
+      await requireLivestock(tx);
+      return paged("movements", await listMovements(tx, { from: args.from, to: args.to, includeVoided: args.includeVoided === true }), args, 500, 2000);
+    },
+  },
+  {
+    name: "list_livestock_suggestions",
+    title: "List suggested livestock movements",
+    description: "Movements you (or another AI) suggested, and whether a person accepted or declined them.",
+    level: "read",
+    inputSchema: schema({ open: { type: "boolean", description: "Only those waiting for a decision." }, ...PAGE }),
+    run: async (tx, args) => paged("suggestions", await listLivestockSuggestions(tx, { open: args.open === true }), args),
+  },
+  {
+    name: "list_farms_and_paddocks",
+    title: "List farms and paddocks",
+    description: "Each farm with its current paddocks and effective areas.",
+    level: "read",
+    inputSchema: schema(PAGE),
+    run: async (tx, args) => {
+      const { farms, ...page } = paged("farms", await listFarms(tx), args) as { farms: Awaited<ReturnType<typeof listFarms>>; more: boolean; nextCursor: string | null };
+      const result = [];
+      for (const farm of farms) result.push({ ...farm, paddocks: (await listPaddocks(tx, { farmId: farm.id })).map((paddock) => ({ id: paddock.id, name: paddock.name, effectiveHa: paddock.effectiveHa })) });
+      return { farms: result, ...page };
+    },
+  },
+  {
+    name: "farm_benchmarks",
+    title: "Farm benchmarks",
+    description: "A financial year's gross farm revenue, working expenses by group and operating surplus, per kgMS, ha, cow and stock unit.",
+    level: "read",
+    inputSchema: schema({ yearEnd: DATE }),
+    run: (tx, args) => farmBenchmarks(tx, { yearEnd: args.yearEnd }),
+  },
+  {
+    name: "list_staff",
+    title: "List staff",
+    description:
+      "The people employed: names, job titles, start and finish dates, who they report to. Pay details are included only when the person using you has payroll access in Tohyee; IRD numbers, bank accounts and dates of birth never are. For more about people, read the notebook's people category.",
+    level: "read",
+    inputSchema: schema({ includeFormer: { type: "boolean" }, ...PAGE }),
+    run: async (tx, args, context) => {
+      const { staff, ...rest } = await staffList(tx, context.role, args.includeFormer === true);
+      return { ...rest, ...paged("staff", staff, args) };
+    },
+  },
+  {
+    name: "list_soil_tests",
+    title: "List soil tests",
+    description:
+      "Soil tests as the lab reported them (results as text and number, the lab's units). Gives each current paddock's latest test and date, and the tests themselves, newest first. Tohyee doesn't judge whether a result is high or low or a test too old; say so if asked, and leave agronomic advice to the person's adviser.",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID, paddockId: PADDOCK_ID, limit: LIMIT(100), cursor: CURSOR }),
+    run: async (tx, args) => {
+      const farmId = await farmFor(tx, args.farmId);
+      return { latestByPaddock: await soilSummary(tx, { farmId }), ...paged("tests", await listSoilTests(tx, { farmId, paddockId: args.paddockId }), args, 100, 1000) };
+    },
+  },
+  {
+    name: "list_fertiliser_products",
+    title: "List fertiliser products",
+    description: "Fertiliser products with their N, P, K and S content (% by weight), as typed in Tohyee.",
+    level: "read",
+    inputSchema: schema(PAGE),
+    run: async (tx, args) => paged("products", await listProducts(tx), args),
+  },
+  {
+    name: "list_fertiliser_plans",
+    title: "List fertiliser plans",
+    description: "A farm's fertiliser plans (budgets), each with its latest version.",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID, ...PAGE }),
+    run: async (tx, args) => paged("plans", await listPlans(tx, { farmId: await farmFor(tx, args.farmId) }), args),
+  },
+  {
+    name: "get_fertiliser_plan",
+    title: "Get a fertiliser plan",
+    description:
+      "One plan: every version's lines (paddock, product, kg/ha, treated ha, tonnes, kg N/ha, quoted costs), what was bought (linked bill lines) and applied, and plan against actual by product and paddock. A plan is a budget and posts nothing; buying fertiliser is a bill.",
+    level: "read",
+    inputSchema: schema({ planId: { type: "string" } }, ["planId"]),
+    run: (tx, args) => getPlanReport(tx, args.planId),
+  },
+  {
+    name: "fertiliser_what_if",
+    title: "Work out a fertiliser application",
+    description:
+      "What a proposed application would come to, saving nothing: tonnes, kg/ha and total kg of N, P, K and S from the product's content, and the product and spreading cost if you give prices. Give paddockId (its effective hectares are used) or hectares. You or the person choose the rate: Tohyee doesn't recommend one.",
+    level: "read",
+    inputSchema: schema(
+      {
+        productId: { type: "string", description: "From list_fertiliser_products." },
+        paddockId: PADDOCK_ID,
+        hectares: { type: "string", description: "Treated hectares, instead of a paddock's effective area." },
+        kgPerHa: { type: "string", description: "Product kg a hectare." },
+        pricePerTonne: { type: "string", description: "Excluding GST." },
+        spreadingPerHa: { type: "string", description: "Excluding GST." },
+      },
+      ["productId", "kgPerHa"],
+    ),
+    run: async (tx, args) => {
+      const product = (await listProducts(tx)).find((entry) => entry.id === String(args.productId));
+      if (!product) throw new ValidationError("That product wasn't found: list_fertiliser_products lists them.");
+      let hectares = args.hectares;
+      let paddock: string | null = null;
+      if (args.paddockId) {
+        const found = await getPaddock(tx, args.paddockId);
+        paddock = found.name;
+        hectares ??= found.effectiveHa;
+        if (!hectares) throw new ValidationError(`${found.name} has no effective area: give hectares.`);
+      }
+      if (hectares === undefined || hectares === null || hectares === "") throw new ValidationError("Give paddockId or hectares.");
+      const parsed = parseWhatIf({ hectares, kgPerHa: args.kgPerHa, pricePerTonne: args.pricePerTonne, spreadingPerHa: args.spreadingPerHa });
+      return { paddock, ...fertiliserWhatIf({ ...parsed, product }), note: "Worked out only: nothing was saved. To plan it, a person adds it to a fertiliser plan in Tohyee." };
+    },
+  },
+  {
+    name: "pasture_cover",
+    title: "Pasture cover",
+    description:
+      "The farm's pasture cover on a date: each paddock's latest reading on or before it, the area-weighted average and total kg DM, the feed wedge (highest first), each paddock's growth since the reading before (only by the same method with no grazing between), who's grazing now, and supplements fed by month in kg DM. Satellite and model readings are estimates. No targets or feed plan.",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID, onDate: DATE }),
+    run: async (tx, args) => pastureSummary(tx, { farmId: await farmFor(tx, args.farmId), onDate: args.onDate ?? todayIsoDate() }),
+  },
+  {
+    name: "list_pasture_readings",
+    title: "List pasture readings",
+    description: "Cover readings (kg DM/ha) by paddock and date, with the method; satellite and model readings are marked as estimates.",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID, paddockId: PADDOCK_ID, limit: LIMIT(500), cursor: CURSOR }),
+    run: async (tx, args) => historyPage(await listReadings(tx, { farmId: await farmFor(tx, args.farmId), paddockId: args.paddockId, limit: boundedLimit(args.limit, 500, 5000), cursor: args.cursor }, { max: 5000 })),
+  },
+  {
+    name: "list_grazings",
+    title: "List grazings",
+    description: "Which mob was in which paddock from the day in to the day out (none while still in), with covers before and after and what was eaten.",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID, paddockId: PADDOCK_ID, limit: LIMIT(500), cursor: CURSOR }),
+    run: async (tx, args) => historyPage(await listGrazings(tx, { farmId: await farmFor(tx, args.farmId), paddockId: args.paddockId, limit: boundedLimit(args.limit, 500, 5000), cursor: args.cursor }, { max: 5000 })),
+  },
+  {
+    name: "list_mobs",
+    title: "List mobs",
+    description:
+      "The farm's mobs (one IRD livestock class each): head, class, paddock they're in now, last average weight and gain, stock units, and withholding safe dates from treatments (as entered from product labels). With stockingRate true, also stock units and head per hectare by paddock and for the farm. Read only.",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID, includeClosed: { type: "boolean", description: "Closed mobs too (all sold or merged)." }, stockingRate: { type: "boolean" }, limit: limitInput(100, 500), cursor: CURSOR }),
+    run: async (tx, args) => {
+      const farmId = await farmFor(tx, args.farmId);
+      const page = pageByPosition(await listMobs(tx, { farmId, includeClosed: args.includeClosed === true }), args.cursor, boundedLimit(args.limit, 100, 500));
+      const mobs = { mobs: page.rows, more: page.more, nextCursor: page.nextCursor };
+      return args.stockingRate === true ? { ...mobs, stocking: await farmStocking(tx, { farmId }) } : mobs;
+    },
+  },
+  {
+    name: "list_animals",
+    title: "List animals",
+    description:
+      "The farm's animal register: each animal's tag, EID or NAIT number (as typed; nothing is sent to NAIT), kind, sex, breed, birth date, dam and sire, status (on farm, missing; sold and dead with includeGone), the mob it's in, and its last weight (with gain per day) and body condition score. Filter by mob or a tag search. Read only.",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID, mobId: { type: "string", description: "One mob, from list_mobs." }, q: { type: "string", description: "Part of a tag or EID." }, includeGone: { type: "boolean" }, limit: limitInput(200, 1000), cursor: CURSOR }),
+    run: async (tx, args) => {
+      const page = pageByPosition(await listAnimals(tx, { farmId: await farmFor(tx, args.farmId), mobId: args.mobId, q: args.q, includeGone: args.includeGone === true }), args.cursor, boundedLimit(args.limit, 200, 1000));
+      return { animals: page.rows, more: page.more, nextCursor: page.nextCursor };
+    },
+  },
+  {
+    name: "get_animal",
+    title: "One animal's records",
+    description:
+      "One animal's page: details, the mobs it was in and when, every weight with gain per day, its body condition scores (with the farm's scale and any NZ targets), treatments given by its tag or to its whole mob while it was in it, the mob's mating, AI and scanning while it was in it, and moves. Scores from AI suggestions are only there once a person accepted them. Read only.",
+    level: "read",
+    inputSchema: schema({ animalId: { type: "string", description: "From list_animals." } }, ["animalId"]),
+    run: async (tx, args) => {
+      const detail = await getAnimal(tx, args.animalId);
+      return { ...detail, photos: detail.photos.length, suggestions: detail.suggestions.filter((entry) => entry.status === "waiting").length };
+    },
+  },
+  {
+    name: "mob_bcs",
+    title: "A mob's body condition",
+    description:
+      "A mob's body condition scores: its own records (averages and tallies of how many at each score), its trend (with days its tagged animals were scored, as their average), the farm's scale for the kind, and NZ targets where a recognised source gives them. Read only.",
+    level: "read",
+    inputSchema: schema({ mobId: { type: "string", description: "From list_mobs." } }, ["mobId"]),
+    run: async (tx, args) => mobBcs(tx, args.mobId),
+  },
+  {
+    name: "list_animal_treatments",
+    title: "List animal treatments",
+    description:
+      "The treatment register: drenches, vaccines and other treatments by date, mob or animals, product, dose, batch, who gave it, and meat and milk withholding as entered from the label with the safe dates worked out from them. Tohyee never supplies a withholding period.",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID, mobId: { type: "string", description: "One mob, from list_mobs." }, from: DATE, to: DATE, limit: limitInput(100, 1000), cursor: CURSOR }),
+    run: async (tx, args) => {
+      const page = pageByPosition(await listTreatments(tx, { farmId: await farmFor(tx, args.farmId), mobId: args.mobId, from: args.from, to: args.to }), args.cursor, boundedLimit(args.limit, 100, 1000));
+      return { treatments: page.rows, more: page.more, nextCursor: page.nextCursor };
+    },
+  },
+  {
+    name: "farm_timeline",
+    title: "Farm timeline",
+    description:
+      "Everything that happened on the farm, newest first: mob moves, splits, merges, sales, deaths, births, purchases, class changes, weights and counts; grazings typed without a mob record; treatments; mating, AI, scanning and pregnancy tests; spray jobs with grazing withholding. Filter by mob, paddock and dates.",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID, mobId: { type: "string" }, paddockId: PADDOCK_ID, from: DATE, to: DATE, limit: LIMIT(500) }),
+    run: async (tx, args) => farmTimeline(tx, { farmId: await farmFor(tx, args.farmId), mobId: args.mobId, paddockId: args.paddockId, from: args.from, to: args.to, limit: args.limit }),
+  },
+  {
+    name: "list_supplements_fed",
+    title: "List supplements fed",
+    description: "Supplements fed out: date, feed, quantity and unit as recorded (never converted), and kg DM where known. Buying feed is a bill, not here.",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID, limit: LIMIT(500), cursor: CURSOR }),
+    run: async (tx, args) => historyPage(await listSupplements(tx, { farmId: await farmFor(tx, args.farmId), limit: boundedLimit(args.limit, 500, 5000), cursor: args.cursor }, { max: 5000 })),
+  },
+  {
+    name: "rainfall",
+    title: "Rainfall",
+    description:
+      "Rain recorded in the farm's own rain gauges, in mm, by rain day (a 9 am reading is the day before's rain): for each active gauge (or one farm's), this month, this season and the last 12 months to a date, by month and by NZ season, each with the same time last year and how many days have a reading (a day with no reading is unknown, not dry). With from and to, the day readings themselves for one farm. MetService forecasts aren't in this tool: see weather_forecast_records.",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID, onDate: DATE, from: DATE, to: DATE }),
+    run: async (tx, args) =>
+      args.from || args.to
+        ? { readings: await listRainReadings(tx, { farmId: await farmFor(tx, args.farmId), from: args.from, to: args.to ?? todayIsoDate() }) }
+        : { gauges: await rainfallOverview(tx, { farmId: args.farmId, onDate: args.onDate }) },
+  },
+  {
+    name: "weather_forecast_records",
+    title: "MetService forecast records",
+    description:
+      "MetService forecasts the organisation kept as records for one farm, newest first: when each was fetched, the farm's pin, and hour by hour the rain (mm), temperature (degrees C), wind and gusts (km/h) and wind direction (degrees). Only available when an admin has enabled forecast records and their use in comparisons, Analytics and AI; otherwise it's refused. The admin acknowledges responsibility for compliance with MetService's terms; Tohyee does not verify permission. This tool returns retained records, not the latest-forecast cache. Whenever you show or use these numbers, say: \"This data was provided by MetService Limited.\"",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID, from: DATE, to: DATE, limit: LIMIT(20) }),
+    run: async (tx, args) => ({
+      attribution: "This data was provided by MetService Limited.",
+      records: await listForecastRecords(tx, { farmId: await farmFor(tx, args.farmId), from: args.from, to: args.to, limit: boundedLimit(args.limit, 20, 200) }),
+    }),
+  },
+  {
+    name: "paddock_greenness",
+    title: "Paddock greenness from satellite",
+    description:
+      "Satellite greenness (NDVI; higher is greener, usually 0.2 to 0.9 on pasture) for a farm's paddocks, from Sentinel-2 pictures: each date's acquisition time (the satellite's, UTC; not when it was fetched), mean and median NDVI, clear pixels (about 10 m × 10 m each) of the paddock's total, the clear share (coveragePct), quality (good, low_coverage, too_small, no_data), flags (small, narrow_or_edge), change since the previous clear date (over pixels clear on both), and whether it's for the paddock's current boundary. A date with no clear view has null greenness: unknown, never 0; don't fill it in. Only 'good' dates are reliable to compare. NDVI is greenness, not feed: it must not be converted to kg DM/ha, pasture cover or feed available, and if asked, say it can't be. With paddockId, that paddock's dates (from and to optional); otherwise every paddock on the farm's latest mostly clear date, or on sceneId's date. Made-up demo pictures are labelled as such.",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID, paddockId: PADDOCK_ID, sceneId: { type: "string", description: "A date's id, from an earlier answer's dates." }, from: DATE, to: DATE }),
+    run: async (tx, args) => {
+      const forAi = (observation: PaddockObservation) => ({
+        paddockId: observation.paddockId,
+        paddock: observation.paddockName,
+        acquiredAt: observation.acquiredAt,
+        meanNdvi: observation.meanNdvi,
+        medianNdvi: observation.medianNdvi,
+        validPixels: observation.validPixels,
+        totalPixels: observation.totalPixels,
+        coveragePct: observation.coveragePct,
+        quality: observation.quality,
+        flags: observation.flags,
+        changeNdvi: observation.changeNdvi,
+        currentBoundary: observation.currentBoundary,
+        uncertainty: [QUALITY_WORDS[observation.quality], ...observation.flags.map((flag) => FLAG_WORDS[flag]), observation.currentBoundary ? null : "For the paddock's earlier boundary"].filter(Boolean).join(". "),
+      });
+      const note = "Greenness (NDVI), not feed available. Never convert it to kg DM/ha.";
+      if (args.paddockId) {
+        const trend = await getPaddockTrend(tx, args.paddockId, { from: typeof args.from === "string" ? args.from : undefined, to: typeof args.to === "string" ? args.to : undefined });
+        return { note, paddock: trend.paddockName, attribution: trend.attribution, observations: trend.observations.map(forAi) };
+      }
+      const vegetation = await getFarmVegetation(tx, await farmFor(tx, args.farmId), { sceneId: args.sceneId });
+      return {
+        note,
+        farm: vegetation.farmName,
+        state: vegetation.state,
+        attribution: vegetation.attribution,
+        thresholds: vegetation.thresholds,
+        date: vegetation.scene ? { sceneId: vegetation.scene.id, acquiredAt: vegetation.scene.acquiredAt, farmClearPct: vegetation.scene.farmValidPct, mostlyClear: vegetation.scene.usable, processingBaseline: vegetation.scene.processingBaseline, processorVersion: vegetation.scene.processorVersion } : null,
+        dates: vegetation.scenes.slice(0, 60).map((scene) => ({ sceneId: scene.id, acquiredAt: scene.acquiredAt, farmClearPct: scene.farmValidPct, mostlyClear: scene.usable })),
+        observations: vegetation.observations.map(forAi),
+      };
+    },
+  },
+];
+
+export const FARM_WRITE_TOOLS: AiTool[] = [
+  {
+    name: "add_farm_note",
+    title: "Add a note to the farm notebook",
+    description: "Write down something worth keeping about the farm (history, goals, people, how it's farmed). People see it marked as written by the AI. Don't repeat a note that's already there: update it.",
+    level: "draft",
+    inputSchema: schema(
+      { category: { type: "string", enum: [...NOTEBOOK_CATEGORIES] }, title: LONG_TEXT("A short title.", 200), body: LONG_TEXT("The note.", 20000), happenedOn: DATE },
+      ["category", "title", "body"],
+    ),
+    run: (tx, args) => addNotebookEntry(tx, { category: args.category, title: args.title, body: args.body, happenedOn: args.happenedOn }, "ai"),
+  },
+  {
+    name: "update_farm_note",
+    title: "Update a farm note",
+    description: "Replace a note's category, title, text and date.",
+    level: "draft",
+    inputSchema: schema(
+      { noteId: { type: "string" }, category: { type: "string", enum: [...NOTEBOOK_CATEGORIES] }, title: LONG_TEXT("A short title.", 200), body: LONG_TEXT("The note.", 20000), happenedOn: DATE },
+      ["noteId", "category", "title", "body"],
+    ),
+    run: (tx, args) => updateNotebookEntry(tx, args.noteId, { category: args.category, title: args.title, body: args.body, happenedOn: args.happenedOn }),
+  },
+  {
+    name: "save_dataset",
+    title: "Make or change one of your tables",
+    description:
+      "Make a table in your workspace, laid out however suits the data (e.g. calving, herd tests, milk production, sales by animal). Columns are text, number, date or boolean. Saving an existing name changes its description and columns; its rows must still fit. Each table is also copied into Analytics as tohyee_ai_<name> when the books are (nightly, or refresh_analytics_sources), so a report over it is built with create_analytics_dashboard like any other.",
+    level: "draft",
+    inputSchema: schema(
+      {
+        name: { type: "string", pattern: "^[a-z][a-z0-9_]{0,62}$" },
+        description: LONG_TEXT("What the table holds and where it came from.", 2000),
+        columns: {
+          type: "array",
+          minItems: 1,
+          maxItems: 60,
+          items: { type: "object", properties: { name: { type: "string", pattern: "^[a-z][a-z0-9_]{0,62}$" }, type: { type: "string", enum: [...COLUMN_TYPES] }, description: { type: "string" } }, required: ["name", "type"] },
+        },
+        sourceNote: LONG_TEXT("Which files or notes it was built from.", 2000),
+      },
+      ["name", "description", "columns"],
+    ),
+    run: (tx, args) => saveDataset(tx, args as { name: unknown; description: unknown; columns: unknown; sourceNote?: unknown }),
+  },
+  {
+    name: "add_dataset_rows",
+    title: "Add rows to one of your tables",
+    description: "Add up to 2,000 rows (objects of column -> value; numbers as text or numbers, dates as YYYY-MM-DD). replace: true clears the table's rows first, to rebuild it.",
+    level: "draft",
+    inputSchema: schema({ name: { type: "string" }, rows: { type: "array", maxItems: 2000, items: { type: "object" } }, replace: { type: "boolean" } }, ["name", "rows"]),
+    run: (tx, args) => addDatasetRows(tx, { name: args.name, rows: args.rows, replace: args.replace }),
+  },
+  {
+    name: "suggest_livestock_movements",
+    title: "Suggest livestock movements",
+    description:
+      "Suggest up to 200 livestock movements you found (births, purchases, sales, deaths, rations, class changes...), each with the evidence: which file and rows, or what you were told. A person accepts or declines each one; accepting records it with every check. Check list_livestock_movements and list_livestock_suggestions first so you don't suggest one twice.",
+    level: "draft",
+    inputSchema: schema(
+      {
+        suggestions: {
+          type: "array",
+          minItems: 1,
+          maxItems: 200,
+          items: { type: "object", properties: { movement: MOVEMENT, evidence: { type: "string", maxLength: 2000 } }, required: ["movement", "evidence"] },
+        },
+      },
+      ["suggestions"],
+    ),
+    run: async (tx, args) => ({ suggestions: await suggestLivestockMovements(tx, { suggestions: args.suggestions }) }),
+  },
+];

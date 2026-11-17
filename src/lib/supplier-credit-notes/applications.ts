@@ -1,0 +1,559 @@
+import { writeAuditEvent } from "@/lib/audit";
+import { lockBill } from "@/lib/bills/service";
+import { parseIsoDate } from "@/lib/dates";
+import type { OrgTx } from "@/lib/db/org-transaction";
+import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
+import { assertSameRequest, requestHash } from "@/lib/idempotency";
+import { assertPostingDateAllowed } from "@/lib/ledger/period-controls";
+import { currencyMinorUnits } from "@/lib/money/currency";
+import { add, cmp, dec, isZero, parseDecimalInput, significantScale, sub, toFixedString, toPlainString, ZERO_DECIMAL } from "@/lib/money/decimal";
+import { payableAccountCode } from "@/lib/bills/service";
+import { getJournal, parseJournalBody, postJournalBody, sameForeign } from "@/lib/ledger/journals";
+import { clearedBase, openBase, roundingField, settlementGainLines, splitGain } from "@/lib/fx/documents";
+import {
+  getSupplierCreditNote,
+  lockSupplierCreditNote,
+  supplierCreditNoteLabel,
+  type SupplierCreditNote,
+} from "@/lib/supplier-credit-notes/service";
+import {
+  asRecord,
+  optionalSource,
+  requireArray,
+  requireId,
+  requireIdempotencyKey,
+} from "@/lib/validation";
+
+/**
+ * Credit from an approved supplier credit note applied to approved bills of
+ * the same supplier and currency (examples SCN3-SCN7, SCN12). Applying posts
+ * no journal, because both sides are accounts payable; it only lowers the
+ * bill's amount due and the credit note's remaining credit. In a foreign
+ * currency (MC12) each side is cleared at its own carrying value, and a
+ * difference is a realised gain or loss in a journal of its own. One command can
+ * apply credit to several bills, all or nothing. An application can be
+ * removed once, which fills in its removal details; rows are never deleted.
+ * Period locks still apply by date.
+ */
+export const APPLICATION_STATUSES = ["active", "removed"] as const;
+export type ApplicationStatus = (typeof APPLICATION_STATUSES)[number];
+
+export type SupplierCreditNoteApplication = {
+  id: string;
+  creditNoteId: string;
+  supplierCreditNoteNumber: string;
+  billId: string;
+  supplierInvoiceNumber: string;
+  status: ApplicationStatus;
+  applicationDate: string;
+  amount: string;
+  currencyCode: string;
+  createdByEmail: string | null;
+  createdAt: string;
+  removalDate: string | null;
+  removedByEmail: string | null;
+  removedAt: string | null;
+  /** In a foreign currency (MC12): the base value cleared from the bill and from the credit note, the realised gain (a loss is negative) and its journal. */
+  billBase: string | null;
+  creditNoteBase: string | null;
+  realisedGain: string | null;
+  /** Rounding on 7050 (MC31): 0.00 when none. */
+  roundingGain: string | null;
+  journalId: string | null;
+};
+
+type ApplicationRow = {
+  id: string;
+  credit_note_id: string;
+  supplier_credit_note_number: string;
+  bill_id: string;
+  supplier_invoice_number: string;
+  status: ApplicationStatus;
+  application_date: string;
+  amount: string;
+  currency_code: string;
+  created_by_email: string | null;
+  created_at: string;
+  removal_date: string | null;
+  removed_by_email: string | null;
+  removed_at: string | null;
+  bill_base: string | null;
+  credit_note_base: string | null;
+  realised_gain: string | null;
+  rounding_gain: string | null;
+  journal_id: string | null;
+};
+
+/** The most bills one command can apply credit to. */
+const MAX_APPLICATIONS = 100;
+
+const APPLICATION_SELECT = `select a.id, a.credit_note_id, n.supplier_credit_note_number, a.bill_id, b.supplier_invoice_number,
+       a.status, a.application_date, a.amount, a.currency_code, a.created_by_email, a.created_at, a.removal_date,
+       a.removed_by_email, a.removed_at, a.bill_base::text, a.credit_note_base::text, a.realised_gain::text, a.rounding_gain::text, a.journal_id::text
+  from supplier_credit_note_applications a
+  join supplier_credit_notes n on n.id = a.credit_note_id
+  join bills b on b.id = a.bill_id`;
+
+function toApplication(row: ApplicationRow): SupplierCreditNoteApplication {
+  return {
+    id: row.id,
+    creditNoteId: row.credit_note_id,
+    supplierCreditNoteNumber: row.supplier_credit_note_number,
+    billId: row.bill_id,
+    supplierInvoiceNumber: row.supplier_invoice_number,
+    status: row.status,
+    applicationDate: row.application_date,
+    amount: toFixedString(dec(row.amount), currencyMinorUnits(row.currency_code)),
+    currencyCode: row.currency_code,
+    createdByEmail: row.created_by_email,
+    createdAt: row.created_at,
+    removalDate: row.removal_date,
+    removedByEmail: row.removed_by_email,
+    removedAt: row.removed_at,
+    billBase: row.bill_base === null ? null : toFixedString(dec(row.bill_base), 2),
+    creditNoteBase: row.credit_note_base === null ? null : toFixedString(dec(row.credit_note_base), 2),
+    realisedGain: row.realised_gain === null ? null : toFixedString(dec(row.realised_gain), 2),
+    roundingGain: roundingField(row),
+    journalId: row.journal_id,
+  };
+}
+
+async function getApplication(tx: OrgTx, applicationId: string): Promise<SupplierCreditNoteApplication> {
+  const result = await tx.query<ApplicationRow>(`${APPLICATION_SELECT} where a.id = $1`, [applicationId]);
+  const row = result.rows[0];
+  if (!row) {
+    throw new NotFoundError("Application not found.");
+  }
+  return toApplication(row);
+}
+
+async function getApplications(tx: OrgTx, applicationIds: string[]): Promise<SupplierCreditNoteApplication[]> {
+  const result = await tx.query<ApplicationRow>(`${APPLICATION_SELECT} where a.id = any($1::bigint[]) order by a.id`, [
+    applicationIds,
+  ]);
+  return result.rows.map(toApplication);
+}
+
+/** A supplier credit note's applications, active and removed, oldest first. */
+export async function listSupplierCreditNoteApplications(
+  tx: OrgTx,
+  creditNoteIdInput: unknown,
+): Promise<SupplierCreditNoteApplication[]> {
+  const creditNoteId = requireId(creditNoteIdInput, "creditNoteId");
+  const creditNote = await tx.query("select id from supplier_credit_notes where id = $1", [creditNoteId]);
+  if (creditNote.rowCount === 0) {
+    throw new NotFoundError("Supplier credit note not found.");
+  }
+  const result = await tx.query<ApplicationRow>(
+    `${APPLICATION_SELECT} where a.credit_note_id = $1 order by a.application_date, a.id`,
+    [creditNoteId],
+  );
+  return result.rows.map(toApplication);
+}
+
+/** The supplier credit applied to a bill, active and removed, oldest first. */
+export async function listBillCredit(tx: OrgTx, billIdInput: unknown): Promise<SupplierCreditNoteApplication[]> {
+  const billId = requireId(billIdInput, "billId");
+  const result = await tx.query<ApplicationRow>(
+    `${APPLICATION_SELECT} where a.bill_id = $1 order by a.application_date, a.id`,
+    [billId],
+  );
+  return result.rows.map(toApplication);
+}
+
+type ApplyResult = { created: boolean; applications: SupplierCreditNoteApplication[]; creditNote: SupplierCreditNote };
+type RemoveResult = { created: boolean; application: SupplierCreditNoteApplication; creditNote: SupplierCreditNote };
+
+function isUniqueViolation(error: unknown): boolean {
+  return (error as { code?: string }).code === "23505";
+}
+
+/**
+ * Applies an approved supplier credit note's credit to one or more approved
+ * bills of the same supplier and currency, all or nothing (examples
+ * SCN3-SCN5). Each amount must be more than zero and not more than that
+ * bill's amount due, the total not more than the remaining credit, and the
+ * date on or after the credit note's and each bill's date, in an open
+ * period. No journal posts.
+ */
+export async function applySupplierCreditNote(
+  tx: OrgTx,
+  creditNoteIdInput: unknown,
+  command: { source?: unknown; idempotencyKey: unknown; applicationDate: unknown; applications: unknown },
+): Promise<ApplyResult> {
+  const creditNoteId = requireId(creditNoteIdInput, "creditNoteId");
+  const source = optionalSource(command.source);
+  const idempotencyKey = requireIdempotencyKey(command.idempotencyKey);
+  const applicationDate = parseIsoDate(command.applicationDate, "applicationDate");
+  // In the credit note's currency (MC12): checked against it once the credit note is loaded.
+  const rawApplications = requireArray(command.applications, "applications", MAX_APPLICATIONS);
+  if (rawApplications.length === 0) {
+    throw new ValidationError("Apply credit to at least one bill.");
+  }
+  const seen = new Set<string>();
+  const wanted = rawApplications.map((raw, index) => {
+    const label = `Application ${index + 1}`;
+    const entry = asRecord(raw, label);
+    const billId = requireId(entry.billId, `${label} billId`);
+    if (seen.has(billId)) {
+      throw new ValidationError(`${label} is for bill #${billId} again. Apply credit to each bill once.`);
+    }
+    seen.add(billId);
+    const amount = dec(parseDecimalInput(entry.amount, `${label} amount`, { maxScale: 4 }));
+    return { label, billId, amount };
+  });
+  const hash = requestHash("supplier_credit_note_application", {
+    creditNoteId,
+    applicationDate,
+    applications: wanted.map((entry) => ({ billId: entry.billId, amount: toPlainString(entry.amount) })),
+  });
+  const replay = async (): Promise<ApplyResult | null> => {
+    const earlier = await tx.query<{ id: string; credit_note_id: string; request_hash: string }>(
+      `select id, credit_note_id, request_hash from supplier_credit_note_applications
+        where command_source = $1 and idempotency_key = $2 order by id`,
+      [source, idempotencyKey],
+    );
+    if (earlier.rows.length === 0) {
+      return null;
+    }
+    for (const row of earlier.rows) {
+      assertSameRequest(row.request_hash, hash, "supplier credit note application");
+    }
+    return {
+      created: false,
+      applications: await getApplications(tx, earlier.rows.map((row) => row.id)),
+      creditNote: await getSupplierCreditNote(tx, earlier.rows[0].credit_note_id),
+    };
+  };
+
+  const earlier = await replay();
+  if (earlier) {
+    return earlier;
+  }
+  // The credit note first, then its bills by id: the same order as the database checks.
+  const creditNote = await lockSupplierCreditNote(tx, creditNoteId);
+  // The original of a retry may have committed while this request waited for the lock.
+  const committedMeanwhile = await replay();
+  if (committedMeanwhile) {
+    return committedMeanwhile;
+  }
+  if (creditNote.status === "draft") {
+    throw new ConflictError("This supplier credit note is still a draft, so its credit can't be applied. Approve it first.");
+  }
+  if (creditNote.status === "voided") {
+    throw new ConflictError(`${supplierCreditNoteLabel(creditNote)} has been voided, so its credit can't be applied.`);
+  }
+  if (applicationDate < creditNote.creditNoteDate) {
+    throw new ValidationError(
+      `The application date can't be before the credit note date (${creditNote.creditNoteDate}).`,
+    );
+  }
+  const scale = currencyMinorUnits(creditNote.currencyCode);
+  for (const entry of wanted) {
+    if (significantScale(entry.amount) > scale) {
+      throw new ValidationError(`${entry.label} amount can have at most ${scale} decimal places.`);
+    }
+  }
+
+  const sorted = [...wanted].sort((a, b) => cmp(dec(a.billId), dec(b.billId)));
+  const bills = new Map<string, Awaited<ReturnType<typeof lockBill>>>();
+  for (const entry of sorted) {
+    let bill;
+    try {
+      bill = await lockBill(tx, entry.billId);
+    } catch (error) {
+      if (error instanceof NotFoundError) {
+        throw new ValidationError(`${entry.label}: there's no bill #${entry.billId}.`);
+      }
+      throw error;
+    }
+    bills.set(entry.billId, bill);
+  }
+
+  let total = ZERO_DECIMAL;
+  for (const entry of wanted) {
+    const bill = bills.get(entry.billId)!;
+    const name = `bill ${bill.supplierInvoiceNumber}`;
+    if (bill.status === "draft") {
+      throw new ConflictError(`${entry.label}: ${name} is still a draft, so credit can't be applied to it.`);
+    }
+    if (bill.status === "voided") {
+      throw new ConflictError(`${entry.label}: ${name} has been voided, so credit can't be applied to it.`);
+    }
+    if (bill.contactId !== creditNote.contactId) {
+      throw new ValidationError(
+        `${entry.label}: ${name} is from ${bill.contactName}, not ${creditNote.contactName}. Credit can only be applied to the same supplier's bills.`,
+      );
+    }
+    if (bill.currencyCode !== creditNote.currencyCode) {
+      throw new ValidationError(
+        `${entry.label}: ${name} is in ${bill.currencyCode}, but the credit note is in ${creditNote.currencyCode}. Applying credit across currencies isn't supported yet.`,
+      );
+    }
+    if (applicationDate < bill.billDate) {
+      throw new ValidationError(
+        `${entry.label}: the application date can't be before the bill date of ${name} (${bill.billDate}).`,
+      );
+    }
+    if (cmp(entry.amount, dec(bill.amountDue!)) > 0) {
+      throw new ValidationError(
+        `${entry.label}: ${toFixedString(entry.amount, scale)} is more than the amount due on ${name} (${bill.amountDue}).`,
+      );
+    }
+    total = add(total, entry.amount);
+  }
+  if (cmp(total, dec(creditNote.remainingCredit!)) > 0) {
+    throw new ValidationError(
+      `The credit applied (${toFixedString(total, scale)}) is more than the remaining credit on ${supplierCreditNoteLabel(creditNote)} (${creditNote.remainingCredit}).`,
+    );
+  }
+  await assertPostingDateAllowed(tx, applicationDate);
+
+  // A foreign-currency credit note (MC12): what's still open on it, in its currency and at its carrying value.
+  const foreignCurrency = creditNote.exchangeRate !== null;
+  let creditOpen = foreignCurrency ? { amount: creditNote.remainingCredit!, base: await openBase(tx, "supplier_credit_note", creditNoteId) } : null;
+  const payable = foreignCurrency ? await payableAccountCode(tx) : null;
+  const ids: string[] = [];
+  for (const entry of sorted) {
+    const amount = toFixedString(entry.amount, scale);
+    const bill = bills.get(entry.billId)!;
+    let fx: { billBase: string; creditNoteBase: string; gain: string; rounding: string; journalId: string | null } | null = null;
+    const next = await tx.query<{ id: string }>(
+      "select nextval(pg_get_serial_sequence('supplier_credit_note_applications', 'id'))::text as id",
+    );
+    const nextId = next.rows[0].id;
+    if (creditOpen) {
+      const creditNoteBase = clearedBase(creditOpen, amount);
+      const billBase = clearedBase({ amount: bill.amountDue!, base: await openBase(tx, "bill", bill.id) }, amount);
+      creditOpen = { amount: toFixedString(sub(dec(creditOpen.amount), dec(amount)), scale), base: toFixedString(sub(dec(creditOpen.base), dec(creditNoteBase)), 2) };
+      // The bill (a liability) carried at more than the credit that settles it is a gain.
+      const gain = toFixedString(sub(dec(billBase), dec(creditNoteBase)), 2);
+      // The realised gain on 7020, any rounding on 7050 (MC31).
+      const split = splitGain(gain, amount, bill.exchangeRate!, creditNote.exchangeRate!);
+      let journalId: string | null = null;
+      if (!isZero(dec(split.realised)) || !isZero(dec(split.rounding))) {
+        const currency = creditNote.currencyCode;
+        const posted = await postJournalBody(
+          tx,
+          "supplier_credit_note_application:apply",
+          nextId,
+          parseJournalBody(
+            tx,
+            {
+              postingDate: applicationDate,
+              reference: `${creditNote.supplierCreditNoteNumber} to ${bill.supplierInvoiceNumber}`.slice(0, 100),
+              description: `Supplier credit note ${creditNote.supplierCreditNoteNumber} applied to bill ${bill.supplierInvoiceNumber} (${currency} ${amount})`,
+              lines: [
+                {
+                  accountCode: payable!,
+                  debitAmount: billBase,
+                  creditAmount: "0",
+                  description: `Bill ${bill.supplierInvoiceNumber} credited`,
+                  foreign: { currencyCode: currency, amount, rate: bill.exchangeRate!, kind: "carrying_value" as const },
+                },
+                {
+                  accountCode: payable!,
+                  debitAmount: "0",
+                  creditAmount: creditNoteBase,
+                  description: `${creditNote.supplierCreditNoteNumber} used`,
+                  foreign: { currencyCode: currency, amount, rate: creditNote.exchangeRate!, kind: "carrying_value" as const },
+                },
+                ...(await settlementGainLines(tx, split, `${creditNote.supplierCreditNoteNumber} applied to bill ${bill.supplierInvoiceNumber}`)),
+              ],
+            },
+            { internal: true },
+          ),
+          { origin: "supplier_credit_note" },
+        );
+        journalId = posted.journal.id;
+      }
+      fx = { billBase, creditNoteBase, gain: split.realised, rounding: split.rounding, journalId };
+    }
+    let inserted;
+    try {
+      inserted = await tx.query<{ id: string }>(
+        `insert into supplier_credit_note_applications (
+           id, command_source, idempotency_key, request_hash, credit_note_id, bill_id, application_date, amount,
+           currency_code, created_by_user_id, created_by_email, bill_base, credit_note_base, realised_gain, journal_id,
+           rounding_gain
+         )
+         values ($11, $1, $2, $3, $4, $5, $6, $7::numeric, $8, $9, $10, $12::numeric, $13::numeric, $14::numeric, $15, $16::numeric)
+         returning id`,
+        [
+          source,
+          idempotencyKey,
+          hash,
+          creditNoteId,
+          entry.billId,
+          applicationDate,
+          amount,
+          creditNote.currencyCode,
+          tx.actor.userId,
+          tx.actor.email,
+          nextId,
+          fx?.billBase ?? null,
+          fx?.creditNoteBase ?? null,
+          fx?.gain ?? null,
+          fx?.journalId ?? null,
+          fx?.rounding ?? null,
+        ],
+      );
+    } catch (error) {
+      if (isUniqueViolation(error)) {
+        // The same key was used for a different application by a request that committed first.
+        throw new ConflictError(
+          "That idempotency key was already used for a different supplier credit note application. Use a new key for a new application.",
+        );
+      }
+      throw error;
+    }
+    const applicationId = inserted.rows[0].id;
+    ids.push(applicationId);
+    await writeAuditEvent(tx, {
+      eventType: "supplier_credit_note.applied",
+      entityType: "supplier_credit_note_application",
+      entityId: applicationId,
+      details: {
+        creditNoteId,
+        supplierCreditNoteNumber: creditNote.supplierCreditNoteNumber,
+        billId: entry.billId,
+        supplierInvoiceNumber: bill.supplierInvoiceNumber,
+        applicationDate,
+        amount,
+        ...(fx ? { billBase: fx.billBase, creditNoteBase: fx.creditNoteBase, realisedGain: fx.gain, roundingGain: fx.rounding, journalId: fx.journalId } : {}),
+      },
+    });
+  }
+  return {
+    created: true,
+    applications: await getApplications(tx, ids),
+    creditNote: await getSupplierCreditNote(tx, creditNoteId),
+  };
+}
+
+/**
+ * Removes an application (example SCN7): the credit is available again and
+ * the bill's amount due goes back up. No journal posts. The removal date must
+ * be on or after the application date and in an open period. An application
+ * can only be removed once.
+ */
+export async function removeSupplierCreditNoteApplication(
+  tx: OrgTx,
+  creditNoteIdInput: unknown,
+  applicationIdInput: unknown,
+  command: { source?: unknown; idempotencyKey: unknown; removalDate: unknown },
+): Promise<RemoveResult> {
+  const creditNoteId = requireId(creditNoteIdInput, "creditNoteId");
+  const applicationId = requireId(applicationIdInput, "applicationId");
+  const source = optionalSource(command.source);
+  const idempotencyKey = requireIdempotencyKey(command.idempotencyKey);
+  const removalDate = parseIsoDate(command.removalDate, "removalDate");
+  const onCreditNote = await tx.query<{ bill_id: string }>(
+    "select bill_id from supplier_credit_note_applications where id = $1 and credit_note_id = $2",
+    [applicationId, creditNoteId],
+  );
+  const billId = onCreditNote.rows[0]?.bill_id;
+  if (!billId) {
+    throw new NotFoundError("Application not found.");
+  }
+  const hash = requestHash("supplier_credit_note_application_removal", { applicationId, removalDate });
+  const replay = async (): Promise<RemoveResult | null> => {
+    const earlier = await tx.query<{ id: string; credit_note_id: string; hash: string }>(
+      `select id, credit_note_id, removal_request_hash as hash from supplier_credit_note_applications
+        where removal_command_source = $1 and removal_idempotency_key = $2`,
+      [source, idempotencyKey],
+    );
+    const row = earlier.rows[0];
+    if (!row) {
+      return null;
+    }
+    assertSameRequest(row.hash, hash, "application removal");
+    return {
+      created: false,
+      application: await getApplication(tx, row.id),
+      creditNote: await getSupplierCreditNote(tx, row.credit_note_id),
+    };
+  };
+
+  const earlier = await replay();
+  if (earlier) {
+    return earlier;
+  }
+  const creditNote = await lockSupplierCreditNote(tx, creditNoteId);
+  await lockBill(tx, billId);
+  const committedMeanwhile = await replay();
+  if (committedMeanwhile) {
+    return committedMeanwhile;
+  }
+  const application = await getApplication(tx, applicationId);
+  if (application.status === "removed") {
+    throw new ConflictError("This application has already been removed.");
+  }
+  if (removalDate < application.applicationDate) {
+    throw new ValidationError(
+      `The removal date can't be before the application date (${application.applicationDate}).`,
+    );
+  }
+  await assertPostingDateAllowed(tx, removalDate);
+  // A realised gain or loss posted when it was applied (MC12) is reversed on the removal date.
+  if (application.journalId) {
+    const original = await getJournal(tx, application.journalId);
+    await postJournalBody(
+      tx,
+      "supplier_credit_note_application:removal",
+      applicationId,
+      parseJournalBody(
+        tx,
+        {
+          postingDate: removalDate,
+          reference: `REV-${original.reference}`.slice(0, 100),
+          description: `Removal of ${original.description ?? original.reference}`.slice(0, 500),
+          lines: original.lines.map((line) => ({
+            accountCode: line.accountCode,
+            debitAmount: line.creditAmount,
+            creditAmount: line.debitAmount,
+            description: line.description,
+            ...sameForeign(line),
+          })),
+        },
+        { internal: true },
+      ),
+      { origin: "supplier_credit_note", relatedJournalId: original.id, correctionKind: "reversal" },
+    );
+  }
+
+  try {
+    await tx.query(
+      `update supplier_credit_note_applications
+          set status = 'removed', removal_date = $2, removal_command_source = $3, removal_idempotency_key = $4,
+              removal_request_hash = $5, removed_by_user_id = $6, removed_by_email = $7, removed_at = now()
+        where id = $1`,
+      [applicationId, removalDate, source, idempotencyKey, hash, tx.actor.userId, tx.actor.email],
+    );
+  } catch (error) {
+    if (isUniqueViolation(error)) {
+      throw new ConflictError(
+        "That idempotency key was already used for a different application removal. Use a new key for a new removal.",
+      );
+    }
+    throw error;
+  }
+  await writeAuditEvent(tx, {
+    eventType: "supplier_credit_note.application_removed",
+    entityType: "supplier_credit_note_application",
+    entityId: applicationId,
+    details: {
+      creditNoteId,
+      supplierCreditNoteNumber: creditNote.supplierCreditNoteNumber,
+      billId,
+      supplierInvoiceNumber: application.supplierInvoiceNumber,
+      removalDate,
+      amount: application.amount,
+    },
+  });
+  return {
+    created: true,
+    application: await getApplication(tx, applicationId),
+    creditNote: await getSupplierCreditNote(tx, creditNoteId),
+  };
+}

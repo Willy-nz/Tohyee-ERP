@@ -1,0 +1,157 @@
+name: Windows installer
+
+# Builds TohyeeSetup-<version>.exe on Windows, installs it on the runner and
+# checks it end to end (installer/windows/test-install.ps1). On a v* tag it
+# also attaches the installer to the GitHub release.
+#
+# The token is read-only by default. The build job (which runs npm ci, so
+# third-party install scripts) never gets write access; only the small jobs
+# below that publish something do, and they don't run any of the repo's code.
+
+on:
+  push:
+    tags:
+      - "v*"
+  pull_request:
+    paths:
+      - "installer/windows/**"
+      - ".github/workflows/windows-installer.yml"
+      - "src/lib/analytics/**"
+      - "package*.json"
+      - "scripts/analytics-benchmark.ts"
+      - "scripts/build-admin.mjs"
+      - "next.config.ts"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+jobs:
+  installer:
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    defaults:
+      run:
+        shell: pwsh
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+
+      - name: Setup .NET (builds the Tohyee server app)
+        uses: actions/setup-dotnet@0f4a354dd5547a28c70b7853dbd95d5b67886e73 # v6.1.0
+        with:
+          dotnet-version: 8.0.x
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Build the app
+        run: npm run build
+
+      - name: Benchmark DuckDB (1,000,000 rows)
+        run: npx tsx scripts/analytics-benchmark.ts 1000000
+
+      - name: Build the installer
+        run: ./installer/windows/build.ps1
+
+      - name: Pictures of the server app (sample data, as on Windows)
+        timeout-minutes: 5
+        continue-on-error: true
+        env:
+          TOHYEE_DEMO_TRANSITIONS: "1"
+          TOHYEE_DEMO_DELAY_MS: "150"
+        run: |
+          $exe = Join-Path $PWD 'dist\windows\stage\tray\TohyeeTray.exe'
+          $shots = Join-Path $PWD 'dist\windows\tray-screenshots'
+          $p = Start-Process -FilePath $exe -ArgumentList @('--demo-screenshots', "`"$shots`"") -Wait -PassThru
+          Write-Host "Exit code $($p.ExitCode)"
+          Get-ChildItem $shots | Select-Object Name, Length | Format-Table | Out-Host
+
+      - name: Keep the pictures
+        if: always()
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: tray-screenshots
+          path: dist/windows/tray-screenshots
+
+      - name: Install and test it on this machine
+        run: ./installer/windows/test-install.ps1
+
+      - name: Keep the installer
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: TohyeeSetup
+          path: |
+            dist/windows/TohyeeSetup-*.exe
+            dist/windows/TohyeeSetup-*.exe.sha256
+
+  # The pictures also go on a branch of their own (ci/tray-screenshots), since
+  # coding agents can fetch branches but not always artifacts. Same-repo pull
+  # requests only; this job only copies the pictures the build job kept.
+  screenshots-branch:
+    needs: installer
+    if: ${{ !cancelled() && github.event_name == 'pull_request' && github.event.pull_request.head.repo.full_name == github.repository }}
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    continue-on-error: true
+    steps:
+      - name: Get the pictures
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: tray-screenshots
+          path: shots
+
+      - name: Put the pictures on the ci/tray-screenshots branch
+        env:
+          GH_TOKEN: ${{ github.token }}
+        run: |
+          work="$RUNNER_TEMP/shots-branch"
+          git init -q "$work"
+          # Only the .png files and the frame timings, so nothing from the build can reach .git.
+          find shots -maxdepth 1 -type f \( -name '*.png' -o -name 'timings.txt' -o -name 'layout-*.txt' \) -exec cp {} "$work" \;
+          cd "$work"
+          git config user.name 'github-actions'
+          git config user.email 'github-actions@users.noreply.github.com'
+          git checkout -q -b ci/tray-screenshots
+          git add -A
+          git commit -q -m "Server app pictures from ${GITHUB_SHA}"
+          git push -f -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci/tray-screenshots
+
+  # Attaches the tested installer to the release for a v* tag. Never replaces
+  # a file that's already on the release (no --clobber): a tag's installer is
+  # what servers update to, so a second upload under the same name fails
+  # instead. To redo one, delete the asset from the release by hand first.
+  release:
+    needs: installer
+    if: startsWith(github.ref, 'refs/tags/v')
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+    steps:
+      - name: Get the installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: TohyeeSetup
+          path: dist/windows
+
+      - name: Attach to the release
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          tag="$GITHUB_REF_NAME"
+          if ! gh release view "$tag" >/dev/null 2>&1; then
+            # The server bundle workflow may be creating it at the same time.
+            gh release create "$tag" --title "$tag" --generate-notes || sleep 30
+          fi
+          gh release upload "$tag" dist/windows/TohyeeSetup-*

@@ -1,0 +1,206 @@
+"use client";
+
+import { IllustratedIcon, type IllustratedIconName } from "@/components/illustrated-icon";
+import { type ButtonHTMLAttributes, Children, cloneElement, isValidElement, type ReactElement, type ReactNode, useId } from "react";
+import Link from "next/link";
+import styles from "./ui.module.css";
+import { PageHeadingArt } from "./destination-art";
+
+export { styles as ui };
+
+export function Page({ children }: { children: ReactNode }) {
+  return <div className={styles.page}>{children}</div>;
+}
+
+/**
+ * A page's title and its main actions. There is deliberately no subtitle
+ *: a screen that needs one gets a clearer layout instead, and
+ * a warning or who-can-see-this note goes in a one-line <Notice> below.
+ */
+export function PageHeader({
+  title,
+  actions,
+}: {
+  title: string;
+  actions?: ReactNode;
+}) {
+  return (
+    <header className={styles.pageHeader}>
+      <div className={styles.pageHeading}>
+        <PageHeadingArt />
+        <div className={styles.pageHeadingCopy}>
+          <h1 className={styles.pageTitle}>{title}</h1>
+        </div>
+      </div>
+      {actions ? <div className={styles.actions}>{actions}</div> : null}
+    </header>
+  );
+}
+
+export function Card({
+  title,
+  href,
+  description,
+  actions,
+  children,
+}: {
+  title?: string;
+  /** Makes the title the link to the page behind the card (instead of an "Open X" link). */
+  href?: string;
+  description?: ReactNode;
+  actions?: ReactNode;
+  children: ReactNode;
+}) {
+  return (
+    <section className={styles.card}>
+      {title || actions || description ? (
+        <div className={styles.cardHeader}>
+          <div>
+            {title ? <h2 className={styles.cardTitle}>{href ? <Link href={href}>{title}</Link> : title}</h2> : null}
+            {description ? <p className={styles.cardDescription}>{description}</p> : null}
+          </div>
+          {actions ? <div className={styles.actions}>{actions}</div> : null}
+        </div>
+      ) : null}
+      {children}
+    </section>
+  );
+}
+
+/**
+ * A labelled form control. The label is tied to the control with htmlFor/id
+ * and the hint with aria-describedby, so screen readers (and tests) get a
+ * clean name like "Password" rather than "Password At least 10 characters."
+ */
+export function Field({
+  label,
+  hint,
+  children,
+}: {
+  label: string;
+  hint?: ReactNode;
+  children: ReactNode;
+}) {
+  const generatedId = useId();
+  const hintId = `${generatedId}-hint`;
+  let control: ReactNode = children;
+  let controlId = generatedId;
+  // The first element is the control, also when something sits beside it (e.g. the Export badge by Customer).
+  const parts = Children.toArray(children);
+  const at = parts.findIndex((part) => isValidElement(part));
+  if (at >= 0) {
+    const first = parts[at] as ReactElement<{ id?: string; "aria-describedby"?: string }>;
+    controlId = first.props.id ?? generatedId;
+    const labelled = cloneElement(first, {
+      id: controlId,
+      "aria-describedby": hint ? hintId : first.props["aria-describedby"],
+    });
+    control = parts.length === 1 ? labelled : parts.map((part, index) => (index === at ? labelled : part));
+  }
+  return (
+    <div className={styles.field}>
+      <label htmlFor={controlId} className={styles.fieldLabel}>
+        {label}
+      </label>
+      {control}
+      {hint ? (
+        <span id={hintId} className={styles.fieldHint}>
+          {hint}
+        </span>
+      ) : null}
+    </div>
+  );
+}
+
+type ButtonProps = ButtonHTMLAttributes<HTMLButtonElement> & {
+  variant?: "primary" | "secondary" | "danger";
+  size?: "normal" | "small";
+};
+
+export function Button({ variant = "primary", size = "normal", className, type, ...rest }: ButtonProps) {
+  return (
+    <button
+      type={type ?? "button"}
+      className={[styles.button, styles[variant], size === "small" ? styles.small : "", className ?? ""]
+        .filter(Boolean)
+        .join(" ")}
+      {...rest}
+    />
+  );
+}
+
+export function Notice({
+  tone = "info",
+  children,
+}: {
+  tone?: "info" | "success" | "error" | "warning";
+  children: ReactNode;
+}) {
+  return (
+    <div className={`${styles.notice} ${styles[tone]}`} role={tone === "error" ? "alert" : "status"}>
+      {children}
+    </div>
+  );
+}
+
+export function Badge({
+  tone = "neutral",
+  children,
+}: {
+  tone?: "neutral" | "blue" | "green" | "amber" | "red";
+  children: ReactNode;
+}) {
+  const toneClass = {
+    neutral: styles.badgeNeutral,
+    blue: styles.badgeBlue,
+    green: styles.badgeGreen,
+    amber: styles.badgeAmber,
+    red: styles.badgeRed,
+  }[tone];
+  return <span className={`${styles.badge} ${toneClass}`}>{children}</span>;
+}
+
+/** A warning that wraps on a phone (a badge never wraps). */
+export function WarningNote({ text }: { text: string }) {
+  return (
+    <div
+      style={{
+        marginTop: 4,
+        display: "inline-block",
+        maxWidth: "100%",
+        borderRadius: 4,
+        padding: "1px 8px",
+        background: "var(--warning-bg)",
+        color: "var(--warning-text)",
+        fontSize: "var(--text-xs)",
+        fontWeight: 600,
+        lineHeight: 1.6,
+        overflowWrap: "anywhere",
+      }}
+    >
+      {text}
+    </div>
+  );
+}
+
+/**
+ * An empty list or page. `picture` adds a small illustration for a page's main list: one sentence and one action beside it, never
+ * on a busy form or a section inside a record.
+ */
+export function Empty({ children, picture }: { children: ReactNode; picture?: IllustratedIconName }) {
+  return (
+    <div className={styles.empty}>
+      {picture ? <IllustratedIcon name={picture} size={48} /> : null}
+      {children}
+    </div>
+  );
+}
+
+export function Stat({ label, value }: { label: string; value: ReactNode }) {
+  return (
+    <div className={styles.stat}>
+      <div className={styles.statLabel}>{label}</div>
+      <div className={styles.statValue}>{value}</div>
+    </div>
+  );
+}

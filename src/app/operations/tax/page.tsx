@@ -1,0 +1,205 @@
+"use client";
+
+import { InfoTip, InfoPara } from "@/components/info-tip";
+import { DateInput } from "@/components/date-input";
+import Link from "next/link";
+import { type FormEvent, useState } from "react";
+import { RequireOrganisation } from "@/components/books";
+import { useApiData } from "@/components/hooks";
+import { Badge, Button, Card, Empty, Field, Notice, Page, PageHeader, ui } from "@/components/ui";
+import { useWorkspace } from "@/components/workspace";
+import { api, errorMessage, newIdempotencyKey } from "@/lib/client/api";
+import { formatDate, todayInBrowser } from "@/lib/format";
+import { dec, divide, mul, toPlainString } from "@/lib/money/decimal";
+import { AVAILABLE_ON, AVAILABLE_ON_LABELS, type AvailableOn } from "@/lib/tax/available-on";
+import { TAX_CATEGORIES, type TaxCategory } from "@/lib/tax/categories";
+import type { TaxCode } from "@/lib/tax/codes";
+
+const CATEGORY_LABELS: Record<TaxCategory, string> = {
+  standard: "Standard rated",
+  zero_rated: "Zero rated",
+  exempt: "Exempt",
+  out_of_scope: "Out of scope",
+};
+
+function percent(rate: string): string {
+  return `${toPlainString(mul(dec(rate), dec("100")))}%`;
+}
+
+function Tax({ organisationId }: { organisationId: string }) {
+  const { can } = useWorkspace();
+  const codes = useApiData<{ taxCodes: TaxCode[] }>("/api/tax/codes", { organisationId });
+  const [form, setForm] = useState({
+    code: "",
+    label: "",
+    category: "standard" as TaxCategory,
+    percent: "15",
+    effectiveFrom: todayInBrowser(),
+    availableOn: "both" as AvailableOn,
+  });
+  const [key, setKey] = useState(() => newIdempotencyKey("tax"));
+  const [status, setStatus] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    const trimmed = form.percent.trim();
+    if (!/^\d+(\.\d+)?$/.test(trimmed)) {
+      setStatus({ tone: "error", text: "Enter the rate as a percentage, like 15." });
+      return;
+    }
+    const rate = toPlainString(divide(dec(trimmed), dec("100"), 6));
+    try {
+      await api("/api/tax/codes", {
+        method: "POST",
+        body: {
+          organisationId,
+          idempotencyKey: key,
+          source: "ui",
+          code: form.code,
+          label: form.label,
+          category: form.category,
+          rate: form.category === "standard" ? rate : "0",
+          effectiveFrom: form.effectiveFrom,
+          availableOn: form.availableOn,
+        },
+      });
+      setKey(newIdempotencyKey("tax"));
+      setStatus({ tone: "success", text: `Added tax code ${form.code.toUpperCase()}.` });
+      setForm((current) => ({ ...current, code: "", label: "" }));
+      codes.reload();
+    } catch (caught) {
+      setStatus({ tone: "error", text: errorMessage(caught) });
+    }
+  }
+
+  // "Available on" (TAO5, TAO10): refused while a contact's default, the tax code for exports, an item or a
+  // bank rule uses the code on the side it would lose; the message lists them.
+  async function changeAvailableOn(code: TaxCode, availableOn: AvailableOn) {
+    try {
+      await api(`/api/tax/codes/${code.id}`, { method: "PATCH", body: { organisationId, availableOn } });
+      setStatus({ tone: "success", text: `${code.code} is now available on ${AVAILABLE_ON_LABELS[availableOn].toLowerCase()}.` });
+    } catch (caught) {
+      setStatus({ tone: "error", text: errorMessage(caught) });
+    }
+    codes.reload();
+  }
+
+  return (
+    <>
+      <Notice tone="info">
+        Tax codes set the GST on <Link href="/operations/invoices">sales invoices</Link> and{" "}
+        <Link href="/operations/bills">bills</Link>. They aren&apos;t applied to journals you enter by hand.{" "}
+        <InfoTip label="Tax codes">
+        <InfoPara>The{" "}
+        <Link href="/operations/reports">GST return</Link> puts each line into its boxes by the tax code&apos;s category.</InfoPara>
+        <InfoPara>&ldquo;Available on&rdquo; says whether a code can be chosen on sales (invoices, credit notes, quotes, receive money),
+        purchases (bills, supplier credit notes, purchase orders, spend money, expense claims) or both. Changing it never
+        changes saved documents.</InfoPara>
+        </InfoTip>
+      </Notice>
+      {status ? <Notice tone={status.tone}>{status.text}</Notice> : null}
+      {can("admin") ? (
+        <Card title="Add a tax code">
+          <form className={ui.inlineForm} onSubmit={(event) => void submit(event)}>
+            <Field label="Code">
+              <input value={form.code} onChange={(event) => setForm({ ...form, code: event.target.value })} maxLength={20} required />
+            </Field>
+            <Field label="Name">
+              <input value={form.label} onChange={(event) => setForm({ ...form, label: event.target.value })} maxLength={100} required />
+            </Field>
+            <Field label="Type">
+              <select value={form.category} onChange={(event) => setForm({ ...form, category: event.target.value as TaxCategory })}>
+                {TAX_CATEGORIES.map((category) => (
+                  <option key={category} value={category}>
+                    {CATEGORY_LABELS[category]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {form.category === "standard" ? (
+              <Field label="Rate (%)">
+                <input inputMode="decimal" value={form.percent} onChange={(event) => setForm({ ...form, percent: event.target.value })} required />
+              </Field>
+            ) : null}
+            <Field label="Effective from">
+              <DateInput value={form.effectiveFrom} onChange={(event) => setForm({ ...form, effectiveFrom: event.target.value })} required />
+            </Field>
+            <Field label="Available on">
+              <select value={form.availableOn} onChange={(event) => setForm({ ...form, availableOn: event.target.value as AvailableOn })}>
+                {AVAILABLE_ON.map((side) => (
+                  <option key={side} value={side}>
+                    {AVAILABLE_ON_LABELS[side]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Button type="submit">Add</Button>
+          </form>
+        </Card>
+      ) : null}
+      <Card title="Tax codes">
+        {codes.error ? <Notice tone="error">{codes.error}</Notice> : null}
+        {codes.data && codes.data.taxCodes.length === 0 ? (
+          <Empty>No tax codes yet. For New Zealand GST, add GST at 15% (standard rated) and a zero-rated code.</Empty>
+        ) : (
+          <div className={ui.tableWrap}>
+            <table className={ui.table}>
+              <thead>
+                <tr>
+                  <th>Code</th>
+                  <th>Name</th>
+                  <th>Type</th>
+                  <th className={ui.num}>Rate</th>
+                  <th>Effective</th>
+                  <th>Available on</th>
+                  <th>Status</th>
+                </tr>
+              </thead>
+              <tbody>
+                {(codes.data?.taxCodes ?? []).map((code) => (
+                  <tr key={code.id}>
+                    <td>{code.code}</td>
+                    <td>{code.label}</td>
+                    <td>{CATEGORY_LABELS[code.category]}</td>
+                    <td className={ui.num}>{percent(code.rate)}</td>
+                    <td>
+                      {formatDate(code.effectiveFrom)}
+                      {code.effectiveTo ? ` to ${formatDate(code.effectiveTo)}` : ""}
+                    </td>
+                    <td>
+                      {can("admin") ? (
+                        <select
+                          aria-label={`${code.code} available on`}
+                          value={code.availableOn}
+                          onChange={(event) => void changeAvailableOn(code, event.target.value as AvailableOn)}
+                        >
+                          {AVAILABLE_ON.map((side) => (
+                            <option key={side} value={side}>
+                              {AVAILABLE_ON_LABELS[side]}
+                            </option>
+                          ))}
+                        </select>
+                      ) : (
+                        AVAILABLE_ON_LABELS[code.availableOn]
+                      )}
+                    </td>
+                    <td>{code.isActive ? <Badge tone="green">Active</Badge> : <Badge>Inactive</Badge>}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+      </Card>
+    </>
+  );
+}
+
+export default function TaxPage() {
+  return (
+    <Page>
+      <PageHeader title="Tax codes" />
+      <RequireOrganisation>{(organisationId) => <Tax key={organisationId} organisationId={organisationId} />}</RequireOrganisation>
+    </Page>
+  );
+}

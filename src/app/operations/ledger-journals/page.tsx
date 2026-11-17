@@ -1,0 +1,790 @@
+"use client";
+
+import { DateInput } from "@/components/date-input";
+import Link from "next/link";
+import { useSearchParams } from "next/navigation";
+import { Suspense, useEffect, useRef, useState } from "react";
+import { Money, RequireOrganisation, useAccounts } from "@/components/books";
+import { useApiData } from "@/components/hooks";
+import { JournalDrafts } from "@/components/journals/journal-drafts";
+import { JournalEditor } from "@/components/journals/journal-editor";
+import { CustomValuesText, useCustomFields } from "@/components/custom-fields";
+import { TrackingTagsText, useTracking } from "@/components/tracking";
+import { Badge, Button, Card, Empty, Field, Notice, Page, PageHeader, ui } from "@/components/ui";
+import { useWorkspace } from "@/components/workspace";
+import { formatDate, formatDateTime, formatMoney, personName } from "@/lib/format";
+import { api, errorMessage, newIdempotencyKey } from "@/lib/client/api";
+import type { VoidJournalsPlan } from "@/lib/ledger/void-journals";
+import type { Journal, JournalWithLines } from "@/lib/ledger/journals";
+
+/** How a foreign-currency line's base amount came about (FXB1-FXB11). */
+const FX_KIND_TEXT: Record<"rate" | "implied" | "carrying_value" | "revaluation" | "document", string> = {
+  rate: "at",
+  implied: "arrived; rate",
+  carrying_value: "at its carrying value; rate",
+  revaluation: "(revaluation) at",
+  document: "(document) at",
+};
+import { RdLineTags } from "@/components/rd";
+import { RecordExtrasPanel } from "@/components/records/record-extras";
+
+type JournalDetails = {
+  journal: JournalWithLines;
+  parentJournal: Journal | null;
+  correctionJournals: Journal[];
+  canCorrect: boolean;
+};
+
+const ORIGIN_LABELS: Record<Journal["origin"], string> = {
+  manual: "Manual",
+  correction: "Correction",
+  inventory: "Stock",
+  fx_revaluation: "FX revaluation",
+  invoice: "Invoice",
+  customer_payment: "Customer payment",
+  customer_payment_batch: "Payment for several invoices",
+  supplier_payment_batch: "Payment for several bills",
+  bill: "Bill",
+  supplier_payment: "Supplier payment",
+  sales_credit_note: "Credit note",
+  sales_credit_note_refund: "Credit note refund",
+  supplier_credit_note: "Supplier credit note",
+  supplier_credit_note_refund: "Supplier refund",
+  customer_overpayment_refund: "Overpayment refund",
+  bank_transaction: "Bank transaction",
+  bank_transfer: "Transfer",
+  expense_claim: "Expense claim",
+  expense_claim_payment: "Expense claim payment",
+  fixed_asset_depreciation: "Depreciation",
+  fixed_asset_disposal: "Asset disposal",
+  opening_balance: "Opening balances",
+  payroll: "Pay run",
+  livestock_valuation: "Livestock valuation",
+  livestock_rations: "Livestock rations",
+  recode: "Recode",
+  history: "Imported history",
+  sales_when_sent: "Sale sent (Shopify)",
+};
+
+const REVERSED_BY: Partial<Record<Journal["origin"], string>> = {
+  invoice: "The invoice was voided: reversed by",
+  customer_payment: "The payment was voided: reversed by",
+  customer_payment_batch: "The payment was voided: reversed by",
+  supplier_payment_batch: "The payment was voided: reversed by",
+  bill: "The bill was voided: reversed by",
+  supplier_payment: "The payment was voided: reversed by",
+  sales_credit_note: "The credit note was voided: reversed by",
+  sales_credit_note_refund: "The refund was voided: reversed by",
+  supplier_credit_note: "The supplier credit note was voided: reversed by",
+  supplier_credit_note_refund: "The refund was voided: reversed by",
+  customer_overpayment_refund: "The refund was voided: reversed by",
+  bank_transaction: "The bank transaction was voided: reversed by",
+  bank_transfer: "The transfer was voided: reversed by",
+  expense_claim: "The expense claim was voided: reversed by",
+  expense_claim_payment: "The payment was voided: reversed by",
+  fixed_asset_depreciation: "The depreciation run was rolled back: reversed by",
+  fixed_asset_disposal: "The disposal was undone: reversed by",
+  payroll: "The pay run was voided: reversed by",
+  livestock_valuation: "The livestock valuation was replaced: reversed by",
+  livestock_rations: "The rations movement was voided: reversed by",
+};
+
+/** A journal Void works on (VJ1): a manual journal, or a correction's replacement. */
+const voidable = (journal: Journal) => (journal.origin === "manual" && journal.correctionKind === null) || journal.correctionKind === "replacement";
+
+/** Void (VJ1-VJ5): a preview of what it does, then the reversals, with a date and a reason. */
+function VoidPanel({ organisationId, journalIds, onDone, onCancel }: { organisationId: string; journalIds: string[]; onDone: () => void; onCancel: () => void }) {
+  const [voidDate, setVoidDate] = useState("");
+  const [reason, setReason] = useState("");
+  const [plan, setPlan] = useState<VoidJournalsPlan | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  const [key] = useState(() => newIdempotencyKey("void-journals"));
+  useEffect(() => {
+    let live = true;
+    api<VoidJournalsPlan>("/api/ledger/journals/void", { method: "POST", body: { organisationId, journalIds, voidDate } })
+      .then((result) => live && (setPlan(result), setError(null)))
+      .catch((caught) => live && setError(errorMessage(caught)));
+    return () => {
+      live = false;
+    };
+  }, [organisationId, journalIds, voidDate]);
+  const stuck = plan?.items.filter((item) => item.blocked) ?? [];
+  async function go() {
+    if (!plan) return;
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/api/ledger/journals/void", { method: "POST", body: { organisationId, journalIds, voidDate, reason, previewHash: plan.hash, idempotencyKey: key } });
+      onDone();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card
+      title={journalIds.length === 1 ? `Void journal #${journalIds[0]}` : `Void ${journalIds.length} journals`}
+      description="Voiding posts the exact reversal of each journal, linked to it, so it comes to nothing. Nothing is deleted, and there's no new version."
+    >
+      {error ? <Notice tone="error">{error}</Notice> : null}
+      <div className={ui.inlineForm}>
+        <Field label="Void on" hint="Blank: each journal's own date.">
+          <DateInput value={voidDate} onChange={(event) => setVoidDate(event.target.value)} />
+        </Field>
+        <Field label="Why">
+          <input value={reason} maxLength={300} placeholder="For example: posted twice" onChange={(event) => setReason(event.target.value)} />
+        </Field>
+      </div>
+      {plan ? (
+        <>
+          {stuck.length > 0 ? (
+            <Notice tone="warning">
+              {stuck.map((item) => (
+                <div key={item.journalId}>
+                  #{item.journalId} {item.reference}: {item.blocked}
+                </div>
+              ))}
+              Take {stuck.length === 1 ? "it" : "them"} out to void the rest.
+            </Notice>
+          ) : null}
+          <table className={ui.table}>
+            <thead>
+              <tr>
+                <th>Account</th>
+                <th className={ui.num}>Debit</th>
+                <th className={ui.num}>Credit</th>
+              </tr>
+            </thead>
+            <tbody>
+              {plan.effect.map((line) => (
+                <tr key={line.accountCode}>
+                  <td>
+                    {line.accountCode} {line.accountName}
+                  </td>
+                  <td className={ui.num}>{line.debit === "0.00" ? "" : formatMoney(line.debit)}</td>
+                  <td className={ui.num}>{line.credit === "0.00" ? "" : formatMoney(line.credit)}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </>
+      ) : (
+        <p className={ui.muted}>Working out what it does…</p>
+      )}
+      <div className={ui.actions}>
+        <Button variant="danger" disabled={busy || !plan || stuck.length > 0} onClick={() => void go()}>
+          {busy ? "Voiding…" : journalIds.length === 1 ? "Void it" : `Void ${journalIds.length} journals`}
+        </Button>
+        <Button variant="secondary" onClick={onCancel}>
+          Cancel
+        </Button>
+      </div>
+    </Card>
+  );
+}
+
+function KindBadge({ journal }: { journal: Journal }) {
+  if (journal.correctionKind === "reversal") return <Badge tone="amber">Reversal</Badge>;
+  if (journal.correctionKind === "replacement") return <Badge tone="blue">Replacement</Badge>;
+  return <Badge tone={journal.origin === "manual" ? "neutral" : "green"}>{ORIGIN_LABELS[journal.origin]}</Badge>;
+}
+
+function JournalDetail({
+  organisationId,
+  journalId,
+  onSelect,
+  onCorrect,
+  onVoid,
+}: {
+  organisationId: string;
+  journalId: string;
+  onSelect: (id: string) => void;
+  onCorrect: (journal: JournalWithLines) => void;
+  onVoid: (journal: JournalWithLines) => void;
+}) {
+  const { can } = useWorkspace();
+  const details = useApiData<JournalDetails>(`/api/ledger/journals/${journalId}`, { organisationId });
+  const tracking = useTracking(organisationId);
+  const customSetup = useCustomFields(organisationId);
+  if (details.error) return <Notice tone="error">{details.error}</Notice>;
+  if (!details.data) return <p className={ui.muted}>Loading journal #{journalId}…</p>;
+  const { journal, parentJournal, correctionJournals, canCorrect } = details.data;
+  return (
+    <Card
+      title={`Journal #${journal.id} · ${journal.reference}`}
+      description={`${formatDate(journal.postingDate)} · posted by ${personName(journal, "createdBy") ?? "unknown"} on ${formatDateTime(journal.createdAt)}`}
+      actions={
+        canCorrect && can("bookkeeper") ? (
+          <>
+            <Button variant="secondary" onClick={() => onCorrect(journal)} title="A posted journal isn't changed in place: saving posts a correction (a reversal and the new version), so the history is kept.">
+              Edit this journal
+            </Button>
+            {voidable(journal) ? (
+              <Button variant="secondary" onClick={() => onVoid(journal)} title="Cancels it with its exact reversal, with no new version.">
+                Void
+              </Button>
+            ) : null}
+          </>
+        ) : null
+      }
+    >
+      <div className={ui.actions}>
+        <KindBadge journal={journal} />
+        {journal.description ? <span className={ui.muted}>{journal.description}</span> : null}
+      </div>
+      {parentJournal ? (
+        <p className={ui.muted}>
+          {journal.correctionKind === "reversal" ? "Reverses" : "Replaces"} journal{" "}
+          <button type="button" className={ui.muted} style={{ border: 0, background: "none", textDecoration: "underline" }} onClick={() => onSelect(parentJournal.id)}>
+            #{parentJournal.id} ({parentJournal.reference})
+          </button>
+        </p>
+      ) : null}
+      {correctionJournals.length > 0 ? (
+        <Notice tone="warning">
+          {/* AJV3: a journal the AI voided says so. */}
+          {correctionJournals.some((entry) => entry.commandSource.startsWith("ai-void:")) ? <strong>Voided by the AI. </strong> : null}
+          {correctionJournals.some((entry) => entry.commandSource.startsWith("void:")) ? <strong>Voided. </strong> : null}
+          {correctionJournals.some((entry) => entry.commandSource.startsWith("ai-void:")) ? "Reversed by" : (REVERSED_BY[journal.origin] ?? "Corrected by")}{" "}
+          {correctionJournals.map((entry, index) => (
+            <span key={entry.id}>
+              {index > 0 ? " and " : ""}
+              <button type="button" style={{ border: 0, background: "none", textDecoration: "underline", color: "inherit" }} onClick={() => onSelect(entry.id)}>
+                #{entry.id} ({entry.correctionKind})
+              </button>
+            </span>
+          ))}
+          .
+        </Notice>
+      ) : null}
+      {!canCorrect && (journal.origin === "inventory" || journal.origin === "fx_revaluation") ? (
+        <p className={ui.muted}>
+          This journal was created by {journal.origin === "inventory" ? "a stock movement" : "an FX revaluation"}. Correct it
+          there so the records stay in step with the ledger.
+        </p>
+      ) : null}
+      {journal.origin === "invoice" ? (
+        <p className={ui.muted}>
+          This journal was posted by {journal.correctionKind === "reversal" ? "voiding" : "approving"} a sales invoice, so it
+          can&apos;t be corrected here.
+          {journal.correctionKind === "reversal" ? null : (
+            <>
+              {" "}
+              To cancel it, void the invoice from <Link href="/operations/invoices">Invoices</Link>.
+            </>
+          )}
+        </p>
+      ) : null}
+      {journal.origin === "customer_payment" ? (
+        <p className={ui.muted}>
+          This journal was posted by {journal.correctionKind === "reversal" ? "voiding" : "recording"} a customer payment, so
+          it can&apos;t be corrected here.
+          {journal.correctionKind === "reversal" ? null : (
+            <>
+              {" "}
+              To undo it, void the payment from its invoice in <Link href="/operations/invoices">Invoices</Link>.
+            </>
+          )}
+        </p>
+      ) : null}
+      {journal.origin === "customer_payment_batch" || journal.origin === "supplier_payment_batch" ? (
+        <p className={ui.muted}>
+          This journal was posted by {journal.correctionKind === "reversal" ? "voiding" : "recording"} a payment for several{" "}
+          {journal.origin === "customer_payment_batch" ? "invoices" : "bills"}, so it can&apos;t be corrected here.
+          {journal.correctionKind === "reversal" ? null : (
+            <>
+              {" "}
+              To undo it, void the whole payment from{" "}
+              {journal.origin === "customer_payment_batch" ? (
+                <Link href="/operations/customer-payments">payments for several invoices</Link>
+              ) : (
+                <Link href="/operations/supplier-payments">payments for several bills</Link>
+              )}
+              .
+            </>
+          )}
+        </p>
+      ) : null}
+      {journal.origin === "bill" ? (
+        <p className={ui.muted}>
+          This journal was posted by {journal.correctionKind === "reversal" ? "voiding" : "approving"} a bill, so it
+          can&apos;t be corrected here.
+          {journal.correctionKind === "reversal" ? null : (
+            <>
+              {" "}
+              To cancel it, void the bill from <Link href="/operations/bills">Bills</Link>.
+            </>
+          )}
+        </p>
+      ) : null}
+      {journal.origin === "supplier_payment" ? (
+        <p className={ui.muted}>
+          This journal was posted by {journal.correctionKind === "reversal" ? "voiding" : "recording"} a supplier payment, so
+          it can&apos;t be corrected here.
+          {journal.correctionKind === "reversal" ? null : (
+            <>
+              {" "}
+              To undo it, void the payment from its bill in <Link href="/operations/bills">Bills</Link>.
+            </>
+          )}
+        </p>
+      ) : null}
+      {journal.origin === "sales_credit_note" ? (
+        <p className={ui.muted}>
+          This journal was posted by {journal.correctionKind === "reversal" ? "voiding" : "approving"} a sales credit note,
+          so it can&apos;t be corrected here.
+          {journal.correctionKind === "reversal" ? null : (
+            <>
+              {" "}
+              To cancel it, void the credit note from <Link href="/operations/credit-notes">Credit notes</Link>.
+            </>
+          )}
+        </p>
+      ) : null}
+      {journal.origin === "sales_credit_note_refund" ? (
+        <p className={ui.muted}>
+          This journal was posted by {journal.correctionKind === "reversal" ? "voiding" : "recording"} a credit note refund,
+          so it can&apos;t be corrected here.
+          {journal.correctionKind === "reversal" ? null : (
+            <>
+              {" "}
+              To undo it, void the refund from its credit note in{" "}
+              <Link href="/operations/credit-notes">Credit notes</Link>.
+            </>
+          )}
+        </p>
+      ) : null}
+      {journal.origin === "customer_overpayment_refund" ? (
+        <p className={ui.muted}>
+          This journal was posted by {journal.correctionKind === "reversal" ? "voiding" : "recording"} a refund of a
+          customer overpayment, so it can&apos;t be corrected here.
+          {journal.correctionKind === "reversal" ? null : (
+            <>
+              {" "}
+              To undo it, void the refund from the overpayment, which is linked from the overpaid invoice in{" "}
+              <Link href="/operations/invoices">Invoices</Link>.
+            </>
+          )}
+        </p>
+      ) : null}
+      {journal.origin === "bank_transaction" || journal.origin === "bank_transfer" ? (
+        <p className={ui.muted}>
+          This journal was posted by {journal.correctionKind === "reversal" ? "voiding" : "posting"} a{" "}
+          {journal.origin === "bank_transaction" ? "bank transaction" : "transfer between bank accounts"}, so it can&apos;t
+          be corrected here.
+          {journal.correctionKind === "reversal" ? null : (
+            <>
+              {" "}
+              To undo it, unreconcile it and void it from its bank account in{" "}
+              <Link href="/operations/bank-accounts">Bank accounts</Link>.
+            </>
+          )}
+        </p>
+      ) : null}
+      {journal.origin === "supplier_credit_note" ? (
+        <p className={ui.muted}>
+          This journal was posted by {journal.correctionKind === "reversal" ? "voiding" : "approving"} a supplier credit
+          note, so it can&apos;t be corrected here.
+          {journal.correctionKind === "reversal" ? null : (
+            <>
+              {" "}
+              To cancel it, void the credit note from{" "}
+              <Link href="/operations/supplier-credit-notes">Supplier credit notes</Link>.
+            </>
+          )}
+        </p>
+      ) : null}
+      {journal.origin === "supplier_credit_note_refund" ? (
+        <p className={ui.muted}>
+          This journal was posted by {journal.correctionKind === "reversal" ? "voiding" : "recording"} a refund received
+          from a supplier, so it can&apos;t be corrected here.
+          {journal.correctionKind === "reversal" ? null : (
+            <>
+              {" "}
+              To undo it, void the refund from its credit note in{" "}
+              <Link href="/operations/supplier-credit-notes">Supplier credit notes</Link>.
+            </>
+          )}
+        </p>
+      ) : null}
+      <CustomValuesText setup={customSetup.data} values={journal.customFields} />
+      <div className={ui.tableWrap}>
+        <table className={ui.table}>
+          <thead>
+            <tr>
+              <th>Account</th>
+              <th>Description</th>
+              <th className={ui.num}>Debit</th>
+              <th className={ui.num}>Credit</th>
+            </tr>
+          </thead>
+          <tbody>
+            {journal.lines.map((line) => (
+              <tr key={line.lineOrder}>
+                <td>
+                  {line.accountCode} · {line.accountName}
+                  <TrackingTagsText setup={tracking.data} tags={line.tracking} />
+                  <CustomValuesText setup={customSetup.data} values={line.customFields} />
+                  {line.foreign ? (
+                    <div className={ui.muted}>
+                      {line.foreign.currencyCode} {formatMoney(line.foreign.amount)}{" "}
+                      {FX_KIND_TEXT[line.foreign.kind]} {line.foreign.rate}
+                    </div>
+                  ) : null}
+                </td>
+                <td className={ui.muted}>{line.description}</td>
+                <td className={ui.num}>
+                  <Money value={line.debitAmount} blankZero />
+                </td>
+                <td className={ui.num}>
+                  <Money value={line.creditAmount} blankZero />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+          <tfoot>
+            <tr>
+              <td colSpan={2}>Total ({journal.currencyCode})</td>
+              <td className={ui.num}>
+                <Money value={journal.totalDebit} />
+              </td>
+              <td className={ui.num}>
+                <Money value={journal.totalCredit} />
+              </td>
+            </tr>
+          </tfoot>
+        </table>
+      </div>
+    </Card>
+  );
+}
+
+type Filters = { from: string; to: string; reference: string; kind: string };
+
+function Journals({ organisationId, initialJournalId }: { organisationId: string; initialJournalId: string | null }) {
+  const { can } = useWorkspace();
+  const accounts = useAccounts(organisationId);
+  // Manual journals by default, 100 a page.
+  const [filters, setFilters] = useState<Filters>({ from: "", to: "", reference: "", kind: "journals" });
+  // VP1: voided or corrected journals and their reversals are left out unless asked for.
+  const [showVoided, setShowVoided] = useState(false);
+  const [applied, setApplied] = useState<Filters>(filters);
+  const [page, setPage] = useState(1);
+  const list = useApiData<{ journals: Array<Journal & { voided?: "voided" | "corrected" }>; page: number; pages: number; total: number }>("/api/ledger/journals", {
+    organisationId,
+    postingDateFrom: applied.from,
+    postingDateTo: applied.to,
+    referenceQuery: applied.reference,
+    kind: applied.kind,
+    page: String(page),
+    pageSize: "100",
+    hideVoided: showVoided ? null : "1",
+  });
+  const [selected, setSelected] = useState<string | null>(initialJournalId);
+  // Void (VJ1-VJ5): ticked journals, and the ones being voided.
+  const [ticked, setTicked] = useState<Set<string>>(new Set());
+  const [voiding, setVoiding] = useState<string[] | null>(null);
+  const [voidedNote, setVoidedNote] = useState<string | null>(null);
+  const detailRef = useRef<HTMLDivElement>(null);
+  // Opening a journal from the list scrolls up to it.
+  useEffect(() => {
+    if (selected) detailRef.current?.scrollIntoView({ behavior: "smooth", block: "start" });
+  }, [selected]);
+  const [composing, setComposing] = useState(false);
+  const [correcting, setCorrecting] = useState<JournalWithLines | null>(null);
+  const [posted, setPosted] = useState<string | null>(null);
+  const [draftsVersion, setDraftsVersion] = useState(0);
+
+  const journals = list.data?.journals ?? [];
+  const pager =
+    list.data && list.data.pages > 1 ? (
+      <div className={ui.rowButtons} role="navigation" aria-label="Journal pages" style={{ alignItems: "center" }}>
+        <Button variant="secondary" size="small" disabled={page <= 1} onClick={() => setPage(page - 1)}>
+          Previous
+        </Button>
+        <span className={ui.muted}>
+          Page {list.data.page} of {list.data.pages} · {list.data.total.toLocaleString("en-NZ")} journals
+        </span>
+        <Button variant="secondary" size="small" disabled={page >= list.data.pages} onClick={() => setPage(page + 1)}>
+          Next
+        </Button>
+      </div>
+    ) : list.data ? (
+      <p className={ui.muted}>{list.data.total.toLocaleString("en-NZ")} journals</p>
+    ) : null;
+
+  function refresh(select: string) {
+    setPage(1);
+    list.reload();
+    setSelected(select);
+  }
+
+  return (
+    <>
+      {posted ? <Notice tone="success">{posted}</Notice> : null}
+      {can("bookkeeper") && !correcting ? (
+        composing ? (
+          <Card
+            title="New journal"
+            description="Pick an account for each line. Debits must equal credits. Save it as a draft to post it later; a draft isn't in the ledger."
+          >
+            {accounts.data ? (
+              <JournalEditor
+                organisationId={organisationId}
+                accounts={accounts.data.accounts}
+                mode="new"
+                onCancel={() => setComposing(false)}
+                onDraftSaved={(id) => {
+                  setComposing(false);
+                  setPosted(`Saved draft journal #${id}. It's under Draft journals until it's posted.`);
+                  setDraftsVersion((value) => value + 1);
+                }}
+                onDone={(id) => {
+                  setPosted(`Posted journal #${id}.`);
+                  refresh(id);
+                }}
+              />
+            ) : (
+              <p className={ui.muted}>{accounts.error ?? "Loading accounts…"}</p>
+            )}
+          </Card>
+        ) : (
+          <div>
+            <Button onClick={() => setComposing(true)}>New journal</Button>
+          </div>
+        )
+      ) : null}
+
+      {correcting ? (
+        <Card title={`Correct journal #${correcting.id}`}>
+          {accounts.data ? (
+            <JournalEditor
+              organisationId={organisationId}
+              accounts={accounts.data.accounts}
+              mode="correct"
+              original={correcting}
+              onCancel={() => setCorrecting(null)}
+              onDone={(id) => {
+                setCorrecting(null);
+                setPosted(`Posted the correction. The replacement is journal #${id}.`);
+                refresh(id);
+              }}
+            />
+          ) : (
+            <p className={ui.muted}>Loading accounts…</p>
+          )}
+        </Card>
+      ) : null}
+
+      <JournalDrafts
+        organisationId={organisationId}
+        accounts={accounts.data?.accounts ?? null}
+        reloadKey={draftsVersion}
+        onPosted={(id) => refresh(id)}
+      />
+
+      <div ref={detailRef} style={{ scrollMarginTop: 72 }} />
+      {selected ? (
+        <JournalDetail
+          key={selected}
+          organisationId={organisationId}
+          journalId={selected}
+          onSelect={setSelected}
+          onCorrect={(journal) => {
+            setComposing(false);
+            setCorrecting(journal);
+            window.scrollTo({ top: 0, behavior: "smooth" });
+          }}
+          onVoid={(journal) => setVoiding([journal.id])}
+        />
+      ) : null}
+      {voiding ? (
+        <VoidPanel
+          key={voiding.join(",")}
+          organisationId={organisationId}
+          journalIds={voiding}
+          onCancel={() => setVoiding(null)}
+          onDone={() => {
+            setVoidedNote(voiding.length === 1 ? `Journal #${voiding[0]} is voided.` : `${voiding.length} journals are voided.`);
+            setVoiding(null);
+            setTicked(new Set());
+            list.reload();
+            if (selected) {
+              const keep = selected;
+              setSelected(null);
+              setTimeout(() => setSelected(keep), 0);
+            }
+          }}
+        />
+      ) : null}
+      {voidedNote ? <Notice tone="success">{voidedNote}</Notice> : null}
+      {selected ? <RdLineTags key={`rd-journal-${selected}`} organisationId={organisationId} documentType="journal" documentId={selected} /> : null}
+      {selected ? (
+        <RecordExtrasPanel key={`journal-${selected}`} organisationId={organisationId} recordType="ledger_journal" recordId={selected} />
+      ) : null}
+
+      <Card title="Journals" description="Click a journal to open it. Manual journals can be edited: saving posts a correction, so the history is kept.">
+        <form
+          className={ui.inlineForm}
+          onSubmit={(event) => {
+            event.preventDefault();
+            setPage(1);
+            setApplied(filters);
+          }}
+        >
+          <Field label="From">
+            <DateInput value={filters.from} onChange={(event) => setFilters({ ...filters, from: event.target.value })} />
+          </Field>
+          <Field label="To">
+            <DateInput value={filters.to} onChange={(event) => setFilters({ ...filters, to: event.target.value })} />
+          </Field>
+          <Field label="Reference contains">
+            <input value={filters.reference} onChange={(event) => setFilters({ ...filters, reference: event.target.value })} />
+          </Field>
+          <Field label="Kind">
+            <select value={filters.kind} onChange={(event) => setFilters({ ...filters, kind: event.target.value })}>
+              <option value="journals">Manual journals</option>
+              <option value="manual">Entered by hand (no corrections)</option>
+              <option value="">Everything: invoices, bank, payments and more</option>
+              <option value="inventory">Stock</option>
+              <option value="fx_revaluation">FX revaluation</option>
+              <option value="invoice">Invoices</option>
+              <option value="customer_payment">Customer payments</option>
+              <option value="customer_payment_batch">Payments for several invoices</option>
+              <option value="bill">Bills</option>
+              <option value="supplier_payment">Supplier payments</option>
+              <option value="supplier_payment_batch">Payments for several bills</option>
+              <option value="sales_credit_note">Credit notes</option>
+              <option value="sales_credit_note_refund">Credit note refunds</option>
+              <option value="supplier_credit_note">Supplier credit notes</option>
+              <option value="supplier_credit_note_refund">Supplier refunds</option>
+              <option value="customer_overpayment_refund">Overpayment refunds</option>
+              <option value="bank_transaction">Bank transactions</option>
+              <option value="bank_transfer">Transfers</option>
+              <option value="history">Imported history</option>
+              <option value="reversal">Reversals</option>
+              <option value="replacement">Replacements</option>
+            </select>
+          </Field>
+          <label className={ui.checkbox} style={{ alignSelf: "end" }}>
+            <input
+              type="checkbox"
+              checked={showVoided}
+              onChange={(event) => {
+                setPage(1);
+                setShowVoided(event.target.checked);
+              }}
+            />{" "}
+            Show voided and reversals
+          </label>
+          <Button type="submit" variant="secondary">
+            Filter
+          </Button>
+        </form>
+        {list.error ? <Notice tone="error">{list.error}</Notice> : null}
+        {can("bookkeeper") && ticked.size > 0 ? (
+          <div className={ui.actions}>
+            <Button variant="secondary" onClick={() => setVoiding([...ticked])}>
+              Void {ticked.size} selected
+            </Button>
+            <Button variant="secondary" onClick={() => setTicked(new Set())}>
+              Clear
+            </Button>
+          </div>
+        ) : null}
+        {pager}
+        {list.data && journals.length === 0 ? (
+          <Empty>No journals match.</Empty>
+        ) : (
+          <div className={ui.tableWrap}>
+            <table className={ui.table}>
+              <thead>
+                <tr>
+                  {can("bookkeeper") ? (
+                    <th>
+                      <span className={ui.srOnly}>Select</span>
+                    </th>
+                  ) : null}
+                  <th>#</th>
+                  <th>Date</th>
+                  <th>Reference</th>
+                  <th>Description</th>
+                  <th>Kind</th>
+                  <th className={ui.num}>Amount</th>
+                </tr>
+              </thead>
+              <tbody>
+                {journals.map((journal) => (
+                  <tr
+                    key={journal.id}
+                    className={`${ui.clickableRow} ${selected === journal.id ? ui.selectedRow : ""}`}
+                    onClick={() => setSelected(journal.id)}
+                  >
+                    {can("bookkeeper") ? (
+                      <td onClick={(event) => event.stopPropagation()}>
+                        {voidable(journal) ? (
+                          <input
+                            type="checkbox"
+                            aria-label={`Select journal ${journal.id}`}
+                            checked={ticked.has(journal.id)}
+                            onChange={(event) => {
+                              const next = new Set(ticked);
+                              if (event.target.checked) next.add(journal.id);
+                              else next.delete(journal.id);
+                              setTicked(next);
+                            }}
+                          />
+                        ) : null}
+                      </td>
+                    ) : null}
+                    <td>{journal.id}</td>
+                    <td>{formatDate(journal.postingDate)}</td>
+                    <td>{journal.reference}</td>
+                    <td className={ui.muted}>{journal.description}</td>
+                    <td>
+                      <KindBadge journal={journal} />
+                      {journal.voided ? (
+                        <>
+                          {" "}
+                          <Badge tone="neutral">{journal.voided === "voided" ? "Voided" : "Corrected"}</Badge>
+                        </>
+                      ) : null}
+                    </td>
+                    <td className={ui.num}>
+                      <Money value={journal.totalDebit} />
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        {pager}
+      </Card>
+    </>
+  );
+}
+
+function JournalsPage() {
+  const params = useSearchParams();
+  return (
+    <Page>
+      <PageHeader title="Journals" />
+      <RequireOrganisation>
+        {(organisationId) => (
+          <Journals key={organisationId} organisationId={organisationId} initialJournalId={params.get("journal")} />
+        )}
+      </RequireOrganisation>
+    </Page>
+  );
+}
+
+export default function LedgerJournalsPage() {
+  return (
+    <Suspense fallback={null}>
+      <JournalsPage />
+    </Suspense>
+  );
+}

@@ -1,0 +1,440 @@
+import fs from "node:fs";
+import os from "node:os";
+import path from "node:path";
+import { afterAll, beforeAll, expect, it } from "vitest";
+import * as moveRoute from "@/app/api/ai-workspace/dashboards/[dashboardId]/move/route";
+import * as booksRoute from "@/app/api/analytics/books/route";
+import * as analyticsRoute from "@/app/api/analytics/route";
+import * as sourcesRoute from "@/app/api/analytics/sources/route";
+import { runTile } from "@/lib/analytics/dashboards";
+import { listAiDashboards, saveAiDashboard } from "@/lib/ai-workspace/dashboards";
+import { addDatasetRows, archiveDataset, saveDataset } from "@/lib/ai-workspace/datasets";
+import { readBooks } from "@/lib/analytics/books";
+import { builtInMeasures, measureFromSaved } from "@/lib/analytics/measure-library";
+import { closeAnalytics, queryAnalytics, replaceTohyeeTables, type TableCopy, type TableCopyRow } from "@/lib/analytics/engine";
+import { runDueLoads } from "@/lib/analytics/scheduler";
+import type { SessionUser } from "@/lib/auth/sessions";
+import { createContact } from "@/lib/contacts/service";
+import { createOpportunity } from "@/lib/crm/service";
+import type { OrgTx } from "@/lib/db/org-transaction";
+import { approveInvoice, createInvoice, voidInvoice } from "@/lib/invoices/service";
+import { postJournal, postJournalBody } from "@/lib/ledger/journals";
+import { updateOrganisationSettings } from "@/lib/organisations/settings";
+import { coreQuery } from "@/lib/db/transactions";
+import {
+  apiRequest,
+  createTestOrganisation,
+  createTestUser,
+  describeWithDatabase,
+  inOrganisation,
+  key,
+  sessionCookieFor,
+  startTestServer,
+  type TestServer,
+} from "../helpers/test-server";
+
+const ORG = "books-co";
+const noContext = undefined as unknown;
+
+/** Examples AB1-AB10 in docs/ACCOUNTING-EXAMPLES.md ("Analytics: Tohyee's own books and CRM"). */
+describeWithDatabase("analytics: the books and CRM", () => {
+  let server: TestServer;
+  let owner: SessionUser;
+  let viewer: SessionUser;
+  let cookie: string;
+  let root: string;
+  const as = <T>(work: (tx: OrgTx) => Promise<T>) => inOrganisation(ORG, { userId: owner.id, email: owner.email }, work);
+  const refresh = async (user = cookie) =>
+    (await (await booksRoute.POST(apiRequest("/api/analytics/books", { method: "POST", cookie: user, body: { organisationId: ORG } }), noContext)).json()) as {
+      run?: { status: string; rowsLoaded: string; error: string | null };
+      error?: string;
+    };
+  const sum = async (sql: string) => (await queryAnalytics(ORG, `select coalesce(sum(amount), 0)::varchar as total from tohyee_ledger_lines where ${sql}`))[0].total;
+  const journal = (postingDate: string, debit: string, credit: string, amount: string) =>
+    as((tx) =>
+      postJournal(tx, {
+        idempotencyKey: key("journal"),
+        postingDate,
+        reference: "Setup",
+        lines: [
+          { accountCode: debit, debitAmount: amount, creditAmount: "0" },
+          { accountCode: credit, debitAmount: "0", creditAmount: amount },
+        ],
+      }),
+    );
+
+  beforeAll(async () => {
+    root = fs.mkdtempSync(path.join(os.tmpdir(), "tohyee-books-"));
+    process.env.TOHYEE_ANALYTICS_DIR = path.join(root, "data");
+    server = await startTestServer();
+    owner = await createTestUser("owner@example.com", { serverAdmin: true });
+    viewer = await createTestUser("viewer@example.com");
+    await createTestOrganisation(owner, ORG);
+    await coreQuery("insert into organisation_members (organisation_id, user_id, role) values ($1, $2, 'viewer')", [ORG, viewer.id]);
+    cookie = await sessionCookieFor(owner);
+    await as((tx) => updateOrganisationSettings(tx, { analyticsEnabled: true }));
+    // The CR1 journals.
+    await journal("2026-03-01", "1000", "3000", "5000.00");
+    await journal("2026-03-20", "1000", "4000", "500.00");
+    await journal("2026-04-10", "1000", "4000", "1000.00");
+    await journal("2026-04-15", "6010", "1000", "100.00");
+    await journal("2026-05-12", "1000", "4000", "1500.00");
+    await journal("2026-05-13", "5000", "1000", "400.00");
+    await journal("2026-06-08", "1000", "4000", "1200.00");
+    await journal("2026-06-09", "5000", "1000", "300.00");
+    await journal("2026-06-20", "6010", "1000", "250.00");
+    await journal("2026-06-30", "1000", "4200", "20.00");
+  });
+
+  afterAll(async () => {
+    await closeAnalytics(ORG);
+    await server?.teardown();
+    fs.rmSync(root, { recursive: true, force: true });
+  });
+
+  it("AB1-AB5: the ledger lines are copied as they are, and tiles decide which way round to show them", async () => {
+    const result = await refresh();
+    expect(result.run).toMatchObject({ status: "ok", error: null });
+    const count = await queryAnalytics(ORG, "select count(*)::int as n, sum(amount)::varchar as total from tohyee_ledger_lines");
+    expect(count).toEqual([{ n: 20, total: "0.00" }]);
+    const first = await queryAnalytics(
+      ORG,
+      "select posting_date::varchar as d, account_code, debit::varchar as debit, credit::varchar as credit from tohyee_ledger_lines order by journal_id, line limit 2",
+    );
+    expect(first).toEqual([
+      { d: "2026-03-01", account_code: "1000", debit: "5000.00", credit: "0.00" },
+      { d: "2026-03-01", account_code: "3000", debit: "0.00", credit: "5000.00" },
+    ]);
+    // AB2: June sales are a credit; a tile can show them the other way round.
+    expect(await sum("account_code = '4000' and posting_date between '2026-06-01' and '2026-06-30'")).toBe("-1200.00");
+    const sales = { label: "Sales", aggregate: "sum", field: "amount", negate: true };
+    const june = await runTile(ORG, {
+      table: "tohyee_ledger_lines",
+      groupBy: null,
+      measures: [sales],
+      filters: [{ field: "account_code", op: "eq", value: "4000" }],
+      dateField: "posting_date",
+    }, { from: "2026-06-01", to: "2026-06-30" });
+    expect(june.rows).toEqual([{ m0: "1200.00" }]);
+    // AB3, AB5.
+    expect(await sum("account_code = '5000' and posting_date between '2026-06-01' and '2026-06-30'")).toBe("300.00");
+    expect(await sum("account_code = '1000' and posting_date <= '2026-06-30'")).toBe("8170.00");
+    // AB4.
+    const monthly = await runTile(ORG, {
+      table: "tohyee_ledger_lines",
+      groupBy: { field: "posting_date", grain: "month" },
+      measures: [sales],
+      filters: [{ field: "account_code", op: "eq", value: "4000" }],
+    });
+    expect(monthly.rows).toEqual([
+      { category: "2026-03-01", m0: "500.00" },
+      { category: "2026-04-01", m0: "1000.00" },
+      { category: "2026-05-01", m0: "1500.00" },
+      { category: "2026-06-01", m0: "1200.00" },
+    ]);
+  });
+
+  it("AB6, AB7: approved and voided invoices are copied (never drafts), foreign ones at their base amounts", async () => {
+    const koru = (await as((tx) => createContact(tx, { idempotencyKey: key("c"), name: "Koru Ltd", isCustomer: true, email: "accounts@koru.example" }))).contact;
+    const acme = (await as((tx) => createContact(tx, { idempotencyKey: key("c"), name: "Acme Inc", isCustomer: true, currencyCode: "USD" }))).contact;
+    const draft = async (contactId: string, unitPrice: string, foreign?: { exchangeRate: string }) =>
+      (
+        await as((tx) =>
+          createInvoice(
+            tx,
+            {
+              idempotencyKey: key("i"),
+              contactId,
+              invoiceDate: "2026-07-03",
+              dueDate: "2026-07-31",
+              amountsMode: "exclusive",
+              lines: [{ description: "Work", quantity: "2", unitPrice, accountCode: "4000", taxCode: foreign ? "ZERO" : "GST" }],
+              ...(foreign ?? {}),
+            },
+            foreign ? { foreignCurrency: true } : {},
+          ),
+        )
+      ).invoice;
+    const i1 = await draft(koru.id, "50.00");
+    await as((tx) => approveInvoice(tx, i1.id, { idempotencyKey: key("a") }));
+    await draft(koru.id, "70.00"); // stays a draft
+    const voided = await draft(koru.id, "10.00");
+    await as((tx) => approveInvoice(tx, voided.id, { idempotencyKey: key("a") }));
+    await as((tx) => voidInvoice(tx, voided.id, { idempotencyKey: key("v"), voidDate: "2026-07-05" }));
+    const usd = await draft(acme.id, "50.00", { exchangeRate: "1.60" });
+    await as((tx) => approveInvoice(tx, usd.id, { idempotencyKey: key("a") }));
+
+    expect((await refresh()).run?.status).toBe("ok");
+    const invoices = await queryAnalytics(
+      ORG,
+      `select contact, status, void_date::varchar as void_date, net::varchar as net, gst::varchar as gst, total::varchar as total,
+              currency, foreign_total::varchar as foreign_total from tohyee_invoices order by invoice_id`,
+    );
+    expect(invoices).toEqual([
+      { contact: "Koru Ltd", status: "approved", void_date: null, net: "100.00", gst: "15.00", total: "115.00", currency: "NZD", foreign_total: null },
+      { contact: "Koru Ltd", status: "voided", void_date: "2026-07-05", net: "20.00", gst: "3.00", total: "23.00", currency: "NZD", foreign_total: null },
+      { contact: "Acme Inc", status: "approved", void_date: null, net: "160.00", gst: "0.00", total: "160.00", currency: "USD", foreign_total: "100.00" },
+    ]);
+    const lines = await queryAnalytics(ORG, "select count(*)::int as n from tohyee_invoice_lines");
+    expect(lines).toEqual([{ n: 3 }]);
+    // The voided invoice's posting and reversal are both in the ledger lines, netting to 0.00.
+    expect(await sum("contact = 'Koru Ltd' and account_code = '4000' and abs(amount) = 20.00")).toBe("0.00");
+    expect((await queryAnalytics(ORG, "select count(*)::int as n from tohyee_ledger_lines where contact = 'Koru Ltd' and abs(amount) = 20.00"))[0]).toEqual({ n: 2 });
+    const contacts = await queryAnalytics(ORG, "select name, email, is_customer from tohyee_contacts order by name");
+    expect(contacts).toEqual([
+      { name: "Acme Inc", email: null, is_customer: true },
+      { name: "Koru Ltd", email: "accounts@koru.example", is_customer: true },
+    ]);
+  });
+
+  it("AB8: the copy doesn't change until it's refreshed (nightly or Refresh now)", async () => {
+    await journal("2026-07-01", "1000", "4000", "300.00");
+    expect(await sum("account_code = '4000' and posting_date between '2026-07-01' and '2026-07-01'")).toBe("0.00");
+    await refresh();
+    expect(await sum("account_code = '4000' and posting_date between '2026-07-01' and '2026-07-01'")).toBe("-300.00");
+
+    // The nightly copy runs for every organisation with Analytics on, folder or not.
+    const tomorrow = new Date(Date.now() + 24 * 60 * 60 * 1000);
+    tomorrow.setUTCHours(18, 0, 0, 0);
+    const made = await runDueLoads(tomorrow);
+    expect(made.map((run) => [run.sourceName, run.status, run.trigger])).toEqual([["Books and CRM", "ok", "schedule"]]);
+  });
+
+  it("AB9: CRM tables are copied only while the CRM is on", async () => {
+    expect((await queryAnalytics(ORG, "select count(*)::int as n from information_schema.tables where table_name like 'tohyee_crm%'"))[0]).toEqual({ n: 0 });
+    await as((tx) => updateOrganisationSettings(tx, { crmEnabled: true }));
+    const company = (await as((tx) => createContact(tx, { idempotencyKey: key("c"), name: "Harbour Vets", isProspect: true }))).contact;
+    await as((tx) =>
+      createOpportunity(tx, { name: "Pendants 2027", contactId: company.id, ownerUserId: owner.id, amount: "5000", closeDate: "2026-12-15", stage: "proposal" }),
+    );
+    await refresh();
+    expect(await queryAnalytics(ORG, "select name, company, amount::varchar as amount, stage, outcome, expected_close::varchar as close from tohyee_crm_opportunities")).toEqual([
+      { name: "Pendants 2027", company: "Harbour Vets", amount: "5000.00", stage: "Proposal", outcome: "open", close: "2026-12-15" },
+    ]);
+    await as((tx) => updateOrganisationSettings(tx, { crmEnabled: false }));
+    await refresh();
+    expect((await queryAnalytics(ORG, "select count(*)::int as n from information_schema.tables where table_name like 'tohyee_crm%'"))[0]).toEqual({ n: 0 });
+  });
+
+  it("AB10: pay run lines are copied without names", async () => {
+    await as((tx) =>
+      postJournalBody(
+        tx,
+        "test",
+        key("payroll"),
+        {
+          postingDate: "2026-07-10",
+          reference: "Pay run 3 - Aroha Smith",
+          description: "Wages for Aroha Smith",
+          currencyCode: "NZD",
+          total: "900.00",
+          customInput: undefined,
+          lines: [
+            { accountCode: "6010", debit: "900.00", credit: "0", description: "Aroha Smith wages", tracking: {}, customInput: undefined, foreign: null },
+            { accountCode: "1000", debit: "0", credit: "900.00", description: "Aroha Smith net pay", tracking: {}, customInput: undefined, foreign: null },
+          ],
+        },
+        { origin: "payroll" },
+      ),
+    );
+    await refresh();
+    const rows = await queryAnalytics(ORG, "select reference, journal_description, description, contact from tohyee_ledger_lines where source = 'payroll'");
+    expect(rows).toEqual([
+      { reference: null, journal_description: "Pay run", description: "Pay run", contact: null },
+      { reference: null, journal_description: "Pay run", description: "Pay run", contact: null },
+    ]);
+    expect(JSON.stringify(await queryAnalytics(ORG, "select * from tohyee_ledger_lines"))).not.toContain("Aroha");
+  });
+
+  it("reads the big tables in batches (issue 150) and copies the same rows as one batch", async () => {
+    // Every table's rows, read in the transaction; batched tables are collected batch by batch.
+    const read = (batchSize?: number) =>
+      as(async (tx) => {
+        const tables = await readBooks(tx, new Map(), batchSize === undefined ? {} : { batchSize });
+        const copies: Array<{ name: string; columns: TableCopy["columns"]; rows: TableCopyRow[]; batches: number[] }> = [];
+        for (const table of tables) {
+          const rows: TableCopyRow[] = [];
+          const batches: number[] = [];
+          if (Array.isArray(table.rows)) rows.push(...table.rows);
+          else {
+            for await (const batch of table.rows) {
+              batches.push(batch.length);
+              rows.push(...batch);
+            }
+          }
+          copies.push({ name: table.name, columns: table.columns, rows, batches });
+        }
+        return copies;
+      });
+    const whole = await read();
+    const small = await read(3);
+    const strip = (copies: typeof whole) => copies.map(({ name, columns, rows }) => ({ name, columns, rows }));
+    expect(strip(small)).toEqual(strip(whole));
+    const ledger = small.find((table) => table.name === "tohyee_ledger_lines")!;
+    // 10 setup journals, AB6's invoice journals, AB8's and AB10's: more lines than one batch of 3.
+    expect(ledger.rows.length).toBeGreaterThan(20);
+    expect(ledger.batches.every((size) => size <= 3)).toBe(true);
+    expect(ledger.batches.length).toBe(Math.ceil(ledger.rows.length / 3));
+    expect(whole.find((table) => table.name === "tohyee_ledger_lines")!.batches).toEqual([ledger.rows.length]);
+
+    // Appended batch by batch into DuckDB, the copy is the same as the nightly one.
+    const before = await queryAnalytics(ORG, "select count(*)::int as n, sum(amount)::varchar as total, string_agg(account_code, ',' order by journal_id, line) as codes from tohyee_ledger_lines");
+    const copied = await as(async (tx) => replaceTohyeeTables(ORG, await readBooks(tx, new Map(), { batchSize: 3 })));
+    expect(copied).toBe(small.reduce((total, table) => total + table.rows.length, 0));
+    expect(await queryAnalytics(ORG, "select count(*)::int as n, sum(amount)::varchar as total, string_agg(account_code, ',' order by journal_id, line) as codes from tohyee_ledger_lines")).toEqual(before);
+    expect(before[0].n).toBe(ledger.rows.length);
+  });
+
+  it("only admins and owners refresh; CSV sources can't take tohyee_ names; anyone can see when it was copied", async () => {
+    const viewerCookie = await sessionCookieFor(viewer);
+    const refused = await booksRoute.POST(apiRequest("/api/analytics/books", { method: "POST", cookie: viewerCookie, body: { organisationId: ORG } }), noContext);
+    expect(refused.status).toBe(403);
+    const named = await sourcesRoute.POST(
+      apiRequest("/api/analytics/sources", {
+        method: "POST",
+        cookie,
+        body: { organisationId: ORG, name: "x", tableName: "tohyee_ledger_lines", fileName: "x.csv", columns: [{ source: "a", name: "a", kind: "text" }] },
+      }),
+      noContext,
+    );
+    expect(named.status).toBe(400);
+    const overview = (await (await analyticsRoute.GET(apiRequest(`/api/analytics?organisationId=${ORG}`, { cookie: viewerCookie }), noContext)).json()) as {
+      books: { status: string } | null;
+    };
+    expect(overview.books?.status).toBe("ok");
+  });
+  it("BM1-BM4: the built-in values give the profit and loss and balances", async () => {
+    await refresh();
+    const columns = (await queryAnalytics(ORG, "describe tohyee_ledger_lines")).map((row) => ({ name: String(row.column_name), type: String(row.column_type) }));
+    const builtIns = builtInMeasures("tohyee_ledger_lines", columns);
+    expect(builtIns.map((measure) => measure.name)).toEqual([
+      "Sales",
+      "Cost of sales",
+      "Gross profit",
+      "Gross margin %",
+      "Other income",
+      "Operating expenses",
+      "Net profit",
+      "Accounts receivable",
+      "Accounts payable",
+      "Cash in bank",
+      "Days to get paid",
+    ]);
+    // Each value as a key figure on its own (a tile has up to six).
+    const values = async (names: string[], dates: { from: string | null; to: string | null }) => {
+      const answers: Array<[string, string | null]> = [];
+      for (const name of names) {
+        const result = await runTile(
+          ORG,
+          { table: "tohyee_ledger_lines", groupBy: null, measures: [measureFromSaved(builtIns.find((measure) => measure.name === name)!)], filters: [], dateField: "posting_date" },
+          dates,
+        );
+        answers.push([name, result.rows[0].m0]);
+      }
+      return Object.fromEntries(answers);
+    };
+    const profitAndLoss = ["Sales", "Cost of sales", "Gross profit", "Gross margin %", "Other income", "Operating expenses", "Net profit"];
+    // BM1: March to June, as Tohyee's profit and loss for those dates.
+    expect(await values(profitAndLoss, { from: "2026-03-01", to: "2026-06-30" })).toEqual({
+      Sales: "4200.00",
+      "Cost of sales": "700.00",
+      "Gross profit": "3500.000000",
+      "Gross margin %": "0.833333",
+      "Other income": "20.00",
+      "Operating expenses": "350.00",
+      "Net profit": "3170.000000",
+    });
+    // BM2: balances as at 30 June, whatever the From date.
+    const balances = ["Accounts receivable", "Accounts payable", "Cash in bank"];
+    expect(await values(balances, { from: "2026-06-01", to: "2026-06-30" })).toEqual({ "Accounts receivable": null, "Accounts payable": null, "Cash in bank": "8170.00" });
+    // BM3: July, with the invoices (AB6, AB7), the 1 July sale (AB8) and the pay run (AB10).
+    expect(await values(["Sales", "Operating expenses", "Net profit", ...balances, "Days to get paid"], { from: "2026-07-01", to: "2026-07-31" })).toEqual({
+      Sales: "560.00",
+      "Operating expenses": "900.00",
+      "Net profit": "-340.000000",
+      "Accounts receivable": "275.00",
+      "Accounts payable": null,
+      "Cash in bank": "7570.00",
+      "Days to get paid": "15.223214",
+    });
+    // BM4: without both dates there are no days to divide by; a balance with no To date is everything.
+    expect(await values(["Days to get paid", "Cash in bank"], { from: null, to: null })).toEqual({ "Days to get paid": null, "Cash in bank": "7570.00" });
+    // A balance on a chart grouped by month isn't a balance, so it's refused.
+    await expect(
+      runTile(ORG, { table: "tohyee_ledger_lines", groupBy: { field: "posting_date", grain: "month" }, measures: [measureFromSaved(builtIns.find((measure) => measure.name === "Cash in bank")!)], filters: [] }),
+    ).rejects.toThrow("A balance can't be grouped by date");
+  });
+
+  it("#693: the AI's own tables are copied as tohyee_ai_ tables, exactly, and go when archived", async () => {
+    await as((tx) =>
+      saveDataset(tx, {
+        name: "herd_tests",
+        description: "Herd test results",
+        columns: [
+          { name: "cow", type: "text" },
+          { name: "tested_on", type: "date" },
+          { name: "milk_solids", type: "number" },
+          { name: "ratio", type: "number" },
+          { name: "in_milk", type: "boolean" },
+        ],
+      }),
+    );
+    await as((tx) =>
+      addDatasetRows(tx, {
+        name: "herd_tests",
+        rows: [
+          { cow: "Daisy", tested_on: "2026-09-01", milk_solids: "1.85", ratio: "0.1234567", in_milk: true },
+          { cow: "Bluebell", tested_on: "2026-09-01", milk_solids: "2.105", ratio: "2", in_milk: false },
+          { cow: "Clover", tested_on: null, milk_solids: null, ratio: null, in_milk: null },
+        ],
+      }),
+    );
+    // A name too long for an Analytics table is left out; it doesn't stop the copy.
+    await as((tx) => saveDataset(tx, { name: `a${"b".repeat(60)}`, description: "Too long for Analytics", columns: [{ name: "x", type: "text" }] }));
+    expect((await refresh()).run).toMatchObject({ status: "ok", error: null });
+
+    const types = await queryAnalytics(ORG, "select column_name, data_type from information_schema.columns where table_name = 'tohyee_ai_herd_tests' order by ordinal_position");
+    // A number that fits six decimals is a number; one that doesn't stays as its exact text, never rounded.
+    expect(types.map((row) => `${row.column_name}:${row.data_type}`)).toEqual(["cow:VARCHAR", "tested_on:DATE", "milk_solids:DECIMAL(28,6)", "ratio:VARCHAR", "in_milk:BOOLEAN"]);
+    const rows = await queryAnalytics(ORG, "select cow, tested_on::varchar as tested_on, milk_solids::varchar as milk_solids, ratio, in_milk::varchar as in_milk from tohyee_ai_herd_tests order by cow nulls last");
+    expect(rows).toEqual([
+      { cow: "Bluebell", tested_on: "2026-09-01", milk_solids: "2.105000", ratio: "2", in_milk: "false" },
+      { cow: "Clover", tested_on: null, milk_solids: null, ratio: null, in_milk: null },
+      { cow: "Daisy", tested_on: "2026-09-01", milk_solids: "1.850000", ratio: "0.1234567", in_milk: "true" },
+    ]);
+    // An Analytics tile adds it up exactly, like any other table.
+    const total = await runTile(ORG, { table: "tohyee_ai_herd_tests", groupBy: null, measures: [{ label: "Milk solids", aggregate: "sum", field: "milk_solids" }], filters: [] });
+    expect(total.rows[0].m0).toBe("3.955000");
+    expect((await queryAnalytics(ORG, "select count(*)::int as n from information_schema.tables where table_name like 'tohyee_ai_%'"))[0].n).toBe(1);
+
+    // Move to Analytics: the same tiles over the same table; what can't move is named and the old one stays.
+    const kpi = { title: "Milk solids", kind: "kpi", dataset: "herd_tests", measures: [{ aggregate: "sum", field: "milk_solids" }], note: "All cows" };
+    const byCow = { title: "By cow", kind: "bar", dataset: "herd_tests", groupBy: ["cow"], measures: [{ aggregate: "sum", field: "milk_solids", label: "solids" }], filters: [{ field: "in_milk", op: "ne", value: null }], sort: { by: "solids", direction: "desc" }, limit: 5, width: 2 };
+    const listing = { title: "Every test", kind: "table", dataset: "herd_tests" };
+    const mixed = await as((tx) => saveAiDashboard(tx, { name: "Herd tests", description: "From the herd test files", tiles: [kpi, byCow, listing] }));
+    const tidy = await as((tx) => saveAiDashboard(tx, { name: "Herd totals", tiles: [kpi] }));
+    const move = async (id: string, user = cookie) => {
+      const response = await moveRoute.POST(apiRequest(`/api/ai-workspace/dashboards/${id}/move`, { method: "POST", cookie: user, body: { organisationId: ORG } }), { params: Promise.resolve({ dashboardId: id }) });
+      return { status: response.status, data: (await response.json()) as { dashboard: { id: string; name: string; description: string; tiles: Array<Record<string, unknown>> }; left: Array<{ title: string; why: string }>; archived: boolean } };
+    };
+    expect((await move(mixed.id, await sessionCookieFor(viewer))).status).toBe(403);
+    const first = await move(mixed.id);
+    expect(first.status).toBe(201);
+    expect(first.data).toMatchObject({ archived: false, left: [{ title: "Every test", why: expect.stringContaining("lists the table's rows") }], dashboard: { name: "Herd tests", description: "From the herd test files" } });
+    expect(first.data.dashboard.tiles).toMatchObject([
+      { title: "Milk solids", visual: "kpi", width: "quarter", format: { card: { subtitle: "All cows" } }, query: { table: "tohyee_ai_herd_tests", groupBy: null, measures: [{ label: "Milk solids", aggregate: "sum", field: "milk_solids" }] } },
+      { title: "By cow", visual: "bar", width: "full", query: { groupBy: { field: "cow" }, measures: [{ label: "solids" }], filters: [{ field: "in_milk", op: "not_blank" }], sort: { by: "value", direction: "desc" }, limit: 5 } },
+    ]);
+    // The moved tile gives the figures the old one did.
+    const movedBars = await runTile(ORG, first.data.dashboard.tiles[1].query as Parameters<typeof runTile>[1]);
+    expect(movedBars.rows).toEqual([{ category: "Bluebell", m0: "2.105000" }, { category: "Daisy", m0: "1.850000" }]);
+    expect((await as((tx) => listAiDashboards(tx))).map((entry) => entry.name)).toEqual(["Herd tests", "Herd totals"]);
+    // Every tile moved: the old one is archived, so the report is in one place.
+    expect((await move(tidy.id)).data).toMatchObject({ archived: true, left: [] });
+    expect((await as((tx) => listAiDashboards(tx))).map((entry) => entry.name)).toEqual(["Herd tests"]);
+
+    await as((tx) => archiveDataset(tx, "herd_tests"));
+    await refresh();
+    expect((await queryAnalytics(ORG, "select count(*)::int as n from information_schema.tables where table_name like 'tohyee_ai_%'"))[0].n).toBe(0);
+  });
+});

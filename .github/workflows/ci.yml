@@ -1,0 +1,181 @@
+name: CI
+
+on:
+  push:
+    branches: [main]
+  pull_request:
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: ci-${{ github.ref }}
+  cancel-in-progress: true
+
+jobs:
+  checks:
+    name: Checks (Node ${{ matrix.node }})
+    runs-on: ubuntu-latest
+    strategy:
+      fail-fast: false
+      matrix:
+        node: [22, 24]
+    services:
+      postgres:
+        image: postgres:17
+        env:
+          POSTGRES_USER: postgres
+          POSTGRES_PASSWORD: postgres
+          POSTGRES_DB: postgres
+        ports:
+          - 5432:5432
+        options: >-
+          --health-cmd "pg_isready -U postgres"
+          --health-interval 5s
+          --health-timeout 5s
+          --health-retries 12
+    env:
+      # The database tests create and drop their own throwaway databases and
+      # logins, so they need a login that can do that.
+      TEST_DATABASE_URL: postgresql://postgres:postgres@localhost:5432/postgres
+      # The backup tests run pg_dump and pg_restore, which must be at least
+      # the database's version (17).
+      TOHYEE_PG_BIN: /usr/lib/postgresql/17/bin
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: ${{ matrix.node }}
+          cache: npm
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: PostgreSQL 17 client tools (for the backup tests)
+        run: |
+          sudo apt-get install -y postgresql-common
+          sudo /usr/share/postgresql-common/pgdg/apt.postgresql.org.sh -y
+          sudo apt-get install -y postgresql-client-17
+          /usr/lib/postgresql/17/bin/pg_dump --version
+
+      # The test databases are thrown away, so they needn't be safe from a
+      # power cut. Without this, each DROP DATABASE waits for a checkpoint
+      # that writes the whole server's changes to disk, and with many test
+      # files at once that can run past a test's time limit.
+      - name: Make the test database quicker (it's thrown away)
+        run: |
+          for setting in "fsync = off" "synchronous_commit = off" "full_page_writes = off"; do
+            /usr/lib/postgresql/17/bin/psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "alter system set $setting"
+          done
+          /usr/lib/postgresql/17/bin/psql "$TEST_DATABASE_URL" -v ON_ERROR_STOP=1 -c "select pg_reload_conf()"
+          /usr/lib/postgresql/17/bin/psql "$TEST_DATABASE_URL" -At -c "show fsync"
+
+      - name: Check foundation docs
+        run: npm run validate:foundation
+
+      - name: Lint
+        run: npm run lint
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      - name: Tests (unit and PostgreSQL)
+        run: npm test
+
+      - name: Production build
+        run: npm run build
+
+  relay:
+    name: Relay (Tohyee address Worker)
+    runs-on: ubuntu-latest
+    defaults:
+      run:
+        working-directory: relay
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Setup Node.js
+        uses: actions/setup-node@949feb2413d6458794dcd2491c4babbbce0c15c1 # v7.1.0
+        with:
+          node-version: 22
+          cache: npm
+          cache-dependency-path: relay/package-lock.json
+
+      - name: Install dependencies
+        run: npm ci
+
+      - name: Typecheck
+        run: npm run typecheck
+
+      # Runs in Cloudflare's local Workers runtime; Cloudflare's API is faked.
+      - name: Tests
+        run: npm test
+
+  postbox:
+    name: Camera post box image
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Check the install script
+        run: |
+          bash -n postbox/install.sh
+          shellcheck postbox/install.sh
+
+      - name: Build the post box image (not pushed)
+        run: docker build --file postbox/Dockerfile --tag tohyee-postbox:ci .
+
+      - name: Start it, check it answers and makes a pairing code
+        run: |
+          docker run -d --name ci-postbox -p 8443:8443 -e POSTBOX_PUBLIC_ADDRESS=127.0.0.1 tohyee-postbox:ci
+          for i in $(seq 1 30); do
+            if [ "$(docker inspect -f '{{.State.Health.Status}}' ci-postbox)" = healthy ]; then break; fi
+            sleep 2
+          done
+          curl -sfk https://127.0.0.1:8443/v1/health
+          echo
+          docker exec ci-postbox node /app/postbox.cjs pairing-code | grep -q '^TPB1-'
+          # Without the token, nothing but health answers.
+          test "$(curl -sk -o /dev/null -w '%{http_code}' https://127.0.0.1:8443/v1/files)" = 401
+          docker logs ci-postbox
+
+  docker:
+    name: Docker image and Windows installer
+    runs-on: ubuntu-latest
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+
+      - name: Build the Docker image (not pushed)
+        run: docker build --tag tohyee:ci .
+
+      - name: Start it with PostgreSQL and check it answers
+        run: |
+          docker network create tohyee-ci
+          docker run -d --name ci-postgres --network tohyee-ci \
+            -e POSTGRES_USER=tohyee -e POSTGRES_PASSWORD=ci-password -e POSTGRES_DB=tohyee postgres:17
+          for i in $(seq 1 30); do docker exec ci-postgres pg_isready -U tohyee -d tohyee && break; sleep 2; done
+          docker run -d --name ci-tohyee --network tohyee-ci -p 3000:3000 \
+            -e DATABASE_URL=postgresql://tohyee:ci-password@ci-postgres:5432/tohyee \
+            -e TOHYEE_SECRET_KEY=ci-secret-key-0123456789abcdefghijklmnop tohyee:ci
+          for i in $(seq 1 60); do
+            if curl -sf http://localhost:3000/api/health; then echo; exit 0; fi
+            sleep 2
+          done
+          docker logs ci-tohyee
+          exit 1
+
+      - name: The command-line tool and a backup work inside the image
+        run: |
+          docker exec ci-tohyee node tohyee-admin.cjs users list
+          docker exec ci-tohyee node tohyee-admin.cjs backups run
+          docker exec ci-tohyee sh -c 'node tohyee-admin.cjs backups check --file "$(ls /backups/_server/*.tohyee-backup | head -n 1)"'
+
+      - name: Package the Windows installer
+        run: node scripts/package-windows.mjs

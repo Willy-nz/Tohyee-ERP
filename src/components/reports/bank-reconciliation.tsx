@@ -1,0 +1,271 @@
+"use client";
+
+import { useSaveAsCustomReport } from "@/components/reports/save-as-custom-report";
+import { DateInput } from "@/components/date-input";
+import Link from "next/link";
+import { useState } from "react";
+import { journalHref, originLabel } from "@/components/bank/common";
+import { Money } from "@/components/books";
+import { useApiData } from "@/components/hooks";
+import { PrintButton } from "@/components/reports/ledger-reports";
+import { ReportExport } from "@/components/reports/report-export";
+import { Badge, Card, Empty, Field, Notice, ui } from "@/components/ui";
+import type { BankAccount } from "@/lib/bank/accounts";
+import { formatDate, formatMoney, todayInBrowser } from "@/lib/format";
+import type { BankReconciliationReport as Report } from "@/lib/reports/bank-reconciliation";
+import { cancellingPairs } from "@/lib/reports/cancelling-pairs";
+
+/** How the statement balance was worked out, in words. */
+function sourceText(report: Report): string {
+  const source = report.statementBalanceSource;
+  if (!source) {
+    return "Not known: no statement line on or before this date has the bank's running balance, and there's no bank feed balance from before it.";
+  }
+  const from =
+    source.kind === "line_balance"
+      ? `the bank's running balance of ${formatMoney(source.balance)} on the ${formatDate(source.date)} statement line`
+      : `the bank feed's balance of ${formatMoney(source.balance)} on ${formatDate(source.date)}`;
+  return source.linesAfter === 0
+    ? `From ${from}.`
+    : `From ${from}, plus ${source.linesAfter} statement ${source.linesAfter === 1 ? "line" : "lines"} after it (${formatMoney(source.linesAfterTotal)}).`;
+}
+
+/**
+ * Reporting › Bank reconciliation (examples BK20, BK21): the bank's balance,
+ * Tohyee's, and the items between them, as at a date. Printable.
+ */
+export function BankReconciliationReportView({
+  organisationId,
+  initialAccountId,
+  initialAsAt,
+}: {
+  organisationId: string;
+  initialAccountId?: string | null;
+  initialAsAt?: string | null;
+}) {
+  const accounts = useApiData<{ bankAccounts: BankAccount[] }>("/api/bank-accounts", { organisationId });
+  const [chosen, setChosen] = useState(initialAccountId ?? "");
+  const [asAt, setAsAt] = useState(() => (initialAsAt && /^\d{4}-\d{2}-\d{2}$/.test(initialAsAt) ? initialAsAt : todayInBrowser()));
+  const accountId = chosen || accounts.data?.bankAccounts[0]?.id || "";
+  const report = useApiData<Report>(accountId ? "/api/reports/bank-reconciliation" : null, { organisationId, accountId, asAt });
+  const save = useSaveAsCustomReport(organisationId, "bank_reconciliation", { accountId: accountId || null, asAt });
+  const data = report.data;
+  // BK46: pairs that cancel out in the same month are left out unless asked for; no total changes.
+  const [hidePairs, setHidePairs] = useState(true);
+  const pairs = data ? cancellingPairs(data.tohyeeNotInBank.items) : new Set<string>();
+  const shown = data ? data.tohyeeNotInBank.items.filter((item) => !hidePairs || !pairs.has(item.journalLineId)) : [];
+  return (
+    <Card
+      title="Bank reconciliation"
+      actions={
+        <div className={ui.inlineForm} data-print="hide">
+          <Field label="Account">
+            <select value={accountId} onChange={(event) => setChosen(event.target.value)}>
+              {(accounts.data?.bankAccounts ?? []).map((account) => (
+                <option key={account.id} value={account.id}>
+                  {account.code} · {account.name}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field label="As at">
+            <DateInput value={asAt} onChange={(event) => setAsAt(event.target.value)} />
+          </Field>
+          <PrintButton />
+          {accountId ? save.buttons : null}
+        </div>
+      }
+    >
+      {save.panel}
+      {accounts.error ? <Notice tone="error">{accounts.error}</Notice> : null}
+      {report.error ? <Notice tone="error">{report.error}</Notice> : null}
+      {accounts.data && accounts.data.bankAccounts.length === 0 ? <Empty>There are no bank or credit card accounts.</Empty> : null}
+      {report.loading ? <p className={ui.muted}>Loading…</p> : null}
+      {data ? (
+        <>
+          <ReportExport
+            organisationId={organisationId}
+            report="bank-reconciliation"
+            title="Bank reconciliation"
+            period={`As at ${formatDate(data.asAt)}`}
+            filters={[`Account: ${data.account.code} · ${data.account.name}`]}
+            tables={[{ id: "bank-reconciliation-report", columns: ["Description", "Amount"] }]}
+          />
+          <p className={`${ui.muted} ${ui.printOnly}`}>
+            {data.account.code} · {data.account.name}, as at {formatDate(data.asAt)}
+          </p>
+          {data.account.accountType === "credit_card" ? (
+            <p className={ui.muted}>For a credit card, a negative balance is what&apos;s owed on the card.</p>
+          ) : null}
+          <div className={ui.tableWrap}>
+            <table id="bank-reconciliation-report" className={ui.table}>
+              <tbody>
+                <tr className={ui.reportTotal}>
+                  <td>
+                    Balance in Tohyee{data.currencyCode !== data.baseCurrency ? ` (${data.currencyCode})` : ""}
+                    {data.currencyCode !== data.baseCurrency ? (
+                      <div className={ui.muted}>
+                        {data.baseCurrency} {formatMoney(data.baseLedgerBalance)}. The report is in {data.currencyCode}, like the
+                        statement.
+                      </div>
+                    ) : null}
+                  </td>
+                  <td className={ui.num}>
+                    <Money value={data.ledgerBalance} />
+                  </td>
+                </tr>
+                <tr className={ui.reportHeading}>
+                  <td colSpan={2}>Plus: in the bank, not yet in Tohyee</td>
+                </tr>
+                {data.bankNotInTohyee.items.length === 0 ? (
+                  <tr>
+                    <td className={ui.muted} colSpan={2}>
+                      None.
+                    </td>
+                  </tr>
+                ) : (
+                  data.bankNotInTohyee.items.map((item) => (
+                    <tr key={`${item.lineId}:${item.matchedJournalId ?? ""}`} className={ui.reportSection}>
+                      <td>
+                        {formatDate(item.date)} · {item.description}
+                        {item.reference ? ` · ${item.reference}` : ""}
+                        {item.why === "matched_later" && item.matchedJournalId ? (
+                          <span className={ui.muted}>
+                            {" "}
+                            (matched to <Link href={journalHref(item.matchedJournalId)}>#{item.matchedJournalId}</Link> dated{" "}
+                            {formatDate(item.matchedDate)})
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className={ui.num}>
+                        <Money value={item.amount} />
+                      </td>
+                    </tr>
+                  ))
+                )}
+                <tr className={ui.reportSection}>
+                  <td>Total in the bank, not yet in Tohyee</td>
+                  <td className={ui.num}>
+                    <Money value={data.bankNotInTohyee.total} />
+                  </td>
+                </tr>
+                <tr className={ui.reportHeading}>
+                  <td colSpan={2}>Less: in Tohyee, not yet on the statement</td>
+                </tr>
+                {pairs.size > 0 ? (
+                  <tr data-print={hidePairs ? undefined : "hide"}>
+                    <td colSpan={2}>
+                      <label className={ui.checkbox} data-print="hide">
+                        <input type="checkbox" checked={hidePairs} onChange={(event) => setHidePairs(event.target.checked)} /> Leave out pairs that cancel out in the same
+                        month ({pairs.size / 2} {pairs.size === 2 ? "pair" : "pairs"})
+                      </label>
+                      {hidePairs ? (
+                        <span className={ui.muted}>
+                          {pairs.size / 2} {pairs.size === 2 ? "pair" : "pairs"} that cancel out left out; the total is the same.
+                        </span>
+                      ) : null}
+                    </td>
+                  </tr>
+                ) : null}
+                {shown.length === 0 ? (
+                  <tr>
+                    <td className={ui.muted} colSpan={2}>
+                      None.
+                    </td>
+                  </tr>
+                ) : (
+                  shown.map((item) => (
+                    <tr key={item.journalLineId} className={ui.reportSection}>
+                      <td>
+                        {formatDate(item.date)} · {originLabel(item.origin)} <Link href={journalHref(item.journalId)}>#{item.journalId}</Link>
+                        {item.description ? ` · ${item.description}` : ""}
+                        {item.reconciledOn ? <span className={ui.muted}> (on the statement {formatDate(item.reconciledOn)})</span> : null}
+                        {data.currencyCode !== data.baseCurrency ? (
+                          <span className={ui.muted}>
+                            {" "}
+                            ({data.baseCurrency} {formatMoney(item.baseAmount)})
+                          </span>
+                        ) : null}
+                      </td>
+                      <td className={ui.num}>
+                        <Money value={item.amount} />
+                      </td>
+                    </tr>
+                  ))
+                )}
+                <tr className={ui.reportSection}>
+                  <td>Total in Tohyee, not yet on the statement</td>
+                  <td className={ui.num}>
+                    <Money value={data.tohyeeNotInBank.total} />
+                  </td>
+                </tr>
+                {data.inBankAlready.items.length > 0 ? (
+                  <>
+                    <tr className={ui.reportHeading}>
+                      <td colSpan={2}>Already in the bank&apos;s balance (not taken off)</td>
+                    </tr>
+                    {data.inBankAlready.items.map((item) => (
+                      <tr key={item.journalLineId} className={ui.reportSection}>
+                        <td>
+                          {formatDate(item.date)} · {originLabel(item.origin)} <Link href={journalHref(item.journalId)}>#{item.journalId}</Link>
+                          {item.description ? ` · ${item.description}` : ""}
+                          <span className={ui.muted}>
+                            {" "}
+                            (
+                            {item.why === "before_lines"
+                              ? "before the bank's lines start"
+                              : `after the last line${data.inBankAlready.lastLineDate ? ` (${formatDate(data.inBankAlready.lastLineDate)})` : ""}: probably in the feed's balance, its line not here yet`}
+                            )
+                          </span>
+                        </td>
+                        <td className={ui.num}>
+                          <Money value={item.amount} />
+                        </td>
+                      </tr>
+                    ))}
+                  </>
+                ) : null}
+                <tr className={ui.reportTotal}>
+                  <td>Statement balance these explain</td>
+                  <td className={ui.num}>
+                    <Money value={data.expectedStatementBalance} />
+                  </td>
+                </tr>
+              </tbody>
+              <tfoot>
+                <tr>
+                  <td>
+                    Statement balance ({data.currencyCode}){" "}
+                    {data.explained ? (
+                      <Badge tone="green">Fully explained</Badge>
+                    ) : data.statementBalance === null ? (
+                      <Badge tone="amber">Balance not known</Badge>
+                    ) : (
+                      <Badge tone="red">Not fully explained</Badge>
+                    )}
+                    <div className={ui.muted}>{sourceText(data)}</div>
+                  </td>
+                  <td className={ui.num}>{data.statementBalance === null ? "—" : <Money value={data.statementBalance} />}</td>
+                </tr>
+                {data.notExplained !== null && data.notExplained !== "0.00" ? (
+                  <tr>
+                    <td>
+                      Not explained
+                      <div className={ui.muted}>
+                        Usually a statement line that&apos;s missing or excluded, an opening balance from before the first line, or a duplicate
+                        that wasn&apos;t excluded.
+                      </div>
+                    </td>
+                    <td className={ui.num}>
+                      <Money value={data.notExplained} />
+                    </td>
+                  </tr>
+                ) : null}
+              </tfoot>
+            </table>
+          </div>
+        </>
+      ) : null}
+    </Card>
+  );
+}

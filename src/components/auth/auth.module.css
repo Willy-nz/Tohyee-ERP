@@ -1,0 +1,184 @@
+.screen {
+  display: grid;
+  min-height: 100vh;
+  place-items: center;
+  padding: 24px 16px;
+  background:
+    radial-gradient(60rem 30rem at 50% -10%, color-mix(in srgb, var(--accent) 12%, transparent), transparent 70%),
+    var(--bg);
+}
+
+.panel {
+  display: grid;
+  gap: 18px;
+  width: min(400px, 100%);
+  border: 1px solid var(--border);
+  border-radius: var(--radius-lg);
+  background: var(--surface);
+  box-shadow: var(--shadow-lg);
+  padding: 32px;
+}
+
+.brand {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin-bottom: 4px;
+  font-size: 1.15rem;
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.brandMark {
+  display: block;
+  border-radius: 8px;
+}
+
+.title {
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: -0.02em;
+}
+
+.text {
+  margin-top: 4px;
+  color: var(--text-muted);
+  font-size: var(--text-base);
+}
+
+.form {
+  display: grid;
+  gap: 12px;
+}
+
+.row {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.check {
+  display: flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-base);
+}
+
+.steps {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding-left: 20px;
+  color: var(--text-muted);
+  font-size: var(--text-base);
+}
+
+.qr {
+  justify-self: center;
+  width: min(220px, 70vw);
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  /* QR codes need a white background to scan, in both themes. */
+  background: #ffffff;
+  padding: 8px;
+}
+
+.qr svg {
+  display: block;
+  width: 100%;
+  height: auto;
+}
+
+.key code {
+  font-size: 1rem;
+  letter-spacing: 0.04em;
+  word-break: break-all;
+}
+
+.codes {
+  display: grid;
+  grid-template-columns: repeat(2, minmax(0, 1fr));
+  gap: 6px 16px;
+  margin: 0;
+  padding-left: 22px;
+  font-size: 1rem;
+}
+
+.linkButton {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--link);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.googleButton {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 10px;
+  width: 100%;
+}
+
+.googleMark {
+  flex: none;
+  /* Google's mark keeps its own colours; a white disc keeps them readable in dark mode. */
+  border-radius: 50%;
+  background: #ffffff;
+  padding: 1px;
+}
+
+.divider {
+  display: flex;
+  align-items: center;
+  gap: 12px;
+  color: var(--text-muted);
+  font-size: var(--text-sm, 0.85rem);
+}
+
+.divider::before,
+.divider::after {
+  content: "";
+  flex: 1;
+  border-top: 1px solid var(--border);
+}
+
+/* The consent screen for an AI app signing in has a little more to show. */
+.panelWide {
+  width: min(480px, 100%);
+}
+
+.facts {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  font-size: var(--text-base);
+}
+
+.facts dt {
+  color: var(--text-muted);
+  font-size: var(--text-sm, 0.85rem);
+}
+
+.facts dd {
+  margin: 0 0 6px;
+  overflow-wrap: anywhere;
+}
+
+.host {
+  font-size: 1.05rem;
+  font-weight: 700;
+}
+
+/* Passkeys: the key on the button, and the note about addresses. */
+.passkeyMark {
+  flex: none;
+}
+
+.note {
+  color: var(--text-muted);
+  font-size: var(--text-sm, 0.85rem);
+}
