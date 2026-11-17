@@ -206,6 +206,7 @@ function Slide({ office, auth, origin, outside }: { office: OfficeGlobal | null;
       onToggleFilters={() => void choose({ ...choice, showFilters: !choice.showFilters })}
       onSignOut={() => void signOut()}
       onSnapshot={keepSnapshot}
+      onPage={(pageId) => void choose({ ...choice, pageId })}
     />
   );
 }
@@ -423,6 +424,7 @@ function LiveReport({
   onToggleFilters,
   onSignOut,
   onSnapshot,
+  onPage,
 }: {
   auth: OfficeAuth;
   office: OfficeGlobal | null;
@@ -433,10 +435,25 @@ function LiveReport({
   onToggleFilters: () => void;
   onSignOut: () => void;
   onSnapshot: (image: string) => Promise<void>;
+  onPage: (pageId: string) => void;
 }) {
   const [refresh, setRefresh] = useState(0);
+  const pages = useReportPages(auth, choice.organisationId, choice.dashboardId);
+  const at = pages ? Math.max(0, pages.findIndex((entry) => entry.id === choice.pageId)) : -1;
+  const goTo = (index: number) => {
+    if (!pages || !pages[index]) return;
+    onPage(pages[index].id);
+  };
+  const { setFrame, setContent, style: fitStyle } = useFitToFrame();
+  const setReportArea = useCallback(
+    (element: HTMLDivElement | null) => {
+      area.current = element;
+      setContent(element);
+    },
+    [setContent],
+  );
   const [refreshedAt, setRefreshedAt] = useState(() => new Date().toISOString());
-  const area = useRef<HTMLDivElement>(null);
+  const area = useRef<HTMLDivElement | null>(null);
   const organisation = me.organisations.find((entry) => entry.id === choice.organisationId) ?? null;
 
   const transportReady = true;
@@ -446,6 +463,8 @@ function LiveReport({
       pageId: choice.pageId,
       tileId: choice.tileId,
       showFilters: choice.showFilters,
+      // A slide shows one page: the next page goes on the next slide (duplicate the slide, then Next page).
+      onePage: true,
       async imageSource(path: string) {
         const url = new URL(path, window.location.origin);
         const mapped = officeApiPath(url.pathname, "GET");
@@ -495,6 +514,13 @@ function LiveReport({
             <span className={styles.quiet}> · {choice.organisationName}</span>
           </span>
           <span className={styles.toolbarButtons}>
+            {pages && pages.length > 1 && !choice.tileId ? (
+              <>
+                <Button size="small" variant="secondary" disabled={at <= 0} onClick={() => goTo(at - 1)} aria-label="Previous page of the report">‹</Button>
+                <span className={styles.quiet}>{pages[at]?.name ?? ""} · {at + 1} of {pages.length}</span>
+                <Button size="small" variant="secondary" disabled={at >= pages.length - 1} onClick={() => goTo(at + 1)} aria-label="Next page of the report">›</Button>
+              </>
+            ) : null}
             <Button size="small" variant="secondary" onClick={reload} title={`Last refreshed ${formatDateTime(refreshedAt)}`}>Refresh</Button>
             <Button size="small" variant="secondary" aria-pressed={choice.showFilters} onClick={onToggleFilters}>{choice.showFilters ? "Hide filters" : "Show filters"}</Button>
             <Button size="small" variant="secondary" onClick={() => openInBrowser(office, reportAddress(choice))}>Open in Tohyee</Button>
@@ -505,7 +531,8 @@ function LiveReport({
       ) : (
         <button type="button" className={styles.showRefresh} onClick={reload} aria-label="Refresh the report">↻</button>
       )}
-      <div ref={area} className={styles.report}>
+      <div ref={setFrame} className={styles.fitFrame}>
+        <div ref={setReportArea} className={styles.report} style={fitStyle}>
         {!organisation ? (
           <Notice tone="warning">You can&apos;t open {choice.organisationName} in Tohyee, so there&apos;s nothing to show you here.</Notice>
         ) : transportReady ? (
@@ -517,7 +544,67 @@ function LiveReport({
             </AnalyticsEmbedContext.Provider>
           </WorkspaceProvider>
         ) : null}
+        </div>
       </div>
     </main>
   );
+}
+
+/** The report's pages, for the slide's Previous and Next page buttons. */
+function useReportPages(auth: OfficeAuth, organisationId: string, dashboardId: string): Array<{ id: string; name: string }> | null {
+  const [pages, setPages] = useState<Array<{ id: string; name: string }> | null>(null);
+  useEffect(() => {
+    let cancelled = false;
+    auth
+      .fetch(`/api/office/reports?organisationId=${encodeURIComponent(organisationId)}`)
+      .then(async (response) => {
+        if (!response.ok) return;
+        const body = (await response.json().catch(() => ({}))) as { reports?: ReportSummary[] };
+        const report = body.reports?.find((entry) => entry.id === dashboardId);
+        if (!cancelled && report) setPages(report.pages);
+      })
+      .catch(() => undefined);
+    return () => {
+      cancelled = true;
+    };
+  }, [auth, organisationId, dashboardId]);
+  return pages;
+}
+
+/** The width a slide's report is laid out at, then scaled to fit the slide, so a page looks the same however big the add-in is. */
+export const FIT_WIDTH = 1280;
+
+/** How much to scale a page laid out at FIT_WIDTH so all of it fits the frame (at most 2x), and how far in to centre it. */
+export function fitBox(width: number, height: number, naturalHeight: number): { scale: number; left: number } {
+  const scale = Math.min(width / FIT_WIDTH, height / Math.max(naturalHeight, 1), 2);
+  return { scale, left: Math.max(0, (width - FIT_WIDTH * scale) / 2) };
+}
+
+/**
+ * Fits the whole page into the add-in's frame, like a picture on a slide:
+ * laid out at FIT_WIDTH, then scaled down (or up, at most 2x) so all of it
+ * shows with no scrolling, centred. Changes with the frame's size.
+ */
+function useFitToFrame() {
+  const [outer, setFrame] = useState<HTMLDivElement | null>(null);
+  const [inner, setContent] = useState<HTMLDivElement | null>(null);
+  const [box, setBox] = useState<{ scale: number; left: number } | null>(null);
+  useEffect(() => {
+    if (!outer || !inner || typeof ResizeObserver === "undefined") return;
+    const measure = () => {
+      const width = outer.clientWidth;
+      const height = outer.clientHeight;
+      const naturalHeight = Math.max(inner.scrollHeight, 1);
+      if (!width || !height) return;
+      const { scale, left } = fitBox(width, height, naturalHeight);
+      setBox((current) => (current && Math.abs(current.scale - scale) < 0.001 && Math.abs(current.left - left) < 0.5 ? current : { scale, left }));
+    };
+    const observer = new ResizeObserver(measure);
+    observer.observe(outer);
+    observer.observe(inner);
+    measure();
+    return () => observer.disconnect();
+  }, [outer, inner]);
+  const style: React.CSSProperties = { width: FIT_WIDTH, transformOrigin: "top left", transform: box ? `translateX(${box.left}px) scale(${box.scale})` : undefined };
+  return { setFrame, setContent, style };
 }

@@ -13,6 +13,8 @@ export type AnalyticsEmbed = {
   pageId: string | null;
   tileId: string | null;
   showFilters: boolean;
+  /** One page per slide: the report's page tabs (and the data freshness line) aren't shown. */
+  onePage?: boolean;
   /** Drawn on a sheet of paper in Tohyee itself: signed in as usual, so page pictures and images load the ordinary way. */
   print?: "landscape" | "portrait";
   /** A report image as an address the page can show (the add-in fetches it with its token). */

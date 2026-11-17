@@ -6,10 +6,14 @@ PowerPoint yet for what may need changing, and for what a check against Microsof
 
 ## What people see
 
-- **On a slide:** a report page (or one tile) that works as it does in
+- **On a slide:** one report page (or one tile) that works as it does in
   Analytics: dates and slicers (if the filters pane is on), click to filter,
-  drill down, tooltips, page tabs. It works while editing and in the slide
-  show.
+  drill down, tooltips. It works while editing and in the slide show.
+- **One page per slide, no scrolling:** the page is laid out at a fixed
+  width and scaled to fit the add-in's box, so resizing it resizes the
+  report like a picture. Page tabs aren't shown on the slide: to put
+  another page on the next slide, duplicate the slide and use ‹ and › in
+  the toolbar (they change the page this slide shows).
 - **Each viewer signs in as themselves** and sees only what they can see in
   Tohyee. A report viewer sees only reports shared with them.
 - **Not signed in:** the picture saved the last time someone signed in

@@ -711,9 +711,9 @@ function DashboardViewInner({ organisationId, dashboardId, startEditing }: { org
       />}
       </div>
 
-      <div data-present="hide"><ReportFreshnessLine organisationId={organisationId} dashboardId={dashboard.id} /></div>
+      {embed?.onePage ? null : <div data-present="hide"><ReportFreshnessLine organisationId={organisationId} dashboardId={dashboard.id} /></div>}
       {presenting && slides.length > 1 ? <p className={styles.slideName}>{page.name}</p> : null}
-      {onlyTile || presenting || embed?.print ? null : <PageTabs
+      {onlyTile || presenting || embed?.print || embed?.onePage ? null : <PageTabs
         pages={pages}
         current={page.id}
         // While text is being changed in place the page stays put, so the draft stays in view.
