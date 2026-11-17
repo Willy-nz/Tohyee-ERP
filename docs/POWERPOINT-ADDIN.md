@@ -9,9 +9,10 @@ PowerPoint yet for what may need changing, and for what a check against Microsof
 - **On a slide:** one report page (or one tile) that works as it does in
   Analytics: dates and slicers (if the filters pane is on), click to filter,
   drill down, tooltips. It works while editing and in the slide show.
-- **One page per slide, no scrolling:** the page is laid out at a fixed
-  width and scaled to fit the add-in's box, so resizing it resizes the
-  report like a picture. Page tabs aren't shown on the slide: to put
+- **One page per slide:** the page is laid out at a fixed width and scaled
+  to fit the add-in's box, so resizing it resizes the report like a
+  picture. A long page isn't squeezed below 70% of its fill-the-width size:
+  it fills the width and scrolls instead. Page tabs aren't shown on the slide: to put
   another page on the next slide, duplicate the slide and use ‹ and › in
   the toolbar (they change the page this slide shows).
 - **Each viewer signs in as themselves** and sees only what they can see in
