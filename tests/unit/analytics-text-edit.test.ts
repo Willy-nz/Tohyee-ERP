@@ -136,6 +136,10 @@ describe("headings", () => {
     expect(changed.format?.card?.title?.color).toBe("#c0392b");
     expect(changed.query).toBe(chart.query);
     expect((changed.format as { series?: unknown }).series).toEqual([{ color: "#123456" }]);
+    const bigger = setHeading(changed, { size: 24 });
+    expect(bigger.format?.card?.title).toEqual({ color: "#c0392b", size: 24 });
+    expect(cardStyle(bigger.format).title).toMatchObject({ fontSize: "24px" });
+    expect(setHeading(bigger, { size: null }).format?.card?.title).toEqual({ color: "#c0392b" });
     const reset = setHeading(changed, { color: null, show: false });
     expect(reset.format?.card).toEqual({ showTitle: false });
     expect(setHeading(reset, { show: true }).format).toEqual({ series: [{ color: "#123456" }] });
@@ -203,6 +207,7 @@ describe("the editor beside the report", () => {
     expect(html).toContain("Heading: Sales by month");
     expect(html).toContain("The chart&#x27;s data, fields and series colours stay as they are.");
     expect(html).not.toContain("Text size");
+    expect(html).toContain("Heading size");
   });
 
   it("the colour control shows the theme's colour until one is chosen", () => {
