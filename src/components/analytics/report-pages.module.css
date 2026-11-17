@@ -1,5 +1,7 @@
 .bar {
   display: grid;
+  /* One column no wider than the screen: many page tabs scroll sideways instead of widening the report (phones). */
+  grid-template-columns: minmax(0, 1fr);
   gap: 8px;
   margin: 0 0 16px;
 }
@@ -16,6 +18,7 @@
 .tabs {
   display: flex;
   gap: 2px;
+  min-width: 0;
   max-width: 100%;
   overflow-x: auto;
 }
