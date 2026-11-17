@@ -1,0 +1,72 @@
+import { SETTINGS_ACTION_TOOLS } from "@/lib/ai/settings-action-tools";
+import { DOCUMENT_ACTION_TOOLS } from "@/lib/ai/document-action-tools";
+import { CATCH_UP_READ_TOOLS, CATCH_UP_WRITE_TOOLS } from "@/lib/ai/catch-up-tools";
+import { type AiAccessLevel, levelAllows } from "@/lib/ai/access-levels";
+import { ANALYTICS_READ_TOOLS, ANALYTICS_WRITE_TOOLS } from "@/lib/ai/analytics-tools";
+import { BANK_PROPOSAL_READ_TOOLS, BANK_PROPOSAL_WRITE_TOOLS } from "@/lib/ai/bank-proposal-tools";
+import { BANK_READ_TOOLS, BANK_WRITE_TOOLS } from "@/lib/ai/bank-tools";
+import { FARM_DETAIL_READ_TOOLS, FARM_MORE_READ_TOOLS, FARM_OVERVIEW_TOOLS, FARM_RECORD_READ_TOOLS, FARM_RECORD_WRITE_TOOLS } from "@/lib/ai/farm-record-tools";
+import { FARM_POST_TOOLS } from "@/lib/ai/farm-post-tools";
+import { FARM_REPORTING_READ_TOOLS, FARM_SETUP_READ_TOOLS } from "@/lib/ai/farm-setup-read-tools";
+import { FARM_READ_TOOLS, FARM_WRITE_TOOLS } from "@/lib/ai/farm-tools";
+import { LIVESTOCK_READ_TOOLS } from "@/lib/ai/livestock-read-tools";
+import { CAMERA_READ_TOOLS, SAFETY_READ_TOOLS } from "@/lib/ai/safety-camera-tools";
+import { FULL_READ_TOOLS, FULL_WRITE_TOOLS } from "@/lib/ai/full-tools";
+import { MIXED_USE_READ_TOOLS, MIXED_USE_WRITE_TOOLS } from "@/lib/ai/mixed-use-tools";
+import { PHOTO_READ_TOOLS, PHOTO_WRITE_TOOLS } from "@/lib/ai/photo-tools";
+import { REPORT_READ_TOOLS, REPORT_WRITE_TOOLS } from "@/lib/ai/report-tools";
+import { SALES_PLATFORM_READ_TOOLS } from "@/lib/ai/sales-platform-tools";
+import { SIGNING_READ_TOOLS } from "@/lib/ai/signing-tools";
+import { TAX_READ_TOOLS, TAX_WRITE_TOOLS } from "@/lib/ai/tax-tools";
+import { type AiTool, READ_TOOLS } from "@/lib/ai/tools";
+import { WRITE_TOOLS } from "@/lib/ai/write-tools";
+
+/** Every tool an AI key can be given, read tools first. */
+export const AI_TOOLS: readonly AiTool[] = [
+  ...READ_TOOLS,
+  ...REPORT_READ_TOOLS,
+  ...BANK_READ_TOOLS,
+  ...MIXED_USE_READ_TOOLS,
+  ...BANK_PROPOSAL_READ_TOOLS,
+  ...FARM_READ_TOOLS,
+  ...FARM_RECORD_READ_TOOLS,
+  ...FARM_OVERVIEW_TOOLS,
+  ...FARM_MORE_READ_TOOLS,
+  ...FARM_DETAIL_READ_TOOLS,
+  ...LIVESTOCK_READ_TOOLS,
+  ...SAFETY_READ_TOOLS,
+  ...CAMERA_READ_TOOLS,
+  ...FARM_SETUP_READ_TOOLS,
+  ...FARM_REPORTING_READ_TOOLS,
+  ...PHOTO_READ_TOOLS,
+  ...FULL_READ_TOOLS,
+  ...TAX_READ_TOOLS,
+  ...SALES_PLATFORM_READ_TOOLS,
+  ...CATCH_UP_READ_TOOLS,
+  ...SIGNING_READ_TOOLS,
+  ...ANALYTICS_READ_TOOLS,
+  ...WRITE_TOOLS,
+  ...REPORT_WRITE_TOOLS,
+  ...BANK_WRITE_TOOLS,
+  ...MIXED_USE_WRITE_TOOLS,
+  ...BANK_PROPOSAL_WRITE_TOOLS,
+  ...FARM_WRITE_TOOLS,
+  ...FARM_RECORD_WRITE_TOOLS,
+  ...FARM_POST_TOOLS,
+  ...PHOTO_WRITE_TOOLS,
+  ...FULL_WRITE_TOOLS,
+  ...TAX_WRITE_TOOLS,
+  ...ANALYTICS_WRITE_TOOLS,
+  ...CATCH_UP_WRITE_TOOLS,
+  ...DOCUMENT_ACTION_TOOLS,
+  ...SETTINGS_ACTION_TOOLS,
+];
+
+export function findAiTool(name: unknown): AiTool | null {
+  return AI_TOOLS.find((tool) => tool.name === name) ?? null;
+}
+
+/** The tools a key at this (effective) level may see and call. */
+export function toolsForLevel(level: AiAccessLevel): AiTool[] {
+  return AI_TOOLS.filter((tool) => levelAllows(level, tool.level));
+}

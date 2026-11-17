@@ -1,0 +1,216 @@
+; Tohyee for Windows: one installer with the Tohyee server, its own PostgreSQL,
+; and two Windows services that start when the computer starts.
+; Built by installer/windows/build.ps1 (on GitHub's Windows runners):
+;   ISCC /DAppVersion=x.y.z /DSourceDir=<staging> /DOutputDir=<out> Tohyee.iss
+
+#ifndef AppVersion
+  #define AppVersion "0.0.0"
+#endif
+#ifndef SourceDir
+  #define SourceDir "..\..\dist\windows\stage"
+#endif
+#ifndef OutputDir
+  #define OutputDir "..\..\dist\windows"
+#endif
+
+[Setup]
+AppId={{8C7C1E2B-5F0A-4B8E-9C1D-6A1F3E7B2D40}
+AppName=Tohyee
+AppVersion={#AppVersion}
+AppVerName=Tohyee {#AppVersion}
+AppPublisher=Tohyee
+AppPublisherURL=https://github.com/Willy-nz/Tohyee-ERP
+AppSupportURL=https://github.com/Willy-nz/Tohyee-ERP/issues
+DefaultDirName={autopf}\Tohyee
+DisableDirPage=yes
+DefaultGroupName=Tohyee
+DisableProgramGroupPage=yes
+PrivilegesRequired=admin
+ArchitecturesAllowed=x64compatible
+ArchitecturesInstallIn64BitMode=x64compatible
+MinVersion=10.0
+OutputDir={#OutputDir}
+OutputBaseFilename=TohyeeSetup-{#AppVersion}
+Compression=lzma2/max
+SolidCompression=yes
+WizardStyle=modern
+CloseApplications=no
+; The only per-user setting is starting the tray icon when you sign in.
+UsedUserAreasWarning=no
+UninstallDisplayName=Tohyee
+UninstallDisplayIcon={app}\node\node.exe
+
+[Tasks]
+Name: "desktopicon"; Description: "Add a Tohyee shortcut to the desktop"
+Name: "starttray"; Description: "Start the Tohyee server app (the icon by the clock) when I sign in to Windows"
+
+[InstallDelete]
+; Replace the program files cleanly on updates (your data lives elsewhere).
+Type: filesandordirs; Name: "{app}\app"
+Type: filesandordirs; Name: "{app}\node"
+Type: filesandordirs; Name: "{app}\scripts"
+Type: filesandordirs; Name: "{app}\tray"
+; Older versions opened the server settings in the browser.
+Type: files; Name: "{group}\Tohyee server settings.url"
+
+[Files]
+Source: "{#SourceDir}\app\*"; DestDir: "{app}\app"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SourceDir}\node\*"; DestDir: "{app}\node"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SourceDir}\pgsql\*"; DestDir: "{app}\pgsql"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SourceDir}\service\*"; DestDir: "{app}\service"; Flags: ignoreversion
+Source: "{#SourceDir}\cloudflared\*"; DestDir: "{app}\cloudflared"; Flags: ignoreversion
+Source: "{#SourceDir}\scripts\*"; DestDir: "{app}\scripts"; Flags: ignoreversion
+Source: "{#SourceDir}\tray\*"; DestDir: "{app}\tray"; Flags: recursesubdirs createallsubdirs ignoreversion
+Source: "{#SourceDir}\LICENSE.txt"; DestDir: "{app}"; Flags: ignoreversion
+Source: "{#SourceDir}\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall
+
+[INI]
+Filename: "{group}\Open Tohyee.url"; Section: "InternetShortcut"; Key: "URL"; String: "http://localhost:3000"
+Filename: "{autodesktop}\Tohyee.url"; Section: "InternetShortcut"; Key: "URL"; String: "http://localhost:3000"; Tasks: desktopicon
+Filename: "{group}\Tohyee server settings.url"; Section: "InternetShortcut"; Key: "URL"; String: "http://localhost:3001/server"
+
+[Icons]
+Name: "{group}\Tohyee server settings"; Filename: "{app}\tray\TohyeeTray.exe"; Parameters: "--settings"; Comment: "Organisations, users, phone access, backups, email and updates (this computer only)"
+Name: "{group}\Back up Tohyee"; Filename: "{app}\tray\TohyeeTray.exe"; Parameters: "--back-up"; Comment: "Back up every organisation now, encrypted, to the backup folder (sign in first)"
+Name: "{group}\Tohyee logs"; Filename: "{commonappdata}\Tohyee\logs"
+Name: "{group}\Uninstall Tohyee"; Filename: "{uninstallexe}"
+
+[UninstallDelete]
+Type: files; Name: "{group}\Open Tohyee.url"
+Type: files; Name: "{autodesktop}\Tohyee.url"
+Type: files; Name: "{group}\Tohyee server settings.url"
+
+[Registry]
+; Start the tray icon when this person signs in to Windows (like a media server's).
+; The app's menu turns this off and on again.
+Root: HKCU; Subkey: "Software\Microsoft\Windows\CurrentVersion\Run"; ValueType: string; ValueName: "Tohyee"; ValueData: """{app}\tray\TohyeeTray.exe"""; Tasks: starttray; Flags: uninsdeletevalue
+
+[Run]
+Filename: "{app}\tray\TohyeeTray.exe"; Flags: nowait runasoriginaluser skipifsilent
+; Install on the server app's Updates page runs this setup silently with
+; /RESTARTTRAY=yes, so the app comes back to say how the update went.
+Filename: "{app}\tray\TohyeeTray.exe"; Parameters: "--after-update"; Flags: nowait runasoriginaluser; Check: RestartTrayAfterUpdate
+Filename: "{code:GetOpenUrl}"; Description: "Open Tohyee now"; Flags: postinstall shellexec nowait skipifsilent
+
+[UninstallRun]
+Filename: "{sys}\taskkill.exe"; Parameters: "/IM TohyeeTray.exe /F"; Flags: runhidden waituntilterminated; RunOnceId: "StopTohyeeTray"
+Filename: "{sys}\WindowsPowerShell\v1.0\powershell.exe"; Parameters: "-NoProfile -ExecutionPolicy Bypass -File ""{app}\scripts\remove-services.ps1"" -InstallDir ""{app}"""; Flags: runhidden waituntilterminated; RunOnceId: "RemoveTohyeeServices"
+
+[Code]
+var
+  SetupOk: Boolean;
+  FirstInstall: Boolean;
+  SetupToken: String;
+  TohyeeUrl: String;
+  TokenEdit: TNewEdit;
+
+function PowerShellExe(): String;
+begin
+  Result := ExpandConstant('{sys}\WindowsPowerShell\v1.0\powershell.exe');
+end;
+
+{ Started silently by the server app's Install: start the app again afterwards. }
+function RestartTrayAfterUpdate(): Boolean;
+begin
+  Result := WizardSilent() and (CompareText(ExpandConstant('{param:RESTARTTRAY|no}'), 'yes') = 0);
+end;
+
+function GetOpenUrl(Param: String): String;
+begin
+  if TohyeeUrl = '' then
+    Result := 'http://localhost:3000'
+  else if FirstInstall then
+    Result := TohyeeUrl + '/setup'
+  else
+    Result := TohyeeUrl;
+end;
+
+function PrepareToInstall(var NeedsRestart: Boolean): String;
+var
+  ResultCode: Integer;
+begin
+  { Stop the services and the tray icon so their files can be replaced on an update. }
+  Exec(PowerShellExe(), '-NoProfile -Command "Stop-Service -Name Tohyee -Force -ErrorAction SilentlyContinue; Stop-Service -Name TohyeePostgres -Force -ErrorAction SilentlyContinue"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM TohyeeTray.exe /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  { A Tohyee node process left running (one that didn't stop with the service) keeps the analytics files locked
+    after an update (Nov 2026): stop any node.exe started from this install's own node folder,
+    and nothing else, then give Windows a moment to let go of the files. }
+  Exec(PowerShellExe(), '-NoProfile -Command "$own = Join-Path ''' + ExpandConstant('{app}') + ''' ''node\node.exe''; Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $own } | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  Result := '';
+end;
+
+procedure InitializeWizard();
+begin
+  TokenEdit := TNewEdit.Create(WizardForm);
+  TokenEdit.Parent := WizardForm.FinishedPage;
+  TokenEdit.ReadOnly := True;
+  TokenEdit.Visible := False;
+end;
+
+procedure CurStepChanged(CurStep: TSetupStep);
+var
+  ResultCode: Integer;
+  ResultFile: String;
+  Lines: TArrayOfString;
+begin
+  if CurStep <> ssPostInstall then
+    exit;
+
+  WizardForm.StatusLabel.Caption := 'Installing the Microsoft Visual C++ runtime...';
+  Exec(ExpandConstant('{tmp}\vc_redist.x64.exe'), '/install /quiet /norestart', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  WizardForm.StatusLabel.Caption := 'Setting up the database and starting Tohyee (this can take a minute)...';
+  ResultFile := ExpandConstant('{tmp}\tohyee-setup-result.txt');
+  Exec(PowerShellExe(),
+    '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\configure-tohyee.ps1') +
+    '" -InstallDir "' + ExpandConstant('{app}') + '" -ResultFile "' + ResultFile + '"',
+    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+
+  SetupOk := (ResultCode = 0) and LoadStringsFromFile(ResultFile, Lines) and (GetArrayLength(Lines) >= 3);
+  if SetupOk then
+  begin
+    FirstInstall := Lines[0] = 'first-install';
+    SetupToken := Lines[1];
+    TohyeeUrl := Lines[2];
+  end
+  else
+    SuppressibleMsgBox('Tohyee was copied to this computer, but setting up its database and services failed.' + #13#10#13#10 +
+      'The details are in ' + ExpandConstant('{commonappdata}\Tohyee\logs\setup.log') + '.' + #13#10 +
+      'Run TohyeeSetup again to retry, or send that file to whoever is helping you.', mbError, MB_OK, IDOK);
+end;
+
+procedure CurPageChanged(CurPageID: Integer);
+begin
+  if CurPageID <> wpFinished then
+    exit;
+  if not SetupOk then
+  begin
+    WizardForm.FinishedLabel.Caption := 'Tohyee was installed, but it isn''t running yet. See ' +
+      ExpandConstant('{commonappdata}\Tohyee\logs\setup.log') + ' for what went wrong.';
+    exit;
+  end;
+  if FirstInstall then
+  begin
+    WizardForm.FinishedLabel.Caption := 'Tohyee is running at ' + TohyeeUrl + ' and starts by itself whenever this computer starts.' + #13#10#13#10 +
+      'Next, create your admin login on the first-time setup page. It asks for this setup token (select it and press Ctrl+C to copy):';
+    WizardForm.AdjustLabelHeight(WizardForm.FinishedLabel);
+    TokenEdit.Text := SetupToken;
+    TokenEdit.Left := WizardForm.FinishedLabel.Left;
+    TokenEdit.Width := WizardForm.FinishedLabel.Width;
+    TokenEdit.Top := WizardForm.FinishedLabel.Top + WizardForm.FinishedLabel.Height + ScaleY(8);
+    TokenEdit.Visible := True;
+    WizardForm.RunList.Top := TokenEdit.Top + TokenEdit.Height + ScaleY(16);
+  end
+  else
+    WizardForm.FinishedLabel.Caption := 'Tohyee has been updated and is running at ' + TohyeeUrl + '. Your data and passwords were kept.';
+end;
+
+procedure CurUninstallStepChanged(CurUninstallStep: TUninstallStep);
+begin
+  if CurUninstallStep = usPostUninstall then
+    SuppressibleMsgBox('Tohyee has been removed. Your data was kept in ' + ExpandConstant('{commonappdata}\Tohyee') +
+      ' (the database and tohyee.env with its password). Installing Tohyee again picks it up. Delete that folder only if you no longer need the data.',
+      mbInformation, MB_OK, IDOK);
+end;

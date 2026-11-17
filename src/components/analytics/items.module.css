@@ -1,0 +1,199 @@
+.rich {
+  color: var(--report-text, var(--text));
+  line-height: 1.5;
+}
+.rich p,
+.rich ul,
+.rich ol {
+  margin: 0 0 8px;
+}
+.rich ul,
+.rich ol {
+  padding-inline-start: 22px;
+}
+.rich a {
+  color: var(--accent);
+  text-decoration: underline;
+}
+.value {
+  font-weight: 600;
+}
+.plain {
+  color: var(--text-muted);
+}
+.plain p {
+  margin: 0 0 8px;
+  white-space: pre-line;
+}
+.imageBox {
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  overflow: hidden;
+  border-radius: 6px;
+}
+.imageBox img {
+  max-width: 100%;
+  max-height: 100%;
+}
+.contain {
+  object-fit: contain;
+}
+.cover {
+  width: 100%;
+  height: 100%;
+  object-fit: cover;
+}
+.shape {
+  position: relative;
+  min-height: 40px;
+}
+.shape svg {
+  display: block;
+  overflow: visible;
+}
+.shapeText {
+  position: absolute;
+  inset: 0;
+  display: flex;
+  align-items: center;
+  justify-content: center;
+  padding: 8px 16px;
+  color: var(--report-text, var(--text));
+  font-weight: 600;
+  text-align: center;
+}
+.buttonBox {
+  display: flex;
+  align-items: center;
+  min-height: 40px;
+}
+.fields {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0;
+  border: 0;
+  min-width: 0;
+}
+.grid {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+  align-items: end;
+}
+.group {
+  display: grid;
+  gap: 10px;
+  margin: 0;
+  padding: 12px;
+  border: 1px solid var(--border);
+  border-radius: 8px;
+  min-width: 0;
+}
+.measure {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+.measure > * {
+  min-width: 0;
+}
+.measure > input,
+.measure > select {
+  flex: 1 1 140px;
+  width: auto;
+}
+.note {
+  margin: 0;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+.previewHeading {
+  margin: 4px 0 0;
+  font-size: var(--text-sm);
+  color: var(--text-muted);
+}
+.preview {
+  padding: 12px;
+  border: 1px dashed var(--border);
+  border-radius: 8px;
+  min-width: 0;
+}
+
+/* An accounting report on a page. */
+.placedReport { overflow-x: auto; }
+.placedReportKind { margin: 0 0 8px; color: var(--text-muted); font-size: var(--text-sm); }
+.reportNote { white-space: pre-wrap; }
+
+/* A sign-off: lines to sign and date, with the name and role under them. */
+.signoff p {
+  margin: 0 0 10px;
+  white-space: pre-line;
+}
+.signatories {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(280px, 1fr));
+  gap: 28px 40px;
+  margin-top: 28px;
+}
+.signRow {
+  display: flex;
+  gap: 16px;
+  align-items: flex-end;
+}
+.signLine {
+  flex: 3;
+  height: 40px;
+  border-bottom: 1px solid currentColor;
+}
+.dateLine {
+  flex: 1;
+  height: 40px;
+  border-bottom: 1px solid currentColor;
+}
+.signName {
+  flex: 3;
+  display: flex;
+  flex-direction: column;
+  padding-top: 6px;
+}
+.signName span {
+  color: var(--text-muted);
+}
+.dateWord {
+  flex: 1;
+  padding-top: 6px;
+  color: var(--text-muted);
+}
+
+/* The organisation's directory: its name, then labelled lines in sections. */
+.directoryName {
+  margin: 0 0 12px;
+  font-size: var(--text-lg);
+  font-weight: 600;
+}
+.directoryTable {
+  width: 100%;
+  max-width: 720px;
+  border-collapse: collapse;
+  margin: 0 0 18px;
+}
+.directoryTable thead th {
+  text-align: left;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--border-strong);
+}
+.directoryTable tbody th {
+  width: 34%;
+  text-align: left;
+  font-weight: 400;
+  color: var(--text-muted);
+  padding: 5px 12px 5px 0;
+  vertical-align: top;
+}
+.directoryTable tbody td {
+  padding: 5px 0;
+  white-space: pre-line;
+}

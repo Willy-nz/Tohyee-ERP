@@ -1,0 +1,192 @@
+import { NextResponse } from "next/server";
+import { MAX_JSON_BYTES, readLimitedBytes, route } from "@/lib/api/http";
+import { MCP_FAILED_KEYS_PER_MINUTE, MCP_REQUESTS_PER_MINUTE, RequestLimiter } from "@/lib/ai/limits";
+import { handleMcpMessage, JSON_RPC, type JsonRpcResponse, protocolHeaderAccepted, rpcError } from "@/lib/ai/mcp-protocol";
+import { mcpServerFor } from "@/lib/ai/mcp-server";
+import { acceptsEventStream, eventStreamBody, TOOLS_LIST_CHANGED, ToolListSessions } from "@/lib/ai/mcp-tool-list";
+import { oauthAddresses } from "@/lib/ai/oauth/config";
+import { bearerToken, wwwAuthenticate } from "@/lib/ai/oauth/format";
+import { authenticateAccessToken } from "@/lib/ai/oauth/tokens";
+import { looksLikeAiToken } from "@/lib/ai/token-format";
+import { loadToolModules, type ToolModules } from "@/lib/ai/tool-modules";
+import { noteAiUseFrom } from "@/lib/ai/key-addresses";
+import { aiKeyVia, authenticateAiToken, type AiTokenIdentity } from "@/lib/ai/tokens";
+import { withOrganisationTransaction } from "@/lib/db/org-transaction";
+import { keyCanReadMail } from "@/lib/private-mail/ai";
+import { sessionMetaFrom } from "@/lib/auth/sessions";
+import { accessRefusalForAiToken } from "@/lib/organisations/access";
+import { PayloadTooLargeError } from "@/lib/errors";
+
+/**
+ * The MCP endpoint people connect their own AI to.
+ *
+ * Authenticated only by `Authorization: Bearer …`: a personal AI key
+ * (`tohyee_ai_…`), or an access token an AI app got by signing in
+ * (`tohyee_at_…`). Session cookies are ignored, so
+ * a signed-in browser can't use it. Without a working token the answer is
+ * 401 with `WWW-Authenticate: Bearer resource_metadata="…"` (RFC 9728), so
+ * an AI app knows where to sign in, when remote access is on.
+ * There's no same-origin check because AI services call it from elsewhere;
+ * a cross-site browser page can't send the header without a CORS preflight,
+ * which this route doesn't answer. Read tools run in a read-only
+ * transaction; a key with draft or post access can also use the write tools
+ * up to its level, as its owner (src/lib/ai/write-tools.ts). A key stops when
+ * revoked, when its owner leaves the organisation, or when its owner's
+ * password or two-step sign-in is reset.
+ *
+ * `initialize` gives the client an `Mcp-Session-Id`. With it Tohyee knows
+ * which tool list the client fetched; when the tools this connection may use
+ * change (its level, the person's role, a new release), the answer to the
+ * client's next request is an event stream with
+ * `notifications/tools/list_changed` first.
+ */
+
+const limiter = new RequestLimiter(MCP_REQUESTS_PER_MINUTE);
+/** Wrong keys from one address (like sign-in tries); with no address known, it doesn't apply. */
+const failedKeys = new RequestLimiter(MCP_FAILED_KEYS_PER_MINUTE);
+/** Which tool list each session's client fetched (in memory; a session id also carries its version at initialize). */
+const sessions = new ToolListSessions();
+
+function methodOf(message: unknown): string | null {
+  return message && typeof message === "object" && !Array.isArray(message) && typeof (message as { method?: unknown }).method === "string"
+    ? ((message as { method: string }).method)
+    : null;
+}
+
+function tooManyFailures(): Response {
+  return reply(rpcError(null, JSON_RPC.UNAUTHORIZED, "Too many wrong AI keys from this address. Wait a minute and try again."), 429, { "retry-after": "60" });
+}
+
+function reply(body: unknown, status = 200, headers: Record<string, string> = {}): Response {
+  return NextResponse.json(body, { status, headers: { "cache-control": "no-store", ...headers } });
+}
+
+async function unauthorized(tokenSent: boolean): Promise<Response> {
+  const addresses = await oauthAddresses();
+  return reply(
+    rpcError(
+      null,
+      JSON_RPC.UNAUTHORIZED,
+      addresses
+        ? "Sign in to Tohyee to connect (your AI app should offer this), or use a Tohyee AI key: Authorization: Bearer tohyee_ai_…"
+        : "This needs a Tohyee AI key: Authorization: Bearer tohyee_ai_… Make one on the AI page in Tohyee.",
+    ),
+    401,
+    { "www-authenticate": wwwAuthenticate(addresses?.resourceMetadataUrl ?? null, tokenSent) },
+  );
+}
+
+async function identify(token: string | null): Promise<AiTokenIdentity | null> {
+  if (!token) return null;
+  if (looksLikeAiToken(token)) return authenticateAiToken(token);
+  return authenticateAccessToken(token);
+}
+
+/**
+ * The organisation's module switches, for the tool list.
+ * If the organisation's database can't be read now, nothing is hidden: every
+ * call opens that database anyway, and fails there with its own message.
+ */
+async function modulesFor(identity: AiTokenIdentity): Promise<ToolModules | null> {
+  try {
+    return await withOrganisationTransaction(
+      identity.membership.organisation,
+      { userId: identity.user.id, email: identity.user.email, via: aiKeyVia(identity) },
+      loadToolModules,
+      { readOnly: true },
+    );
+  } catch (error) {
+    console.error("[tohyee] MCP: couldn't read the organisation's modules for the tool list:", error);
+    return null;
+  }
+}
+
+export const POST = route(async (request) => {
+  const address = sessionMetaFrom(request).ipAddress;
+  if (address && failedKeys.spent(address)) return tooManyFailures();
+  const token = bearerToken(request.headers.get("authorization"));
+  const identity = await identify(token);
+  if (!identity) {
+    // A real key whose person's access dates have passed: say so, plainly.
+    const ended = token ? await accessRefusalForAiToken(token) : null;
+    if (ended) return reply(rpcError(null, JSON_RPC.UNAUTHORIZED, ended.message), 403);
+    if (token && address && !failedKeys.take(address)) return tooManyFailures();
+    return unauthorized(token !== null);
+  }
+
+  if (!limiter.take(identity.tokenId)) {
+    // A batch the AI was working through keeps its progress: resume it after this long.
+    const wait = limiter.retryAfterSeconds(identity.tokenId);
+    return reply(
+      rpcError(null, JSON_RPC.INTERNAL_ERROR, `Too many requests with this key. Wait ${wait} second${wait === 1 ? "" : "s"} and try again; a batch keeps its progress.`),
+      429,
+      { "retry-after": String(wait) },
+    );
+  }
+  await noteAiUseFrom(identity, address);
+  if (!protocolHeaderAccepted(request.headers.get("mcp-protocol-version"))) {
+    return reply(rpcError(null, JSON_RPC.INVALID_REQUEST, "Unsupported MCP-Protocol-Version."), 400);
+  }
+
+  let message: unknown;
+  try {
+    message = JSON.parse((await readLimitedBytes(request, MAX_JSON_BYTES)).toString("utf8"));
+  } catch (error) {
+    if (error instanceof PayloadTooLargeError) return reply(rpcError(null, JSON_RPC.INVALID_REQUEST, error.message), 413);
+    return reply(rpcError(null, JSON_RPC.PARSE_ERROR, "The request body must be JSON."), 400);
+  }
+
+  // A session belongs to one person in one organisation; another key of theirs (a new sign-in) keeps it.
+  const owner = `${identity.user.id}:${identity.membership.organisation.id}`;
+  const sessionId = request.headers.get("mcp-session-id");
+  const messages = Array.isArray(message) ? message : [message];
+  const methods = messages.map(methodOf);
+  // The mail tools only for a Look only key its Owner gave the private-mail scope.
+  const server = mcpServerFor(identity, {
+    privateMail: await keyCanReadMail(identity),
+    modules: await modulesFor(identity),
+    toolListSeen: methods.includes("initialize") ? null : sessions.seen(owner, sessionId),
+  });
+  const toolList = server.toolList!;
+  const headers: Record<string, string> = {};
+  if (methods.includes("initialize")) headers["mcp-session-id"] = sessions.start(owner, toolList.version);
+  else if (methods.includes("tools/list")) sessions.listed(owner, sessionId, toolList.version);
+
+  let answers: JsonRpcResponse[];
+  if (Array.isArray(message)) {
+    // JSON-RPC batches (MCP 2025-03-26 allowed them; later versions don't send them).
+    if (message.length === 0 || message.length > 20) {
+      return reply(rpcError(null, JSON_RPC.INVALID_REQUEST, "A batch must have 1 to 20 messages."), 400);
+    }
+    answers = [];
+    for (const entry of message) {
+      const answer = await handleMcpMessage(entry, server);
+      if (answer) answers.push(answer);
+    }
+  } else {
+    const answer = await handleMcpMessage(message, server);
+    answers = answer ? [answer] : [];
+  }
+  if (answers.length === 0) return new Response(null, { status: 202, headers });
+
+  // The client's tool list is out of date and this request wasn't the one fetching it:
+  // tell it first, on this answer's stream. A tools/list in the batch is already the fresh list.
+  if (toolList.stale && !methods.includes("tools/list") && !methods.includes("initialize") && acceptsEventStream(request.headers.get("accept"))) {
+    return new Response(eventStreamBody([TOOLS_LIST_CHANGED, ...answers]), {
+      status: 200,
+      headers: { "content-type": "text/event-stream", "cache-control": "no-store", "x-accel-buffering": "no", ...headers },
+    });
+  }
+  return reply(Array.isArray(message) ? answers : answers[0], 200, headers);
+});
+
+/**
+ * No GET event stream (so nothing can be pushed while the client is quiet),
+ * and a session ends by being forgotten: only POST.
+ */
+function methodNotAllowed(): Response {
+  return new Response(null, { status: 405, headers: { allow: "POST" } });
+}
+
+export const GET = route(async () => methodNotAllowed());
+export const DELETE = route(async () => methodNotAllowed());

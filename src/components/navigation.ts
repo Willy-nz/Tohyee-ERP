@@ -1,0 +1,774 @@
+import type { Modules } from "@/components/modules";
+import type { Role } from "@/lib/auth/roles";
+import type { IllustratedIconName } from "@/components/illustrated-icon";
+
+/** An optional module a menu or link belongs to (example MOD1); shown only while it's on. Accounting counts as on unless it's been turned off (MOD2). */
+export type ModuleKey = "accounting" | "crm" | "reporting" | "notForProfit" | "analytics" | "gst" | "livestock" | "farming";
+/** `section`: the sub-heading the link sits under inside its column; links of a section are kept together. */
+export type MenuLink = { href: string; label: string; minRole?: Role; module?: ModuleKey; section?: string };
+export type MenuGroup = { heading: string; links: MenuLink[] };
+/** A run of links under one sub-heading (none for a column without sub-headings). */
+export type MenuSection = { heading: string | null; links: MenuLink[] };
+/** `area`: the paths that show the menu as current (default: AREAS by its label). */
+export type Menu = {
+  label: string; href?: string; groups: MenuGroup[]; module?: ModuleKey; area?: string[]; minRole?: Role;
+  /** Decorative picture for the whole menu, when its first link's picture would mislead (CRM Settings opens on Teams). */
+  art?: IllustratedIconName;
+};
+
+/**
+ * The accounting menus: Home, Sales, Purchases, Banking, Payroll,
+ * Reports, Accounting, Tax and Settings. Farm is its
+ * own app now, beside Accounting: FARM_MENUS. Each opens to a panel of a few labelled groups.
+ * Making something new lives in the "+ New" menu (NEW_ACTIONS), not here.
+ * Server settings aren't here: they open only on the server computer.
+ */
+/** Where Shopify and other sales platforms are connected (an Accounting setting). */
+export const SALES_PLATFORMS_HREF = "/operations/settings/sales-platforms";
+
+/** The All settings page: every setting on one page of cards. */
+export const ALL_SETTINGS_HREF = "/operations/settings/all";
+
+/** Puts links under a sub-heading inside a menu column. */
+function section(heading: string, links: MenuLink[]): MenuLink[] {
+  return links.map((link) => ({ ...link, section: heading }));
+}
+
+export const MENUS: Menu[] = [
+  { label: "Home", href: "/operations", groups: [] },
+  {
+    label: "Sales",
+    groups: [
+      {
+        heading: "Documents",
+        links: [
+          ...section("Invoicing", [
+            { href: "/operations/invoices", label: "Invoices" },
+            { href: "/operations/invoices?show=awaiting", label: "Awaiting payment" },
+            { href: "/operations/credit-notes", label: "Credit notes" },
+            { href: "/operations/repeating-invoices", label: "Repeating invoices" },
+          ]),
+          ...section("Orders", [
+            { href: "/operations/quotes", label: "Quotes" },
+            { href: "/operations/sales-orders", label: "Sales orders" },
+            { href: "/operations/to-send", label: "To send" },
+            { href: "/operations/signing", label: "Signing" },
+          ]),
+        ],
+      },
+      {
+        heading: "Money in",
+        links: [
+          { href: "/operations/customer-payments", label: "Payments for several invoices" },
+          { href: "/operations/overpayments", label: "Overpayments" },
+        ],
+      },
+      {
+        heading: "Customers and items",
+        links: [
+          ...section("Customers", [
+            { href: "/operations/contacts?type=customers", label: "Customers" },
+            { href: "/operations/contacts", label: "All contacts" },
+            { href: "/operations/customer-statements", label: "Customer statements" },
+            { href: "/operations/items", label: "Products and services" },
+          ]),
+          ...section("Projects and jobs", [
+            { href: "/operations/projects", label: "Projects" },
+            { href: "/operations/jobs", label: "Jobs" },
+            { href: "/operations/jobs/calendar", label: "Job calendar" },
+            { href: "/operations/jobs/my-visits", label: "My visits" },
+            { href: "/operations/projects/staff-rates", label: "Staff cost rates" },
+          ]),
+        ],
+      },
+    ],
+  },
+  {
+    label: "Purchases",
+    groups: [
+      {
+        heading: "Documents",
+        links: [
+          ...section("Bills", [
+            { href: "/operations/purchases", label: "Purchases overview" },
+            { href: "/operations/bills", label: "Bills" },
+            { href: "/operations/bills/inbox", label: "Bills inbox" },
+            { href: "/operations/bills?show=awaiting", label: "Awaiting payment" },
+            { href: "/operations/repeating-bills", label: "Repeating bills" },
+            { href: "/operations/purchases/approvals", label: "Approvals" },
+          ]),
+          ...section("Orders and credits", [
+            { href: "/operations/purchase-orders", label: "Purchase orders" },
+            { href: "/operations/supplier-credit-notes", label: "Supplier credit notes" },
+          ]),
+        ],
+      },
+      {
+        heading: "Suppliers and money out",
+        links: [
+          { href: "/operations/contacts?type=suppliers", label: "Suppliers" },
+          { href: "/operations/supplier-payments", label: "Payments for several bills" },
+          { href: "/operations/expense-claims", label: "Expense claims" },
+        ],
+      },
+    ],
+  },
+  {
+    label: "Banking",
+    groups: [
+      {
+        heading: "Banking",
+        links: [
+          { href: "/operations/bank-accounts", label: "Bank accounts" },
+          { href: "/operations/bank-rules", label: "Bank rules" },
+          { href: "/operations/exchange-rates", label: "Exchange rates" },
+        ],
+      },
+      {
+        heading: "FX",
+        links: [
+          { href: "/operations/fx-revaluation", label: "FX revaluation", minRole: "bookkeeper" },
+        ],
+      },
+    ],
+  },
+  {
+    label: "Payroll",
+    groups: [
+      {
+        heading: "Pay",
+        links: [
+          ...section("Pay runs", [
+            { href: "/operations/payroll/pay-runs", label: "Pay runs", minRole: "bookkeeper" },
+            { href: "/operations/payroll/ird-payments", label: "IRD payments", minRole: "bookkeeper" },
+          ]),
+          ...section("Time", [
+            { href: "/operations/payroll/rosters", label: "Rosters", minRole: "bookkeeper" },
+            { href: "/operations/payroll/my-shifts", label: "My shifts", minRole: "viewer" },
+            { href: "/operations/payroll/clock-ins", label: "Clock-ins", minRole: "bookkeeper" },
+            { href: "/operations/payroll/timesheets", label: "Timesheets", minRole: "viewer" },
+          ]),
+          ...section("Leave", [
+            { href: "/operations/payroll/leave-requests", label: "Leave requests", minRole: "viewer" },
+            { href: "/operations/payroll/leave", label: "Leave", minRole: "bookkeeper" },
+          ]),
+        ],
+      },
+      {
+        heading: "People and reports",
+        links: [
+          { href: "/operations/payroll/employees", label: "Employees", minRole: "bookkeeper" },
+          { href: "/operations/payroll/reports", label: "Reports", minRole: "bookkeeper" },
+          { href: "/operations/payroll/workforce-budget", label: "Workforce budget", minRole: "bookkeeper" },
+        ],
+      },
+      {
+        heading: "Settings",
+        links: [
+          { href: "/operations/payroll/groups", label: "Pay groups and employee groups", minRole: "bookkeeper" },
+          { href: "/operations/payroll/pay-items", label: "Pay items", minRole: "bookkeeper" },
+          { href: "/operations/settings/bank-files", label: "Bank file settings", minRole: "bookkeeper" },
+          { href: "/operations/settings/payroll-access", label: "Payroll access", minRole: "admin" },
+        ],
+      },
+    ],
+  },
+  {
+    label: "Reports",
+    groups: [
+      {
+        heading: "Financial statements",
+        links: [
+          ...section("Statements", [
+            { href: "/operations/reports?report=pnl", label: "Profit and loss" },
+            { href: "/operations/reports?report=bs", label: "Balance sheet" },
+            { href: "/operations/reports?report=tb", label: "Trial balance" },
+            { href: "/operations/reports?report=equity", label: "Changes in equity" },
+            { href: "/operations/reports?report=cashflow", label: "Cash flows" },
+            { href: "/operations/reports?report=statements", label: "Annual financial statements" },
+          ]),
+          ...section("Detail", [
+            { href: "/operations/reports?report=ledger", label: "General ledger" },
+            { href: "/operations/reports?report=transactions", label: "Account transactions" },
+            { href: "/operations/reports?report=journals", label: "Journal report" },
+            { href: "/operations/reports?report=bankrec", label: "Bank reconciliation" },
+          ]),
+          ...section("Who owes what", [
+            { href: "/operations/reports?report=aged", label: "Aged receivables" },
+            { href: "/operations/reports?report=payables", label: "Aged payables" },
+          ]),
+        ],
+      },
+      {
+        heading: "Business",
+        links: [
+          ...section("Budgets and forecasts", [
+            { href: "/operations/budgets", label: "Budgets" },
+            { href: "/operations/reports?report=budget", label: "Budget vs actual" },
+            { href: "/operations/reports/cash-flow-forecast", label: "Cash flow forecast" },
+          ]),
+          ...section("Sales, stock and assets", [
+            { href: "/operations/reports?report=stock", label: "Stock valuation" },
+            { href: "/operations/reports?report=sales", label: "Sales by salesperson", module: "reporting" },
+            { href: "/operations/fixed-assets/register", label: "Fixed asset register" },
+            { href: "/operations/reports/consolidation", label: "Consolidation" },
+          ]),
+          ...section("Projects", [
+            { href: "/operations/project-reports/profitability", label: "Project profitability" },
+            { href: "/operations/project-reports/time", label: "Time report" },
+          ]),
+        ],
+      },
+      {
+        heading: "Custom reports",
+        links: [
+          { href: "/operations/reports?view=custom", label: "New custom report", minRole: "bookkeeper" },
+          { href: "/operations/reports?view=drafts", label: "Drafts" },
+          { href: "/operations/reports?view=published", label: "Published" },
+          { href: "/operations/reports?view=archived", label: "Archived" },
+        ],
+      },
+      {
+        heading: "Not-for-profit",
+        links: [
+          { href: "/operations/settings/tracking", label: "Set up fund tracking", minRole: "admin", module: "notForProfit" },
+          { href: "/operations/reports?report=pnl", label: "Fund activity", module: "notForProfit" },
+          { href: "/operations/budgets", label: "Budgets by fund", module: "notForProfit" },
+        ],
+      },
+    ],
+  },
+  {
+    // : the old Accountant menu split into Accounting, Tax and Settings.
+    label: "Accounting",
+    groups: [
+      {
+        heading: "Ledger",
+        links: [
+          ...section("Ledger", [
+            { href: "/operations/ledger-journals", label: "Journals" },
+            { href: "/operations/accounts", label: "Chart of accounts" },
+          ]),
+          ...section("Year end", [
+            { href: "/operations/period-close", label: "Period close" },
+            { href: "/operations/reports/accountant-pack", label: "Year-end pack" },
+            // The statements themselves are a report now; this page keeps signing and performance reports.
+            { href: "/operations/reports?report=statements", label: "Financial statements" },
+            { href: "/operations/reports/financial-statements", label: "Signing and performance reports" },
+          ]),
+          // Products and services are also under Sales; the owner looked for them here (2 Oct 2026).
+          ...section("Inventory", [
+            { href: "/operations/items", label: "Products and services" },
+            { href: "/operations/inventory", label: "Stock" },
+          ]),
+        ],
+      },
+      {
+        heading: "Assets",
+        links: [
+          ...section("Fixed assets", [
+            { href: "/operations/fixed-assets", label: "Fixed assets" },
+            { href: "/operations/fixed-assets/depreciation", label: "Depreciation" },
+          ]),
+          ...section("Livestock", [
+            { href: "/operations/livestock", label: "Livestock", module: "livestock" },
+            { href: "/operations/livestock/account-sales", label: "Account sales", module: "livestock" },
+            { href: "/operations/livestock/valuation", label: "Livestock valuation", module: "livestock" },
+            { href: "/operations/livestock/management", label: "Livestock management values", module: "livestock" },
+          ]),
+        ],
+      },
+    ],
+  },
+  {
+    label: "Tax",
+    // The calculator is the Tax menu's own picture; its pages each have their own.
+    art: "tax",
+    groups: [
+      {
+        heading: "Tax",
+        links: [
+          ...section("GST", [
+            { href: "/operations/gst-return", label: "GST return", module: "gst" },
+            { href: "/operations/gst-audit", label: "GST audit report", module: "gst" },
+            { href: "/operations/tax", label: "Tax codes" },
+          ]),
+          ...section("Income tax", [{ href: "/operations/income-tax", label: "Income tax", minRole: "admin" }]),
+          ...section("R&D", [
+            { href: "/operations/rd", label: "R&D activities" },
+            { href: "/operations/rd/costs", label: "Tagged R&D costs" },
+            { href: "/operations/rd/claim", label: "R&D claim report" },
+          ]),
+        ],
+      },
+    ],
+  },
+  {
+    label: "Settings",
+    groups: [
+      {
+        // The most used settings; the rest are on the All settings page (SETTINGS).
+        heading: "Settings",
+        links: [
+          { href: "/operations/settings", label: "Organisation settings", minRole: "admin" },
+          { href: "/operations/members", label: "People and roles", minRole: "admin" },
+          { href: "/operations/settings/email", label: "Email", minRole: "admin" },
+          { href: "/operations/settings/sales-platforms", label: "Sales platforms" },
+          { href: "/operations/settings/import", label: "Import and export", minRole: "admin" },
+          { href: ALL_SETTINGS_HREF, label: "All settings" },
+        ],
+      },
+    ],
+  },
+];
+
+/** Every setting, as the All settings page's cards of 2-6 links. */
+export const SETTINGS: MenuGroup[] = [
+  {
+    heading: "Organisation",
+    links: [
+      { href: "/operations/settings", label: "Organisation settings", minRole: "admin" },
+      { href: "/operations/modules", label: "Modules", minRole: "admin" },
+      { href: "/operations/settings/email", label: "Email", minRole: "admin" },
+      { href: "/operations/settings/import", label: "Import and export", minRole: "admin" },
+      { href: "/operations/settings/powerpoint", label: "PowerPoint add-in", minRole: "admin" },
+    ],
+  },
+  {
+    heading: "People and access",
+    links: [
+      { href: "/operations/members", label: "People and roles", minRole: "admin" },
+      { href: "/operations/members/hire", label: "Hire help", minRole: "admin" },
+      { href: "/operations/settings/payroll-access", label: "Payroll access", minRole: "admin" },
+      { href: "/operations/settings/approval-rules", label: "Approval rules" },
+    ],
+  },
+  {
+    heading: "Sales and payments",
+    links: [
+      { href: "/operations/settings/customers", label: "Payment terms and customers", minRole: "admin" },
+      { href: "/operations/settings/salespeople", label: "Salespeople", minRole: "admin", module: "reporting" },
+      { href: "/operations/settings/sales-platforms", label: "Sales platforms" },
+      { href: "/operations/settings/online-payments", label: "Online payments" },
+    ],
+  },
+  {
+    heading: "Accounting setup",
+    links: [
+      { href: "/operations/settings/tracking", label: "Tracking categories", minRole: "admin", module: "reporting" },
+      { href: "/operations/settings/custom-fields", label: "Custom fields", minRole: "admin", module: "reporting" },
+      { href: "/operations/settings/bank-files", label: "Bank files", minRole: "bookkeeper" },
+      { href: "/operations/settings/kilometre-rates", label: "Kilometre rates" },
+    ],
+  },
+  {
+    heading: "Assets and livestock",
+    links: [
+      { href: "/operations/fixed-assets/types", label: "Fixed asset types", minRole: "admin" },
+      { href: "/operations/livestock/settings", label: "Livestock", module: "livestock" },
+    ],
+  },
+  {
+    heading: "Farm",
+    links: [
+      // Set up on the farm Map since.
+      { href: "/operations/farm/map?aerial=1", label: "Aerial photos for farm maps", minRole: "admin", module: "farming" },
+      { href: "/operations/settings/weather", label: "Weather (MetService)", minRole: "admin", module: "farming" },
+    ],
+  },
+  {
+    heading: "CRM",
+    links: [
+      { href: "/crm/record-types", label: "CRM record types", minRole: "admin", module: "crm" },
+      { href: "/crm/stages", label: "CRM opportunity stages", minRole: "admin", module: "crm" },
+    ],
+  },
+];
+
+/** Everything someone can start from the "+ New" button (moved out of the Sales and Purchases menus). */
+export const NEW_ACTIONS: MenuGroup[] = [
+  {
+    heading: "Sales",
+    links: [
+      { href: "/operations/invoices/new", label: "New invoice", minRole: "bookkeeper" },
+      { href: "/operations/quotes/new", label: "New quote", minRole: "bookkeeper" },
+      { href: "/operations/sales-orders/new", label: "New sales order", minRole: "bookkeeper" },
+      { href: "/operations/credit-notes/new", label: "New credit note", minRole: "bookkeeper" },
+      { href: "/operations/customer-payments/new", label: "Receive a payment", minRole: "bookkeeper" },
+      { href: "/operations/projects/new", label: "New project", minRole: "bookkeeper" },
+    ],
+  },
+  {
+    heading: "Purchases",
+    links: [
+      { href: "/operations/bills/new", label: "New bill", minRole: "bookkeeper" },
+      { href: "/operations/purchase-orders/new", label: "New purchase order", minRole: "bookkeeper" },
+      { href: "/operations/supplier-credit-notes/new", label: "New supplier credit note", minRole: "bookkeeper" },
+      { href: "/operations/supplier-payments/new", label: "Pay bills", minRole: "bookkeeper" },
+      { href: "/operations/expense-claims/new", label: "New expense claim", minRole: "bookkeeper" },
+    ],
+  },
+  // : the Log's quick records, when Farming is on. Farm staff see these and nothing else.
+  {
+    heading: "Farm",
+    links: [
+      { href: "/operations/farm/log?record=walk", label: "Farm walk", module: "farming", minRole: "bookkeeper" },
+      { href: "/operations/farm/log?record=in", label: "Record a grazing", module: "farming", minRole: "bookkeeper" },
+      { href: "/operations/farm/log?record=cover", label: "Add a cover reading", module: "farming", minRole: "bookkeeper" },
+      { href: "/operations/farm/log?record=move", label: "Move a mob", module: "farming", minRole: "bookkeeper" },
+      { href: "/operations/farm/log?record=births", label: "Record births", module: "farming", minRole: "bookkeeper" },
+      { href: "/operations/farm/log?record=deaths", label: "Record deaths", module: "farming", minRole: "bookkeeper" },
+      { href: "/operations/farm/log?record=treatment", label: "Record a treatment", module: "farming", minRole: "bookkeeper" },
+      { href: "/operations/farm/log?record=rain", label: "Record rain", module: "farming", minRole: "bookkeeper" },
+      { href: "/operations/farm/log?record=photo", label: "Add a photo or note", module: "farming", minRole: "bookkeeper" },
+    ],
+  },
+];
+
+/**
+ * The CRM's top bar (its own app, under /crm); shown only while the CRM is on
+ * (MOD1). Routine work up front, the rest under More and Settings, every page
+ * still reachable with the same roles.
+ */
+export const CRM_MENUS: Menu[] = (
+  [
+    { label: "Home", href: "/crm", area: ["/crm"], groups: [] },
+    {
+      label: "Contacts",
+      area: ["/crm/companies", "/crm/people"],
+      groups: [
+        {
+          heading: "Contacts",
+          links: [
+            { href: "/crm/companies", label: "Companies" },
+            { href: "/crm/people", label: "People" },
+          ],
+        },
+      ],
+    },
+    {
+      label: "Sales",
+      // Not the CRM card: Home and Contacts have that.
+      art: "pipeline",
+      area: ["/crm/leads", "/crm/pipeline", "/crm/opportunities", "/crm/forecasts"],
+      groups: [
+        {
+          heading: "Sales",
+          links: [
+            { href: "/crm/leads", label: "Leads" },
+            { href: "/crm/pipeline", label: "Pipeline" },
+            { href: "/crm/forecasts", label: "Forecasts" },
+          ],
+        },
+      ],
+    },
+    { label: "Tasks", href: "/crm/tasks", area: ["/crm/tasks"], groups: [] },
+    { label: "Dashboard", href: "/crm/dashboard", area: ["/crm/dashboard"], groups: [] },
+    {
+      label: "More",
+      // Marketing and email: the mail picture, so the CRM card isn't on four menus.
+      art: "mail",
+      area: ["/crm/campaigns", "/crm/mail", "/crm/follow-ups", "/crm/email-templates", "/crm/sequences"],
+      groups: [
+        {
+          heading: "Marketing",
+          links: [
+            { href: "/crm/campaigns", label: "Campaigns" },
+            { href: "/crm/sequences", label: "Sequences", minRole: "admin" },
+            { href: "/crm/follow-ups", label: "Follow-ups", minRole: "admin" },
+          ],
+        },
+        {
+          heading: "Email",
+          links: [
+            { href: "/crm/mail", label: "Email and calendar" },
+            { href: "/crm/email-templates", label: "Email templates", minRole: "admin" },
+          ],
+        },
+      ],
+    },
+    {
+      label: "Settings",
+      art: "settings",
+      area: ["/crm/teams", "/crm/reassign", "/crm/duplicates", "/crm/record-types", "/crm/stages"],
+      groups: [
+        {
+          heading: "Team and data",
+          links: [
+            { href: "/crm/teams", label: "Teams" },
+            { href: "/crm/reassign", label: "Reassign records" },
+            { href: "/crm/duplicates", label: "Duplicates" },
+          ],
+        },
+        {
+          heading: "Customise",
+          links: [
+            { href: "/crm/record-types", label: "Record types", minRole: "admin" },
+            { href: "/crm/stages", label: "Stages", minRole: "admin" },
+          ],
+        },
+        {
+          // Shopify's own settings, in Accounting (where its orders post); not a copy.
+          heading: "Integrations",
+          links: [{ href: SALES_PLATFORMS_HREF, label: "Sales platforms (Shopify)", module: "accounting" }],
+        },
+      ],
+    },
+  ] satisfies Menu[]
+).map((menu) => ({ ...menu, module: "crm" as const }));
+
+/** Analytics' tabs (its own app, under /analytics); shown only while Analytics is on. */
+export const ANALYTICS_MENUS: Menu[] = [
+  { label: "Reports", href: "/analytics", area: ["/analytics", "/analytics/dashboards"] },
+  { label: "Data sources", href: "/analytics/sources", area: ["/analytics/sources"], minRole: "viewer" as const },
+  { label: "Prepare data", href: "/analytics/shaping", area: ["/analytics/shaping"], minRole: "viewer" as const },
+].map((menu) => ({ ...menu, groups: [], module: "analytics" as const }));
+
+/** The AI assistant's page; shown to everyone (the page itself checks what they may do). */
+export const AI_LINK: MenuLink = { href: "/operations/ai", label: "AI" };
+
+/** The paths a menu covers, so its button shows as the current area. */
+export const AREAS: Record<string, string[]> = {
+  Home: ["/operations"],
+  Sales: [
+    "/operations/sales",
+    "/operations/items",
+    "/operations/invoices",
+    "/operations/credit-notes",
+    "/operations/quotes",
+    "/operations/sales-orders",
+    "/operations/to-send",
+    "/operations/signing",
+    "/operations/repeating-invoices",
+    "/operations/overpayments",
+    "/operations/customer-payments",
+    "/operations/projects",
+    "/operations/jobs",
+  ],
+  Purchases: ["/operations/purchases", "/operations/bills", "/operations/purchase-orders", "/operations/repeating-bills", "/operations/supplier-credit-notes", "/operations/supplier-payments", "/operations/expense-claims"],
+  Payroll: ["/operations/payroll"],
+  Banking: ["/operations/bank-accounts", "/operations/bank-rules", "/operations/exchange-rates", "/operations/fx-revaluation"],
+  Reports: ["/operations/reports", "/operations/budgets", "/operations/project-reports"],
+  Accounting: ["/operations/accounts", "/operations/ledger-journals", "/operations/inventory", "/operations/fixed-assets", "/operations/livestock", "/operations/period-close"],
+  Tax: ["/operations/gst-return", "/operations/gst-audit", "/operations/tax", "/operations/income-tax", "/operations/rd"],
+  Settings: ["/operations/settings", "/operations/members", "/operations/modules"],
+};
+
+/** Home pages whose menu is current on that page only, not the pages under it. */
+const EXACT_AREAS = new Set(["/operations", "/crm", "/analytics", "/operations/farm"]);
+
+export function inArea(pathname: string, menu: Menu): boolean {
+  return (menu.area ?? AREAS[menu.label] ?? []).some((path) =>
+    EXACT_AREAS.has(path) ? pathname === path : pathname === path || pathname.startsWith(`${path}/`),
+  );
+}
+
+/** Whether a menu link is the page being shown (its path and any ?query it names). */
+export function isCurrent(pathname: string, search: URLSearchParams, href: string): boolean {
+  const [path, query] = href.split("?");
+  if (pathname !== path) return false;
+  const wanted = new URLSearchParams(query ?? "");
+  if ([...wanted.keys()].length === 0) {
+    return !search.get("show") && !search.get("type") && !search.get("report");
+  }
+  return [...wanted.entries()].every(([key, value]) => search.get(key) === value);
+}
+
+/** A column's links split by their sub-headings, in order; sections left empty by role or module filtering don't appear. */
+export function menuSections(group: MenuGroup): MenuSection[] {
+  const sections: MenuSection[] = [];
+  for (const link of group.links) {
+    const heading = link.section ?? null;
+    const last = sections.at(-1);
+    if (last && last.heading === heading) last.links.push(link);
+    else sections.push({ heading, links: [link] });
+  }
+  return sections;
+}
+
+type Access = { can(role: Role): boolean; modules: Modules | null; farmWorker?: boolean };
+
+/**
+ * The Farm app's top bar: the same five places
+ * as the phone's bottom tabs, with Effluent beside them, and everything
+ * else on the farm under More. Livestock valuation and co-op shares stay
+ * linked to the books; they open in Accounting where they live.
+ */
+export const FARM_MENUS: Menu[] = [
+  { label: "Today", href: "/operations/farm", module: "farming", groups: [], area: ["/operations/farm"] },
+  { label: "Map", href: "/operations/farm/map", module: "farming", groups: [], area: ["/operations/farm/map", "/operations/farm/tractor"] },
+  { label: "Log", href: "/operations/farm/log", module: "farming", groups: [], area: ["/operations/farm/log"] },
+  { label: "Safety", href: "/operations/farm/safety", module: "farming", groups: [], area: ["/operations/farm/safety", "/operations/farming/safety"] },
+  { label: "Effluent", href: "/operations/farm/effluent", module: "farming", groups: [], area: ["/operations/farm/effluent"] },
+  {
+    label: "More",
+    module: "farming",
+    // Its first link (Farms and paddocks) is drawn as a map; the menu is the whole farm.
+    art: "farm",
+    area: ["/operations/farm/more", "/operations/farm/offline", "/operations/farm/security", "/operations/farm/mobs", "/operations/farm/animals", "/operations/farm/timeline", "/operations/farm/weather", "/operations/farming"],
+    groups: [
+      {
+        heading: "Paddocks and feed",
+        links: [
+          { href: "/operations/farming", label: "Farms and paddocks" },
+          { href: "/operations/farm/mobs", label: "Mobs" },
+          { href: "/operations/farm/animals", label: "Animals" },
+          { href: "/operations/farming/pasture", label: "Pasture and feed" },
+          { href: "/operations/farming/rainfall", label: "Rainfall" },
+          { href: "/operations/farm/weather", label: "Weather forecast" },
+          { href: "/operations/farming/soil", label: "Soil tests" },
+          { href: "/operations/farming/fertiliser", label: "Fertiliser plans" },
+          { href: "/operations/farming/compare", label: "All farms compared" },
+          { href: "/operations/farming/import", label: "Import paddock shapes", minRole: "bookkeeper" },
+        ],
+      },
+      {
+        heading: "Records",
+        links: [
+          { href: "/operations/farming/calendar", label: "Farm calendar" },
+          { href: "/operations/farming/tasks", label: "Tasks" },
+          { href: "/operations/farm/timeline", label: "Farm timeline" },
+          { href: "/operations/farm/tractor", label: "Tractor mode" },
+          { href: "/operations/farm/security", label: "Security" },
+          { href: "/operations/farming/notebook", label: "Farm notebook" },
+          { href: "/operations/livestock", label: "Livestock", module: "livestock" },
+          { href: "/operations/farming/co-op-shares", label: "Co-op shares" },
+        ],
+      },
+      {
+        heading: "Insights and apps",
+        links: [
+          { href: "/operations/farming/benchmarks", label: "Benchmarks" },
+          { href: "/operations/livestock/valuation", label: "Livestock valuation", module: "livestock" },
+          { href: "/operations/farming/apps", label: "Farm apps" },
+        ],
+      },
+      {
+        heading: "This device",
+        links: [
+          { href: "/operations/farm/offline", label: "Offline on this device" },
+          { href: "/get-tohyee", label: "Get Tohyee on this device" },
+        ],
+      },
+    ],
+  },
+];
+
+/** Which app's top bar a page shows: farm pages are in the Farm app, though they live under /operations. */
+export function appForPath(app: "accounting" | "farm" | "crm" | "analytics", pathname: string): "accounting" | "farm" | "crm" | "analytics" {
+  if (app !== "accounting") return app;
+  return ["/operations/farm", "/operations/farming"].some((path) => pathname === path || pathname.startsWith(`${path}/`)) ? "farm" : app;
+}
+
+/** Where farm staff may go; anywhere else in Accounting sends them to the first. */
+export const FARM_WORK_PATHS = ["/operations/farm", "/operations/farming/pasture", "/operations/farming/rainfall", "/operations/farming/soil", "/operations/farming/calendar", "/operations/farming/tasks", "/operations/farming/apps", "/operations/profile"];
+
+export function farmWorkAllowsPath(pathname: string): boolean {
+  if (pathname === "/operations/farming") return true;
+  return FARM_WORK_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+}
+
+function moduleOn(module: ModuleKey | undefined, modules: Modules | null): boolean {
+  if (!module) return true;
+  if (module === "accounting") return modules !== null && modules.accounting !== false;
+  return Boolean(modules?.[module]);
+}
+
+function linkVisible(link: MenuLink, { can, modules }: Access): boolean {
+  return (!link.minRole || can(link.minRole)) && moduleOn(link.module, modules);
+}
+
+function filterGroups(groups: MenuGroup[], access: Access): MenuGroup[] {
+  return groups
+    .map((group) => ({ ...group, links: group.links.filter((link) => linkVisible(link, access)) }))
+    .filter((group) => group.links.length > 0);
+}
+
+/** Farm staff see the farm pages they may open, and Get Tohyee on this device. */
+function farmWorkLink(href: string): boolean {
+  return href === "/get-tohyee" || farmWorkAllowsPath(href.split("?")[0]);
+}
+
+/** The menus someone may see in an app: their role and the organisation's modules decide. */
+export function visibleMenus(app: "accounting" | "farm" | "crm" | "analytics", access: Access): Menu[] {
+  // MOD2: no Accounting menus while it's off; Farm needs Accounting.
+  if ((app === "accounting" || app === "farm") && access.modules?.accounting === false) return [];
+  if (access.farmWorker) {
+    if (app !== "accounting" && app !== "farm") return [];
+    return FARM_MENUS.filter((menu) => moduleOn(menu.module, access.modules) && (!menu.href || farmWorkLink(menu.href)))
+      .map((menu) => ({ ...menu, groups: filterGroups(menu.groups, access).map((group) => ({ ...group, links: group.links.filter((link) => farmWorkLink(link.href)) })).filter((group) => group.links.length > 0) }))
+      .filter((menu) => menu.href || menu.groups.length > 0);
+  }
+  return (app === "crm" ? CRM_MENUS : app === "analytics" ? ANALYTICS_MENUS : app === "farm" ? FARM_MENUS : MENUS)
+    .filter((menu) => moduleOn(menu.module, access.modules) && (!menu.minRole || access.can(menu.minRole)))
+    .map((menu) => ({ ...menu, groups: filterGroups(menu.groups, access) }))
+    // A dropdown left with nothing in it isn't shown.
+    .filter((menu) => menu.href || menu.groups.length > 0);
+}
+
+/** The All settings page's cards someone may see: their role and the organisation's modules decide. */
+export function visibleSettings(access: Access): MenuGroup[] {
+  // The page is an Accounting page, so it's not offered while Accounting is off (MOD2).
+  if (access.modules?.accounting === false || access.farmWorker) return [];
+  return filterGroups(SETTINGS, access);
+}
+
+/** The "+ New" actions someone may start: the books for bookkeepers and up, the farm's quick records for anyone who may log. */
+export function visibleNewActions(access: Access): MenuGroup[] {
+  if (access.modules?.accounting === false) return [];
+  if (!access.farmWorker) return filterGroups(NEW_ACTIONS, access);
+  // Farm staff record farm work but none of the books: only the farm's links, whatever their role says.
+  const farmLinks = NEW_ACTIONS.flatMap((group) => group.links).filter((link) => link.module === "farming" && moduleOn(link.module, access.modules) && farmWorkLink(link.href));
+  return farmLinks.length ? [{ heading: "Farm", links: farmLinks }] : [];
+}
+
+/** One row in the command palette: where it goes and what it's called. */
+export type Destination = { href: string; label: string; group: string };
+
+/** Every place the menus and "+ New" offer, for the command palette (exact duplicates dropped). */
+export function destinations(menus: Menu[], newActions: MenuGroup[], extra: Destination[] = []): Destination[] {
+  const all: Destination[] = [];
+  for (const group of newActions) {
+    for (const link of group.links) all.push({ href: link.href, label: link.label, group: `New › ${group.heading}` });
+  }
+  for (const menu of menus) {
+    if (menu.href) all.push({ href: menu.href, label: menu.label, group: menu.label });
+    for (const group of menu.groups) {
+      for (const link of group.links) {
+        const column = group.heading === menu.label ? menu.label : `${menu.label} › ${group.heading}`;
+        all.push({ href: link.href, label: link.label, group: link.section && link.section !== group.heading ? `${column} › ${link.section}` : column });
+      }
+    }
+  }
+  all.push(...extra);
+  const seen = new Set<string>();
+  return all.filter((item) => {
+    const key = `${item.href}|${item.label}`;
+    if (seen.has(key)) return false;
+    seen.add(key);
+    return true;
+  });
+}
+
+/**
+ * Loose matching for the command palette: every word typed must appear in
+ * the label or its group, ignoring case. Label matches sort first, then
+ * those starting with what was typed.
+ */
+export function searchDestinations(items: Destination[], query: string): Destination[] {
+  const words = query.toLowerCase().split(/\s+/).filter(Boolean);
+  if (words.length === 0) return items;
+  const scored = items
+    .map((item, index) => {
+      const label = item.label.toLowerCase();
+      const haystack = `${label} ${item.group.toLowerCase()}`;
+      if (!words.every((word) => haystack.includes(word))) return null;
+      let score = 0;
+      if (label.startsWith(words[0])) score -= 20;
+      else if (words.every((word) => label.includes(word))) score -= 10;
+      return { item, score, index };
+    })
+    .filter((entry): entry is { item: Destination; score: number; index: number } => entry !== null);
+  scored.sort((a, b) => a.score - b.score || a.index - b.index);
+  return scored.map((entry) => entry.item);
+}

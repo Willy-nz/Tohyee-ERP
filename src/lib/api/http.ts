@@ -1,0 +1,248 @@
+import { CLIENT_PG_ERRORS, pgErrorCode, plainDatabaseError } from "@/lib/db/plain-errors";
+import { NextResponse } from "next/server";
+import { assertSameOrigin, authenticate, type AuthContext, requireOrganisationRole } from "@/lib/auth/guard";
+import { farmWorkAllows, type Role } from "@/lib/auth/roles";
+import { type OrgRunner, type OrgTx, withOrganisationTransaction } from "@/lib/db/org-transaction";
+import { type CrmNeed, type CrmScope, crmAllows, crmScope } from "@/lib/crm/access";
+import { ForbiddenError, HttpError, ValidationError } from "@/lib/errors";
+import { readLimitedBytes } from "@/lib/net/limited-body";
+import type { Membership } from "@/lib/organisations/registry";
+import { parseOrganisationId } from "@/lib/organisations/registry";
+import { PAYROLL_MINIMUM_ROLE, requirePayrollAccess } from "@/lib/payroll/access";
+import { addPersonNames, loadMemberNames } from "@/lib/people/names";
+import { countRequest } from "@/lib/server-stats/counters";
+import { assertDemoAllows } from "@/lib/demo/guard";
+
+export function json(data: unknown, init: { status?: number; headers?: HeadersInit } = {}) {
+  return NextResponse.json(data, {
+    status: init.status ?? 200,
+    headers: { "cache-control": "no-store", ...(init.headers ?? {}) },
+  });
+}
+
+/** Turns any thrown error into a JSON response. Unexpected errors are logged, not leaked. */
+export function errorResponse(error: unknown): NextResponse {
+  if (error instanceof HttpError) {
+    const retryAfter = error.status === 429 ? Number(error.details?.retryAfterSeconds) : NaN;
+    return json(
+      { error: error.message, code: error.code, ...(error.details ? { details: error.details } : {}) },
+      { status: error.status, ...(Number.isFinite(retryAfter) && retryAfter > 0 ? { headers: { "retry-after": String(retryAfter) } } : {}) },
+    );
+  }
+  // The database refused it: a plain sentence goes out and its own words go to the log.
+  const pgCode = pgErrorCode(error);
+  if (pgCode && CLIENT_PG_ERRORS[pgCode]) {
+    return json({ error: plainDatabaseError(error, "a request") ?? "The request was rejected by the database.", code: `db_${pgCode}` }, { status: CLIENT_PG_ERRORS[pgCode] });
+  }
+  console.error("[tohyee] unexpected error:", error);
+  return json({ error: "Something went wrong on the server. Check the server logs.", code: "internal_error" }, { status: 500 });
+}
+
+type Handler<Context> = (request: Request, context: Context) => Promise<Response>;
+
+/** Wraps a route handler so every error becomes a consistent JSON response. */
+export function route<Context = unknown>(handler: Handler<Context>): Handler<Context> {
+  return async (request, context) => {
+    const started = performance.now();
+    let response: Response;
+    try {
+      response = await handler(request, context);
+    } catch (error) {
+      response = errorResponse(error);
+    }
+    // For the server app's Stats page: counts only.
+    countRequest(performance.now() - started, response.status);
+    return response;
+  };
+}
+
+/** The most a JSON request body may be; routes that carry a file (base64) or many rows pass a larger `maxBytes`. */
+export const MAX_JSON_BYTES = 2 * 1024 * 1024;
+/** For the import and statement routes: a 10 MB file as base64 (about 13.4 MB) and its form fields, or 5,000 parsed rows. */
+export const MAX_FILE_JSON_BYTES = 20 * 1024 * 1024;
+
+export { readLimitedBytes };
+
+async function readLimitedText(request: Request, maxBytes: number): Promise<string> {
+  return (await readLimitedBytes(request, maxBytes)).toString("utf8");
+}
+
+export async function readJson(request: Request, options: { maxBytes?: number } = {}): Promise<Record<string, unknown>> {
+  const text = await readLimitedText(request, options.maxBytes ?? MAX_JSON_BYTES);
+  let body: unknown;
+  try {
+    body = JSON.parse(text);
+  } catch {
+    throw new ValidationError("The request body must be JSON.");
+  }
+  if (!body || typeof body !== "object" || Array.isArray(body)) {
+    throw new ValidationError("The request body must be a JSON object.");
+  }
+  return body as Record<string, unknown>;
+}
+
+export function searchParams(request: Request): URLSearchParams {
+  return new URL(request.url).searchParams;
+}
+
+/** Signed-in user, with the cross-site check for anything that changes data. */
+export async function requireAuth(request: Request): Promise<AuthContext> {
+  assertSameOrigin(request);
+  return authenticate(request);
+}
+
+/**
+ * Authenticates, checks the caller's role in the organisation, then runs
+ * `work` inside one transaction on that organisation's own database. After
+ * the transaction, every person's email in the result gets their name beside
+ * it (`createdByEmail` -> `createdByName`), from one lookup of the
+ * organisation's members.
+ */
+export async function withOrganisation<T>(
+  request: Request,
+  organisationIdInput: unknown,
+  minimumRole: Role,
+  work: (tx: OrgTx, context: { auth: AuthContext; membership: Membership }) => Promise<T>,
+): Promise<T> {
+  const auth = await requireAuth(request);
+  const organisationId = parseOrganisationId(organisationIdInput);
+  const membership = await requireOrganisationRole(auth, organisationId, minimumRole);
+  assertDemoAllows(request, membership.organisation);
+  const people = await loadMemberNames(membership.organisation.id);
+  const result = await withOrganisationTransaction(
+    membership.organisation,
+    { userId: auth.user.id, email: auth.user.email, role: membership.role },
+    (tx) => work(tx, { auth, membership }),
+    { people },
+  );
+  return addPersonNames(result, people);
+}
+
+/**
+ * `withOrganisation` for the CRM: admits sales reps and
+ * managers as well as viewers and up, at the level needed ("read", "write" or
+ * "admin"), and hands `work` the person's CRM scope (whose deals and tasks
+ * they see). Every CRM route uses this, not `withOrganisation`.
+ */
+export async function withCrm<T>(
+  request: Request,
+  organisationIdInput: unknown,
+  need: CrmNeed,
+  work: (tx: OrgTx, context: { auth: AuthContext; membership: Membership; scope: CrmScope }) => Promise<T>,
+): Promise<T> {
+  const auth = await requireAuth(request);
+  const organisationId = parseOrganisationId(organisationIdInput);
+  const membership = await requireOrganisationRole(auth, organisationId, "sales_rep");
+  assertDemoAllows(request, membership.organisation);
+  if (!crmAllows(membership.role, need)) {
+    throw new ForbiddenError(
+      need === "admin"
+        ? "Setting up the CRM needs the admin role or higher in this organisation."
+        : need === "write"
+          ? "Changing CRM records needs the bookkeeper role or higher, or a sales role, in this organisation."
+          : "The CRM needs the viewer role or higher, or a sales role, in this organisation.",
+    );
+  }
+  const people = await loadMemberNames(membership.organisation.id);
+  const result = await withOrganisationTransaction(
+    membership.organisation,
+    { userId: auth.user.id, email: auth.user.email },
+    async (tx) => work(tx, { auth, membership, scope: await crmScope(tx, membership.role, auth.user.id) }),
+    { people },
+  );
+  return addPersonNames(result, people);
+}
+
+/**
+ * `withOrganisation` for farm field work: admits farm
+ * staff as well as viewers (to read) and bookkeepers (to record). Which farms
+ * is checked in the farming services, as always. Only the
+ * field-work routes use this: reading farms, paddocks, pasture, grazings,
+ * feed, soil and the farm calendar, and recording readings, grazings, feed
+ * and soil samples. Everything else still refuses farm staff.
+ */
+/** The member, if they may do farm work at this level; for routes on the core database (farm app keys). */
+export async function requireFarmWorkMember(auth: AuthContext, organisationId: string, need: "read" | "record"): Promise<Membership> {
+  const membership = await requireOrganisationRole(auth, organisationId, "farm_worker");
+  if (!farmWorkAllows(membership.role, need)) throw new ForbiddenError("Farm apps need the farm staff or viewer role or higher in this organisation.");
+  return membership;
+}
+
+export async function withFarmWork<T>(
+  request: Request,
+  organisationIdInput: unknown,
+  need: "read" | "record",
+  work: (tx: OrgTx, context: { auth: AuthContext; membership: Membership }) => Promise<T>,
+): Promise<T> {
+  const auth = await requireAuth(request);
+  const organisationId = parseOrganisationId(organisationIdInput);
+  const membership = await requireOrganisationRole(auth, organisationId, "farm_worker");
+  assertDemoAllows(request, membership.organisation);
+  if (!farmWorkAllows(membership.role, need)) {
+    throw new ForbiddenError(need === "record" ? "Recording farm work needs the farm staff or bookkeeper role or higher in this organisation." : "Farm records need the farm staff or viewer role or higher in this organisation.");
+  }
+  const people = await loadMemberNames(membership.organisation.id);
+  const result = await withOrganisationTransaction(
+    membership.organisation,
+    { userId: auth.user.id, email: auth.user.email, role: membership.role },
+    (tx) => work(tx, { auth, membership }),
+    { people },
+  );
+  return addPersonNames(result, people);
+}
+
+/**
+ * Notes and files on a record (NF1-NF14): a company's ("contact") are part of
+ * the CRM's shared address book, so sales reps and managers reach them too
+ *; every other record type is the books' and needs viewer to
+ * read or bookkeeper to change, as before.
+ */
+export async function withRecord<T>(
+  request: Request,
+  organisationIdInput: unknown,
+  recordType: string,
+  level: "read" | "write",
+  work: (tx: OrgTx, context: { auth: AuthContext; membership: Membership }) => Promise<T>,
+): Promise<T> {
+  if (recordType === "contact") return withCrm(request, organisationIdInput, level, work);
+  return withOrganisation(request, organisationIdInput, level === "read" ? "viewer" : "bookkeeper", work);
+}
+
+/**
+ * `withOrganisation` for payroll: the bookkeeper role or higher and payroll
+ * access (examples PE9-PE12). Use it for every payroll route that reads or
+ * changes pay details, allocations, rate history, IRD numbers, bank
+ * accounts, pay runs or payroll reports.
+ */
+export async function withPayrollAccess<T>(
+  request: Request,
+  organisationIdInput: unknown,
+  work: (tx: OrgTx, context: { auth: AuthContext; membership: Membership }) => Promise<T>,
+): Promise<T> {
+  return withOrganisation(request, organisationIdInput, PAYROLL_MINIMUM_ROLE, async (tx, context) => {
+    await requirePayrollAccess(tx);
+    return work(tx, context);
+  });
+}
+
+/**
+ * Like `withOrganisation`, but for bulk commands: authenticates and checks
+ * the role once, then hands `work` a runner that opens a new transaction on
+ * the organisation's database each time it's called, so one item failing
+ * doesn't undo the others.
+ */
+export async function withOrganisationRunner<T>(
+  request: Request,
+  organisationIdInput: unknown,
+  minimumRole: Role,
+  work: (run: OrgRunner) => Promise<T>,
+): Promise<T> {
+  const auth = await requireAuth(request);
+  const organisationId = parseOrganisationId(organisationIdInput);
+  const membership = await requireOrganisationRole(auth, organisationId, minimumRole);
+  assertDemoAllows(request, membership.organisation);
+  const people = await loadMemberNames(membership.organisation.id);
+  const actor = { userId: auth.user.id, email: auth.user.email };
+  const run: OrgRunner = (each) => withOrganisationTransaction(membership.organisation, actor, each, { people });
+  return addPersonNames(await work(run), people);
+}

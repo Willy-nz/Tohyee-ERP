@@ -1,0 +1,32 @@
+"use client";
+
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
+import { FarmEffluent } from "@/components/farm-effluent";
+import { FarmWorkspace } from "@/components/farm-workspace";
+import { Page } from "@/components/ui";
+import { readEffluentLink } from "@/lib/effluent/screens";
+
+/**
+ * Effluent: under More, with its daily jobs on Today
+ * and the Log. `?view=` chooses the screen, `?farm=` the farm and
+ * `?record=` the record to open.
+ */
+function EffluentForLink() {
+  const link = readEffluentLink(useSearchParams());
+  return (
+    <FarmWorkspace title="Effluent" linkedFarmId={link.farmId}>
+      {(context) => <FarmEffluent organisationId={context.organisationId} farm={context.farm} link={link} />}
+    </FarmWorkspace>
+  );
+}
+
+export default function FarmEffluentPage() {
+  return (
+    <Page>
+      <Suspense fallback={null}>
+        <EffluentForLink />
+      </Suspense>
+    </Page>
+  );
+}

@@ -1,0 +1,348 @@
+"use client";
+
+import { InfoPara, InfoTip } from "@/components/info-tip";
+import { DateInput } from "@/components/date-input";
+import Link from "next/link";
+import { type FormEvent, useEffect, useState } from "react";
+import { useRouter } from "next/navigation";
+import { RequireOrganisation } from "@/components/books";
+import { AERIAL_PHOTOS_SETTINGS } from "@/components/farm-imagery";
+import { LogoCard } from "@/components/organisation/logo-card";
+import { DirectoryCard } from "@/components/organisation/directory-card";
+import { RevenueRecognitionCard } from "@/components/revenue-recognition";
+import { useApiData } from "@/components/hooks";
+import { Button, Card, Field, Notice, Page, PageHeader, ui } from "@/components/ui";
+import { useWorkspace } from "@/components/workspace";
+import { api, errorMessage } from "@/lib/client/api";
+import { MONTH_NAMES } from "@/lib/financial-year";
+import { formatDate, formatGstNumber } from "@/lib/format";
+import type { PeriodControls } from "@/lib/ledger/period-controls";
+import { CURRENCY_MINOR_UNITS } from "@/lib/money/currency";
+import type { OrganisationSettings } from "@/lib/organisations/settings";
+import { describeGstPeriodSetting, gstPeriodSetting } from "@/lib/reports/gst-boxes";
+import { GST_BASES, GST_BASIS_LABELS, type GstBasis } from "@/lib/tax/categories";
+import type { TaxCode } from "@/lib/tax/codes";
+import { codesForSide, unavailableNote } from "@/lib/tax/available-on";
+import type { AffectedGstPeriod } from "@/lib/organisations/settings";
+import { initialRegistrationChoice, registrationChanges, registrationPatch } from "@/lib/tax/registration-choice";
+
+/** The GST filing frequency choices (GP1): "months:endMonth", or "" for not set. */
+const GST_PERIOD_CHOICES: Array<{ value: string; label: string }> = [
+  { value: "", label: "Not set" },
+  ...[
+    gstPeriodSetting(1, 1),
+    gstPeriodSetting(2, 1),
+    gstPeriodSetting(2, 2),
+    ...[1, 2, 3, 4, 5, 6].map((month) => gstPeriodSetting(6, month)),
+  ].map((setting) => ({ value: `${setting.months}:${setting.endMonth}`, label: describeGstPeriodSetting(setting) })),
+];
+
+// The forms below remount when their data reloads (so the fields show what
+// was saved), which would wipe their own state. Success messages therefore
+// live in the parent; the forms only keep their error messages.
+type SavedHandler = (message: string) => void;
+
+function SettingsForm({
+  organisationId,
+  settings,
+  taxCodes,
+  onSaved,
+}: {
+  organisationId: string;
+  settings: OrganisationSettings;
+  taxCodes: TaxCode[];
+  onSaved: SavedHandler;
+}) {
+  const [displayName, setDisplayName] = useState(settings.displayName);
+  const [baseCurrency, setBaseCurrency] = useState(settings.baseCurrency);
+  const [financialYearEndMonth, setFinancialYearEndMonth] = useState(settings.financialYearEndMonth);
+  const [gstBasis, setGstBasis] = useState<GstBasis>(settings.gstBasis);
+  const [gstPeriod, setGstPeriod] = useState(settings.gstPeriod ? `${settings.gstPeriod.months}:${settings.gstPeriod.endMonth}` : "");
+  const [allowNegativeStock, setAllowNegativeStock] = useState(settings.allowNegativeStock);
+  const [foreignTrade, setForeignTrade] = useState(settings.foreignTrade);
+  const [exportTaxCode, setExportTaxCode] = useState(settings.exportTaxCode ?? "");
+  // Only zero-rated codes available on sales can be the tax code for exports (EX13, TAO7).
+  const zeroRated = codesForSide(taxCodes, "sales").filter(
+    (code) => code.category === "zero_rated" && (code.isActive || code.code === settings.exportTaxCode),
+  );
+  const [postalAddress, setPostalAddress] = useState(settings.postalAddress ?? "");
+  const [gstNumber, setGstNumber] = useState(settings.gstNumber ? formatGstNumber(settings.gstNumber) : "");
+  // Issue : registered for GST, optionally from and until a date (NR5, NR6).
+  // : nothing is chosen until someone confirms it (GSR4).
+  const [gstChoice, setGstChoice] = useState(initialRegistrationChoice(settings));
+  const gstRegistered = gstChoice === "registered";
+  const [acknowledged, setAcknowledged] = useState(false);
+  const [gstRegisteredFrom, setGstRegisteredFrom] = useState(settings.gstRegisteredFrom ?? "");
+  const [gstRegisteredUntil, setGstRegisteredUntil] = useState(settings.gstRegisteredUntil ?? "");
+  const [paymentDetails, setPaymentDetails] = useState(settings.paymentDetails ?? "");
+  const [error, setError] = useState<string | null>(null);
+  const registrationForm = { choice: gstChoice, from: gstRegisteredFrom, until: gstRegisteredUntil };
+  const changing = registrationChanges(settings, registrationForm);
+  // GSR8: the months already holding entries that this change reaches. Nothing is rewritten.
+  const impact = useApiData<{ periods: AffectedGstPeriod[] }>(
+    changing ? `/api/organisations/${organisationId}/settings/gst-impact` : null,
+    { registered: String(gstRegistered), from: gstRegisteredFrom, until: gstRegisteredUntil },
+  );
+  const affected = changing ? (impact.data?.periods ?? []) : [];
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setError(null);
+    try {
+      await api(`/api/organisations/${organisationId}/settings`, {
+        method: "PATCH",
+        body: {
+          displayName,
+          baseCurrency,
+          financialYearEndMonth,
+          gstBasis,
+          gstPeriodMonths: gstPeriod === "" ? null : Number(gstPeriod.split(":")[0]),
+          gstPeriodEndMonth: gstPeriod === "" ? null : Number(gstPeriod.split(":")[1]),
+          allowNegativeStock,
+          foreignTrade,
+          ...(exportTaxCode ? { exportTaxCode } : {}),
+          postalAddress: postalAddress.trim() || null,
+          gstNumber: gstNumber.trim() || null,
+          ...registrationPatch(settings, registrationForm, acknowledged),
+          paymentDetails: paymentDetails.trim() || null,
+        },
+      });
+      onSaved(
+        displayName === settings.displayName
+          ? "Saved."
+          : "Saved. Reload the page to see the new name in the organisation picker.",
+      );
+    } catch (caught) {
+      setError(errorMessage(caught));
+    }
+  }
+
+  return (
+    <form onSubmit={(event) => void submit(event)} style={{ display: "grid", gap: 12 }}>
+      {error ? <Notice tone="error">{error}</Notice> : null}
+      <div className={ui.grid3}>
+        <Field label="Organisation name">
+          <input value={displayName} onChange={(event) => setDisplayName(event.target.value)} maxLength={150} required />
+        </Field>
+        <Field
+          label="Base currency"
+          hint={settings.hasPostings ? "Fixed now that journals have been posted." : "Every journal is posted in this currency."}
+        >
+          <select value={baseCurrency} disabled={settings.hasPostings} onChange={(event) => setBaseCurrency(event.target.value)}>
+            {Object.keys(CURRENCY_MINOR_UNITS).map((code) => (
+              <option key={code} value={code}>
+                {code}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field label="Financial year ends" hint="On the last day of this month. Sets report defaults and the balance sheet's current year. It can't change while a financial year is closed.">
+          <select value={financialYearEndMonth} onChange={(event) => setFinancialYearEndMonth(Number(event.target.value))}>
+            {MONTH_NAMES.map((name, index) => (
+              <option key={name} value={index + 1}>
+                {name}
+              </option>
+            ))}
+          </select>
+        </Field>
+      </div>
+      <h3 style={{ margin: "8px 0 0" }}>GST</h3>
+      {settings.gstRegistrationConfirmedAt === null ? (
+        <Notice tone="warning">
+          Is {settings.displayName} registered for GST? Choose below and save.{" "}
+          {settings.gstRegistered
+            ? "Until then, Shopify and WooCommerce sales wait and the AI won't choose GST codes."
+            : "Until then, everything is recorded with no GST."}
+        </Notice>
+      ) : null}
+      <fieldset style={{ border: 0, padding: 0, margin: 0, display: "grid", gap: 4 }}>
+        <legend>
+          Registered for GST?{" "}
+          <InfoTip label="What this changes">
+            <InfoPara>
+              <strong>Yes:</strong> documents can charge and claim GST, invoices print as &ldquo;Tax invoice&rdquo;, and the GST return is in the menus. Use the dates
+              if registration started or ended part way through.
+            </InfoPara>
+            <InfoPara>
+              <strong>No:</strong> amounts are recorded in full with no GST, documents print as &ldquo;Invoice&rdquo;, and the GST return and GST audit are hidden.
+              Shopify and WooCommerce sales come in at the full amount.
+            </InfoPara>
+            <InfoPara>Changing this never changes anything already recorded. If it reaches months that already have entries, Tohyee lists them for you to correct.</InfoPara>
+          </InfoTip>
+        </legend>
+        <label className={ui.checkbox}>
+          <input type="radio" name="gst-registered" checked={gstChoice === "registered"} onChange={() => setGstChoice("registered")} /> Yes, registered for GST
+        </label>
+        <label className={ui.checkbox}>
+          <input type="radio" name="gst-registered" checked={gstChoice === "not_registered"} onChange={() => setGstChoice("not_registered")} /> No, not registered
+        </label>
+        {settings.gstRegistrationConfirmedAt !== null && settings.gstRegistrationConfirmedBy ? (
+          <span className={ui.muted}>
+            Confirmed by {settings.gstRegistrationConfirmedBy} on {formatDate(settings.gstRegistrationConfirmedAt.slice(0, 10))}.
+          </span>
+        ) : null}
+      </fieldset>
+      {affected.length > 0 ? (
+        <Notice tone="warning">
+          <p style={{ margin: 0 }}>This reaches months that already have entries. Nothing already recorded will change:</p>
+          <ul style={{ margin: "4px 0", paddingLeft: 20 }}>
+            {affected.map((period) => (
+              <li key={period.month}>
+                {period.label}: {period.entries} {period.entries === 1 ? "entry" : "entries"}
+                {period.withGst > 0 ? `, ${period.withGst} with GST` : ""}
+              </li>
+            ))}
+          </ul>
+          <label className={ui.checkbox}>
+            <input type="checkbox" checked={acknowledged} onChange={(event) => setAcknowledged(event.target.checked)} /> I&apos;ll correct these months myself (credit
+            notes, new documents or journals)
+          </label>
+        </Notice>
+      ) : null}
+      {gstRegistered ? (
+        <div className={ui.grid3}>
+          <Field label="GST number" hint="Printed on tax invoices and credit notes. Without it, invoices print as “Invoice”, not “Tax invoice”.">
+            <input value={gstNumber} onChange={(event) => setGstNumber(event.target.value)} maxLength={20} placeholder="123-456-789" />
+          </Field>
+          <Field label="Registered from" hint="Blank if registered from the start. Documents dated before it can't have GST.">
+            <DateInput value={gstRegisteredFrom} onChange={(event) => setGstRegisteredFrom(event.target.value)} />
+          </Field>
+          <Field label="Registration ended" hint="Blank while still registered. Documents dated after it can't have GST; the last GST return covers up to it.">
+            <DateInput value={gstRegisteredUntil} onChange={(event) => setGstRegisteredUntil(event.target.value)} />
+          </Field>
+          <Field label="GST basis" hint={<>How GST returns are worked out. <InfoTip label="GST basis">The payments basis is for sales of $2 million or less in the last 12 months (Tohyee doesn&apos;t check this). After a change, the next GST return suggests the adjustment IRD asks for.</InfoTip></>}>
+            <select value={gstBasis} onChange={(event) => setGstBasis(event.target.value as GstBasis)}>
+              {GST_BASES.map((basis) => (
+                <option key={basis} value={basis}>
+                  {GST_BASIS_LABELS[basis]}
+                </option>
+              ))}
+            </select>
+          </Field>
+          <Field
+            label="GST filing frequency"
+            hint={<>How often you file GST, and which months periods end in. <InfoTip label="GST filing frequency">IRD lines two-monthly and six-monthly periods up with your balance date unless you asked otherwise. The GST return, Home and the period close use it.</InfoTip></>}
+          >
+            <select value={gstPeriod} onChange={(event) => setGstPeriod(event.target.value)}>
+              {GST_PERIOD_CHOICES.map((choice) => (
+                <option key={choice.value} value={choice.value}>
+                  {choice.label}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      ) : null}
+      {gstRegistered ? <h3 style={{ margin: "8px 0 0" }}>Exports</h3> : null}
+      {/* Only when registered: a grid's display would override the hidden attribute. */}
+      {gstRegistered ? (
+        <div className={ui.grid3}>
+          <label className={ui.checkbox}>
+            <input type="checkbox" checked={foreignTrade} onChange={(event) => setForeignTrade(event.target.checked)} />
+            Foreign trade: new sales lines for customers outside New Zealand (by their delivery country, else their billing country)
+            start with the tax code for exports. A customer&apos;s own default sales tax code comes first, and any line can be changed.
+          </label>
+          <Field
+            label="Tax code for exports"
+            hint="A zero-rated code. Exported goods and most services to non-residents are zero-rated (GST at 0%), not exempt, so they count in Box 5 and Box 6 of the GST return."
+          >
+            <select value={exportTaxCode} onChange={(event) => setExportTaxCode(event.target.value)}>
+              {exportTaxCode === "" ? <option value="">None</option> : null}
+              {zeroRated.map((code) => (
+                <option key={code.id} value={code.code}>
+                  {code.code} ({code.label}){unavailableNote(code)}
+                </option>
+              ))}
+            </select>
+          </Field>
+        </div>
+      ) : null}
+      <h3 style={{ margin: "8px 0 0" }}>On printed invoices, credit notes and quotes</h3>
+      <div className={ui.grid3}>
+        <Field label="Address" hint="Your postal or business address, printed under your name.">
+          <textarea value={postalAddress} onChange={(event) => setPostalAddress(event.target.value)} maxLength={500} rows={3} />
+        </Field>
+        <Field label="How to pay" hint="Printed on approved invoices, e.g. the bank account number and what to use as the reference.">
+          <textarea value={paymentDetails} onChange={(event) => setPaymentDetails(event.target.value)} maxLength={1000} rows={3} />
+        </Field>
+      </div>
+      <label className={ui.checkbox} id="inventory">
+        <input type="checkbox" checked={allowNegativeStock} onChange={(event) => setAllowNegativeStock(event.target.checked)} />
+        Allow negative stock: sell stock items before their bill is in. The sale is costed at the average (or the last or purchase
+        cost); the bill that fills the shortfall puts any difference to cost of sales. It can&apos;t be turned off while anything is
+        below zero.
+      </label>
+      <div>
+        <Button type="submit">Save settings</Button>
+      </div>
+    </form>
+  );
+}
+
+function Settings({ organisationId }: { organisationId: string }) {
+  const { can } = useWorkspace();
+  const settings = useApiData<{ settings: OrganisationSettings }>(`/api/organisations/${organisationId}/settings`);
+  const controls = useApiData<{ controls: PeriodControls }>("/api/ledger/period-controls", { organisationId });
+  const taxCodes = useApiData<{ taxCodes: TaxCode[] }>("/api/tax/codes", { organisationId });
+  const [saved, setSaved] = useState<{ settings: string | null }>({ settings: null });
+  if (!can("admin")) {
+    return <Notice tone="warning">Only organisation admins and owners can change settings.</Notice>;
+  }
+  return (
+    <>
+      <Card title="Organisation">
+        {settings.error ? <Notice tone="error">{settings.error}</Notice> : null}
+        {taxCodes.error ? <Notice tone="error">{taxCodes.error}</Notice> : null}
+        {saved.settings ? <Notice tone="success">{saved.settings}</Notice> : null}
+        {settings.data && taxCodes.data ? (
+          <SettingsForm
+            key={JSON.stringify(settings.data.settings)}
+            organisationId={organisationId}
+            settings={settings.data.settings}
+            taxCodes={taxCodes.data.taxCodes}
+            onSaved={(message) => {
+              setSaved((current) => ({ ...current, settings: message }));
+              settings.reload();
+            }}
+          />
+        ) : null}
+      </Card>
+      <div id="revenue-recognition">
+        <RevenueRecognitionCard organisationId={organisationId} />
+      </div>
+      <LogoCard organisationId={organisationId} />
+      <DirectoryCard organisationId={organisationId} />
+      <Card title="Period locks" description="Months are closed, and reopened, on Accounting › Period close. Nothing can be posted in a closed month.">
+        {controls.error ? <Notice tone="error">{controls.error}</Notice> : null}
+        {controls.data ? (
+          <p className={ui.muted}>
+            {controls.data.controls.lockDate
+              ? `Closed up to ${formatDate(controls.data.controls.lockDate)}: nothing can be posted on or before it.`
+              : "Nothing is closed yet, so any date can be posted to."}{" "}
+            <Link href="/operations/period-close">Period close</Link>
+          </p>
+        ) : null}
+      </Card>
+    </>
+  );
+}
+
+/** Old links to the aerial photo card here (…/settings#aerial-photos) go to its new place on the farm Map. */
+function MovedAnchors() {
+  const router = useRouter();
+  useEffect(() => {
+    if (window.location.hash === "#aerial-photos") router.replace(AERIAL_PHOTOS_SETTINGS);
+  }, [router]);
+  return null;
+}
+
+/** The organisation's own settings. All settings is the hub for everything else; Modules has its own page. */
+export default function SettingsPage() {
+  return (
+    <Page>
+      <MovedAnchors />
+      <PageHeader title="Organisation settings" />
+      <RequireOrganisation>{(organisationId) => <Settings key={organisationId} organisationId={organisationId} />}</RequireOrganisation>
+    </Page>
+  );
+}

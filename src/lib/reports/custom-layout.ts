@@ -1,0 +1,716 @@
+import type { AccountType } from "@/lib/accounts/types";
+
+/**
+ * Custom reports (examples CR1-CR10): the layout a user edits, and the
+ * figures worked out from it. Browser-safe: no server imports, so the editor
+ * can build and change layouts with the same types.
+ */
+import type { ReportRounding } from "@/lib/reports/rounding";
+
+export type FinancialReportBase = "profit_and_loss" | "balance_sheet";
+export type TransactionReportBase =
+  | "account_transactions"
+  | "aged_receivables"
+  | "aged_payables"
+  | "sales_by_salesperson"
+  | "journal_report"
+  // CRS1 (7 Nov 2026): the rest of the standard reports, as lists of their own figures.
+  | "trial_balance"
+  | "inventory_valuation"
+  | "bank_reconciliation"
+  | "budget_vs_actual"
+  | "changes_in_equity";
+
+export type CustomReportBase = FinancialReportBase | TransactionReportBase | "cash_flows";
+
+/** The standard reports that can have a default layout: profit and loss, balance sheet, (CFL5) cash flows and (CEL5) changes in equity. */
+export type LayoutBase = FinancialReportBase | "cash_flows" | "changes_in_equity";
+
+/** A cash flows layout (CFL1-CFL5). */
+export function isCashFlowBase(base: string): base is "cash_flows" {
+  return base === "cash_flows";
+}
+
+/**
+ * A changes in equity layout (CEL1-CEL5), told from a changes in equity
+ * report saved as a list (CRS1) by its rows.
+ */
+export function isEquityLayout(base: string, layout: unknown): layout is EquityLayout {
+  return base === "changes_in_equity" && Boolean(layout) && typeof layout === "object" && Array.isArray((layout as { blocks?: unknown }).blocks);
+}
+
+export function isTransactionReportBase(base: string): base is TransactionReportBase {
+  return [
+    "account_transactions",
+    "aged_receivables",
+    "aged_payables",
+    "sales_by_salesperson",
+    "journal_report",
+    "trial_balance",
+    "inventory_valuation",
+    "bank_reconciliation",
+    "budget_vs_actual",
+    "changes_in_equity",
+  ].includes(base);
+}
+export type PeriodLength = "month" | "quarter" | "year";
+
+export const CUSTOM_REPORT_BASES: Record<CustomReportBase, string> = {
+  profit_and_loss: "Profit and loss",
+  balance_sheet: "Balance sheet",
+  cash_flows: "Cash flows",
+  account_transactions: "Account transactions",
+  aged_receivables: "Aged receivables",
+  aged_payables: "Aged payables",
+  sales_by_salesperson: "Sales by salesperson",
+  journal_report: "Journal report",
+  trial_balance: "Trial balance",
+  inventory_valuation: "Stock valuation",
+  bank_reconciliation: "Bank reconciliation",
+  budget_vs_actual: "Budget vs actual",
+  changes_in_equity: "Changes in equity",
+};
+
+export const TRANSACTION_REPORT_DEFAULT_COLUMNS: Record<TransactionReportBase, string[]> = {
+  account_transactions: ["date", "source", "description", "debit", "credit", "balance"],
+  aged_receivables: ["contact.name", "current", "days1to30", "days31to60", "days61to90", "over90", "credit", "total"],
+  aged_payables: ["contact.name", "current", "days1to30", "days31to60", "days61to90", "over90", "credit", "total"],
+  sales_by_salesperson: ["salesperson", "invoices", "sales", "creditNotes", "netSales"],
+  journal_report: ["date", "source", "account", "description", "debit", "credit"],
+  trial_balance: ["code", "name", "debit", "credit"],
+  inventory_valuation: ["itemCode", "itemName", "location", "quantity", "averageCost", "value"],
+  bank_reconciliation: ["date", "description", "reference", "amount"],
+  budget_vs_actual: ["code", "name", "actual", "budget", "variance", "variancePercent"],
+  changes_in_equity: ["item", "amount"],
+};
+
+export const PERIOD_LENGTHS: Record<PeriodLength, { label: string; months: number }> = {
+  month: { label: "Months", months: 1 },
+  quarter: { label: "Quarters", months: 3 },
+  year: { label: "Years", months: 12 },
+};
+
+export const CUSTOM_REPORT_LIMITS = {
+  titleLength: 200,
+  labelLength: 200,
+  noteLength: 5000,
+  blocks: 20,
+  rowsPerTable: 100,
+  periods: 12,
+  termsPerFormula: 50,
+  accountCodesPerGroup: 200,
+  rowNoteLength: 500,
+  addedColumns: 10,
+  cellLength: 200,
+} as const;
+
+export type ReportColumnsSetting = {
+  /** The last day of a month: the newest column ends here. */
+  periodEnd: string;
+  periodLength: PeriodLength;
+  periodCount: number;
+  /** First column less the second. */
+  difference: boolean;
+  /** The difference as a % of the second column (needs `difference`). */
+  percent: boolean;
+  /** Profit and loss only: from the start of the financial year to `periodEnd`. */
+  yearToDate: boolean;
+  /** Profit and loss only: a column with this budget for the first period (BU7). Left out when there's none. */
+  budgetId?: string;
+  /** The first period less the budget (needs `budgetId`). */
+  budgetDifference?: boolean;
+  /** Columns added with Add column (LE4-LE9), after the ones above, in order. */
+  added?: AddedColumn[];
+  /** Figures rounded to whole dollars, thousands or millions, with totals added from the rounded lines (RND1-RND5). Left out: to the cent. */
+  rounding?: ReportRounding;
+};
+
+/** What Add column offers (LE4). */
+export const ADDED_COLUMN_KINDS = {
+  date: "Date",
+  budget: "Budget",
+  formula: "Formula",
+  notes: "Notes",
+  percentage: "Percentage",
+  variance: "Variance",
+} as const;
+export type AddedColumnKind = keyof typeof ADDED_COLUMN_KINDS;
+
+/**
+ * A column added with Add column (LE4-LE9). Its key in the figures is
+ * `a_` and its id. Columns are referred to by key: `p0` (the newest
+ * period), `p1`..., `diff`, `ytd`, `bud`, `bdiff` and earlier added columns.
+ */
+export type AddedColumn = { id: string; heading?: string } & (
+  | { kind: "date"; from: string | null; to: string }
+  | { kind: "budget"; budgetId: string; from: string; to: string }
+  | { kind: "formula"; terms: Array<{ column: string; sign: 1 | -1 }> }
+  | { kind: "notes" }
+  | { kind: "percentage"; column: string; ofRowId: string }
+  | { kind: "variance"; first: string; second: string; percentOfSecond?: boolean }
+);
+
+export const addedColumnKey = (column: { id: string }) => `a_${column.id}`;
+
+export type FormulaTerm = { rowId: string; sign: 1 | -1 };
+
+/**
+ * How a formula row works it out (CR17): "sum" adds and
+ * takes away its terms (the default); "multiply" and "divide" take row `a`
+ * times or divided by row `b` or the number `by`; "percent" is row `a` as a
+ * % of row `b`. Dividing by 0.00 gives a blank, never an error.
+ */
+export type FormulaOperation = "sum" | "multiply" | "divide" | "percent";
+export const FORMULA_OPERATIONS: Record<FormulaOperation, string> = {
+  sum: "Add and take away rows",
+  multiply: "× (times)",
+  divide: "÷ (divided by)",
+  percent: "% of",
+};
+
+/** What every row can carry besides its figures. */
+export type RowExtras = {
+  /** Worked out (formulas can use it) but not shown. */
+  hidden?: boolean;
+  /** Printing and PDF start a new page after this row. */
+  pageBreakAfter?: boolean;
+  /** A short note shown under the row. */
+  note?: string;
+  /** The row's text in each Notes column, by column key (LE7). */
+  cells?: Record<string, string>;
+};
+
+export type ReportRow = RowExtras &
+  (
+    | { id: string; kind: "heading"; label: string }
+    | {
+        id: string;
+        kind: "group";
+        label: string;
+        /** Used when `accountCodes` is empty. */
+        accountTypes: AccountType[];
+        /** When not empty, exactly these accounts. */
+        accountCodes: string[];
+        /** With account types: these accounts are left out (they've been grouped elsewhere, CR16). */
+        exceptCodes?: string[];
+        /** With account types: these accounts as well (they've been moved in from another group, CR21). */
+        alsoCodes?: string[];
+        showAccounts: boolean;
+      }
+    | {
+        id: string;
+        kind: "formula";
+        label: string;
+        terms: FormulaTerm[];
+        operation?: FormulaOperation;
+        /** multiply, divide and percent: the first row. */
+        a?: string;
+        /** multiply, divide and percent: the second row, or `by`. */
+        b?: string;
+        /** multiply and divide: a number instead of row `b`, e.g. "420" cows. */
+        by?: string;
+      }
+    | { id: string; kind: "earnings"; label: string; which: "previous" | "current" }
+  );
+
+/** Cash flow layouts (CFL1-CFL5): the sections a line usually sits in. */
+export type CashFlowSectionKind = "operating" | "investing" | "financing";
+export const CASH_FLOW_SECTIONS: Record<CashFlowSectionKind, string> = {
+  operating: "Operating activities",
+  investing: "Investing activities",
+  financing: "Financing activities",
+};
+/**
+ * A line a cash flow group can hold: "profit"; "adjust:<bucket>" for a
+ * non-cash adjustment (depreciation, livestock, rations, fx, disposal,
+ * opening); "account:<code>" for an account's movement; "disposal_proceeds".
+ */
+export type CashFlowLineRef = string;
+export type CashFlowRow = RowExtras &
+  ({ id: string; kind: "heading"; label: string } | { id: string; kind: "group"; label: string; lines: CashFlowLineRef[]; showLines: boolean });
+export type CashFlowSection = { id: string; kind: "section"; usual: CashFlowSectionKind; title: string; totalLabel: string; rows: CashFlowRow[] };
+export type CashFlowBlock = CashFlowSection | { id: string; kind: "text"; text: string };
+export type CashFlowEndLabels = { netChange: string; exchange: string; openingCash: string; closingCash: string };
+export const CASH_FLOW_END_LABELS: CashFlowEndLabels = {
+  netChange: "Net increase (decrease) in cash",
+  exchange: "Effect of exchange rates on cash",
+  openingCash: "Cash at the start of the period",
+  closingCash: "Cash at the end of the period",
+};
+export type CashFlowLayout = { title: string; columns: ReportColumnsSetting; blocks: CashFlowBlock[]; endLabels?: Partial<CashFlowEndLabels> };
+
+/** The standard statement as a layout: each section takes its usual lines, one by one (CFL2). */
+export function standardCashFlowLayout(periodEnd: string): CashFlowLayout {
+  const section = (usual: CashFlowSectionKind): CashFlowSection => ({
+    id: usual,
+    kind: "section",
+    usual,
+    title: CASH_FLOW_SECTIONS[usual],
+    totalLabel: `Net cash from ${usual} activities`,
+    rows: usual === "operating" ? [{ id: "profit", kind: "group", label: "Net profit", lines: ["profit"], showLines: false }] : [],
+  });
+  return {
+    title: "Cash flows",
+    columns: { periodEnd, periodLength: "year", periodCount: 1, difference: false, percent: false, yearToDate: false },
+    blocks: [section("operating"), section("investing"), section("financing")],
+  };
+}
+
+/**
+ * Changes in equity layouts (CEL1-CEL5): headings and groups of the
+ * statement's lines ("profit", or "account:<code>" for an equity account's
+ * movement) and notes, between equity at the start and at the end.
+ */
+export type EquityBlock = CashFlowRow | { id: string; kind: "text"; text: string };
+export type EquityEndLabels = { opening: string; closing: string };
+export const EQUITY_END_LABELS: EquityEndLabels = {
+  opening: "Equity at the start of the period",
+  closing: "Equity at the end of the period",
+};
+export type EquityLayout = { title: string; columns: ReportColumnsSetting; blocks: EquityBlock[]; endLabels?: Partial<EquityEndLabels> };
+
+/** The standard statement as a layout: net profit, then each account's movement as it comes (CEL2). */
+export function standardEquityLayout(periodEnd: string): EquityLayout {
+  return {
+    title: "Changes in equity",
+    columns: { periodEnd, periodLength: "year", periodCount: 1, difference: false, percent: false, yearToDate: false },
+    blocks: [{ id: "profit", kind: "group", label: "Net profit", lines: ["profit"], showLines: false }],
+  };
+}
+
+/** A page break after a table or note when printed or made a PDF (LE3). */
+export type BlockExtras = { pageBreakAfter?: boolean };
+
+export type ReportBlock =
+  | ({ id: string; kind: "table"; title: string; rows: ReportRow[] } & BlockExtras)
+  | ({ id: string; kind: "text"; text: string } & BlockExtras);
+
+/** Profit and loss only: count just the lines tagged with this value or a value under it (TC8). */
+export type ReportTrackingFilter = { categoryId: string; valueId: string };
+
+export type CustomReportLayout = {
+  title: string;
+  columns: ReportColumnsSetting;
+  blocks: ReportBlock[];
+  filter?: ReportTrackingFilter | null;
+};
+
+export type TransactionReportFilters = {
+  from?: string | null;
+  to?: string | null;
+  asAt?: string | null;
+  accountId?: string | null;
+  trackingCategoryId?: string | null;
+  trackingValueId?: string | null;
+  rollUp?: boolean;
+  /** Budget vs actual: which budget (CRS1). */
+  budgetId?: string | null;
+};
+
+export type TransactionReportLayout = {
+  title: string;
+  filters: TransactionReportFilters;
+  columns: string[];
+};
+
+export type StoredCustomReportLayout = CustomReportLayout | TransactionReportLayout | CashFlowLayout | EquityLayout;
+
+export type TransactionReportColumn = { key: string; label: string };
+
+export type TransactionCustomReportFigures = {
+  title: string;
+  base: TransactionReportBase;
+  currencyCode: string;
+  columns: ReportColumn[];
+  selectedColumns: string[];
+  columnOptions: TransactionReportColumn[];
+  data: unknown;
+  blocks: ComputedBlock[];
+  notInReport: ComputedLine[];
+  inSeveralGroups: Array<{ tableTitle: string; code: string; name: string; groups: string[] }>;
+  filterLabel?: string | null;
+  computedAt: string;
+};
+
+export type ReportColumnKind = "period" | "difference" | "percent" | "budget" | "budget_difference" | "year_to_date" | "date" | "formula" | "notes" | "percentage" | "variance";
+
+export type ReportColumn = {
+  key: string;
+  kind: ReportColumnKind;
+  label: string;
+  /** Profit and loss periods and year to date; null on a balance sheet (as at `to`). */
+  from: string | null;
+  to: string | null;
+  /** An amount in this column opens Account transactions from this date to `to`; none for a difference, % or budget. */
+  drillFrom?: string | null;
+  /** How an added column shows (LE4): a % or text; money otherwise. */
+  format?: "percent" | "text";
+};
+
+/** Amounts as strings, keyed by column; null for a % that can't be worked out (the compared amount is 0.00). */
+export type ReportValues = Record<string, string | null>;
+
+export type ComputedLine = {
+  code: string;
+  name: string;
+  values: ReportValues;
+  accountId?: string;
+  /** Nothing in these columns: only listed for the layout editor, so it can be moved (CR23). Never printed. */
+  empty?: boolean;
+};
+
+export type ComputedRow = RowExtras & {
+  id: string;
+  kind: ReportRow["kind"];
+  label: string;
+  values: ReportValues;
+  /** "percent" values show with a %; "number" are plain (a ratio or per-unit figure); money otherwise. */
+  format?: "money" | "number" | "percent";
+  showAccounts: boolean;
+  lines: ComputedLine[];
+  /** A group's accounts, so its total opens their transactions together. */
+  accountIds?: string[];
+};
+
+export type ComputedBlock =
+  | ({ id: string; kind: "table"; title: string; rows: ComputedRow[] } & BlockExtras)
+  | ({ id: string; kind: "text"; text: string } & BlockExtras);
+
+export type CustomReportFigures = {
+  title: string;
+  base: CustomReportBase;
+  currencyCode: string;
+  columns: ReportColumn[];
+  blocks: ComputedBlock[];
+  /** Accounts with a balance that no group includes. */
+  notInReport: ComputedLine[];
+  /** Accounts with a balance that more than one group of the same table includes. */
+  inSeveralGroups: Array<{ tableTitle: string; code: string; name: string; groups: string[] }>;
+  /** The tracking filter, as shown on the report, e.g. "Location: Otago" (TC8). */
+  filterLabel?: string | null;
+  /** How its money is rounded (RND1): amounts are still in dollars, already rounded; the table shows them in these units. */
+  rounding?: ReportRounding;
+  data?: unknown;
+  computedAt: string;
+};
+
+const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
+
+/** Months since year 0, for stepping back through periods. */
+function monthIndex(date: string): number {
+  return Number(date.slice(0, 4)) * 12 + Number(date.slice(5, 7)) - 1;
+}
+
+function monthStart(index: number): string {
+  const year = Math.floor(index / 12);
+  const month = (index % 12) + 1;
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-01`;
+}
+
+export function monthEnd(index: number): string {
+  const year = Math.floor(index / 12);
+  const month = (index % 12) + 1;
+  const days = new Date(Date.UTC(year, month, 0)).getUTCDate();
+  return `${String(year).padStart(4, "0")}-${String(month).padStart(2, "0")}-${String(days).padStart(2, "0")}`;
+}
+
+/** The last day of the month `date` is in. */
+export function lastDayOfMonth(date: string): string {
+  return monthEnd(monthIndex(date));
+}
+
+function monthLabel(index: number): string {
+  return `${MONTHS[index % 12]} ${Math.floor(index / 12)}`;
+}
+
+function dayLabel(date: string): string {
+  return `${Number(date.slice(8, 10))} ${MONTHS[Number(date.slice(5, 7)) - 1]} ${date.slice(0, 4)}`;
+}
+
+/** The period columns, newest first (CR2, CR3, CR6). */
+export function periodColumns(base: FinancialReportBase, setting: ReportColumnsSetting): ReportColumn[] {
+  const months = PERIOD_LENGTHS[setting.periodLength].months;
+  const last = monthIndex(setting.periodEnd);
+  const columns: ReportColumn[] = [];
+  for (let i = 0; i < setting.periodCount; i += 1) {
+    const endIndex = last - i * months;
+    const startIndex = endIndex - months + 1;
+    const to = monthEnd(endIndex);
+    let label: string;
+    if (base === "balance_sheet") label = dayLabel(to);
+    else if (months === 1) label = monthLabel(endIndex);
+    else if (Math.floor(startIndex / 12) === Math.floor(endIndex / 12)) label = `${MONTHS[startIndex % 12]} - ${monthLabel(endIndex)}`;
+    else label = `${monthLabel(startIndex)} - ${monthLabel(endIndex)}`;
+    columns.push({
+      key: `p${i}`,
+      kind: "period",
+      label,
+      from: base === "balance_sheet" ? null : monthStart(startIndex),
+      to,
+    });
+  }
+  return columns;
+}
+
+/** What Edit layout carries from the report on screen into a new layout's columns. */
+export type EditLayoutColumns = Pick<ReportColumnsSetting, "periodEnd" | "periodLength" | "periodCount" | "yearToDate">;
+
+/**
+ * The columns a layout started with Edit layout gets, so it shows what the
+ * report on screen showed: a profit and loss for a whole month,
+ * quarter or year keeps that length, ending on the same day, with the
+ * same number of earlier periods compared; a balance sheet keeps its
+ * comparisons. Dates the editor can't show (part of a month, or a range
+ * that isn't a whole month, quarter or year) give a `problem` to show the
+ * person, rather than quietly becoming one month.
+ */
+export function editLayoutColumns(
+  base: "profit_and_loss" | "balance_sheet",
+  shown: { from: string | null; to: string; compare: number; compareBy: PeriodLength; ytd?: boolean },
+): { columns: EditLayoutColumns } | { problem: string } {
+  const compare = Math.max(0, Math.min(CUSTOM_REPORT_LIMITS.periods - 1, Math.trunc(shown.compare) || 0));
+  if (shown.to !== lastDayOfMonth(shown.to)) {
+    return { problem: `The layout editor shows whole months, and ${dayLabel(shown.to)} isn't the end of a month. Choose dates that end on a month end, then Edit layout.` };
+  }
+  if (base === "balance_sheet") {
+    return { columns: { periodEnd: shown.to, periodLength: compare > 0 ? shown.compareBy : "month", periodCount: 1 + compare, yearToDate: false } };
+  }
+  const from = shown.from;
+  if (!from || from.slice(8, 10) !== "01") {
+    return { problem: "The layout editor shows whole months, quarters or years, and this report doesn't start on the 1st of a month. Choose a whole month, quarter or year, then Edit layout." };
+  }
+  const months = monthIndex(shown.to) - monthIndex(from) + 1;
+  const length = (Object.keys(PERIOD_LENGTHS) as PeriodLength[]).find((key) => PERIOD_LENGTHS[key].months === months);
+  if (!length) {
+    return { problem: `The layout editor shows whole months, quarters or years, and ${dayLabel(from)} to ${dayLabel(shown.to)} is ${months} months. Choose a whole month, quarter or year, then Edit layout.` };
+  }
+  if (compare > 0 && shown.compareBy !== length) {
+    return { problem: `The layout editor compares periods of the same length, and this report compares ${PERIOD_LENGTHS[length].label.toLowerCase()} with ${PERIOD_LENGTHS[shown.compareBy].label.toLowerCase()}. Compare by ${PERIOD_LENGTHS[length].label.toLowerCase()}, then Edit layout.` };
+  }
+  return { columns: { periodEnd: shown.to, periodLength: length, periodCount: 1 + compare, yearToDate: Boolean(shown.ytd) } };
+}
+
+let counter = 0;
+/** A short id for a new row or block, unique within a report. */
+export function newLayoutId(prefix: string): string {
+  counter += 1;
+  return `${prefix}${Date.now().toString(36)}${counter.toString(36)}${Math.floor(Math.random() * 1296).toString(36)}`;
+}
+
+/**
+ * "Edit layout" on the standard profit and loss or balance sheet starts from
+ * this: the standard report's own rows and labels, so a
+ * report made from it reads exactly like the standard one until it's changed.
+ */
+export function standardLayout(base: FinancialReportBase, periodEnd: string): CustomReportLayout {
+  const layout = templateLayout(base, periodEnd);
+  const group = (id: string, label: string, accountTypes: AccountType[]): ReportRow => ({ id, kind: "group", label, accountTypes, accountCodes: [], showAccounts: true });
+  const sum = (id: string, label: string, terms: Array<[string, 1 | -1]>): ReportRow => ({ id, kind: "formula", label, terms: terms.map(([rowId, sign]) => ({ rowId, sign })) });
+  const rows: ReportRow[] =
+    base === "profit_and_loss"
+      ? [
+          group("revenue", "Trading income", ["revenue"]),
+          group("cost_of_sales", "Cost of sales", ["direct_costs"]),
+          sum("gross_profit", "Gross profit", [["revenue", 1], ["cost_of_sales", -1]]),
+          group("other_income", "Other income", ["other_income"]),
+          group("expenses", "Operating expenses", ["expense", "depreciation"]),
+          sum("net_profit", "Net profit", [["gross_profit", 1], ["other_income", 1], ["expenses", -1]]),
+        ]
+      : [
+          { id: "assets_heading", kind: "heading", label: "Assets" },
+          group("current_assets", "Current assets", ["bank", "current_asset", "inventory"]),
+          group("non_current_assets", "Non-current assets", ["fixed_asset", "non_current_asset"]),
+          sum("assets", "Total assets", [["current_assets", 1], ["non_current_assets", 1]]),
+          { id: "liabilities_heading", kind: "heading", label: "Liabilities" },
+          group("current_liabilities", "Current liabilities", ["credit_card", "current_liability"]),
+          group("non_current_liabilities", "Non-current liabilities", ["non_current_liability"]),
+          sum("liabilities", "Total liabilities", [["current_liabilities", 1], ["non_current_liabilities", 1]]),
+          sum("net_assets", "Net assets", [["assets", 1], ["liabilities", -1]]),
+          { id: "equity_heading", kind: "heading", label: "Equity" },
+          group("equity", "Equity accounts", ["equity"]),
+          { id: "previous_earnings", kind: "earnings", label: "Earnings from previous years", which: "previous" },
+          { id: "current_earnings", kind: "earnings", label: "Current year earnings", which: "current" },
+          sum("total_equity", "Total equity", [["equity", 1], ["previous_earnings", 1], ["current_earnings", 1]]),
+        ];
+  return { ...layout, blocks: [{ id: "main", kind: "table", title: "", rows }] };
+}
+
+/** A new custom report starts as a copy of the standard report (CR1, CR6). */
+export function templateLayout(base: FinancialReportBase, periodEnd: string): CustomReportLayout {
+  const columns: ReportColumnsSetting = {
+    periodEnd: lastDayOfMonth(periodEnd),
+    periodLength: "month",
+    periodCount: 1,
+    difference: false,
+    percent: false,
+    yearToDate: false,
+  };
+  const group = (id: string, label: string, accountTypes: AccountType[]): ReportRow => ({
+    id,
+    kind: "group",
+    label,
+    accountTypes,
+    accountCodes: [],
+    showAccounts: true,
+  });
+  if (base === "profit_and_loss") {
+    return {
+      title: CUSTOM_REPORT_BASES[base],
+      columns,
+      blocks: [
+        {
+          id: "main",
+          kind: "table",
+          title: "",
+          rows: [
+            group("revenue", "Revenue", ["revenue"]),
+            group("cost_of_sales", "Cost of sales", ["direct_costs"]),
+            { id: "gross_profit", kind: "formula", label: "Gross profit", terms: [{ rowId: "revenue", sign: 1 }, { rowId: "cost_of_sales", sign: -1 }] },
+            group("other_income", "Other income", ["other_income"]),
+            group("expenses", "Expenses", ["expense", "depreciation"]),
+            {
+              id: "net_profit",
+              kind: "formula",
+              label: "Net profit",
+              terms: [
+                { rowId: "gross_profit", sign: 1 },
+                { rowId: "other_income", sign: 1 },
+                { rowId: "expenses", sign: -1 },
+              ],
+            },
+          ],
+        },
+      ],
+    };
+  }
+  return {
+    title: CUSTOM_REPORT_BASES[base],
+    columns,
+    blocks: [
+      {
+        id: "main",
+        kind: "table",
+        title: "",
+        rows: [
+          group("assets", "Assets", ["bank", "current_asset", "inventory", "fixed_asset", "non_current_asset"]),
+          group("liabilities", "Liabilities", ["credit_card", "current_liability", "non_current_liability"]),
+          { id: "net_assets", kind: "formula", label: "Net assets", terms: [{ rowId: "assets", sign: 1 }, { rowId: "liabilities", sign: -1 }] },
+          group("equity", "Equity accounts", ["equity"]),
+          { id: "previous_earnings", kind: "earnings", label: "Earnings from previous years", which: "previous" },
+          { id: "current_earnings", kind: "earnings", label: "Current year earnings", which: "current" },
+          {
+            id: "total_equity",
+            kind: "formula",
+            label: "Total equity",
+            terms: [
+              { rowId: "equity", sign: 1 },
+              { rowId: "previous_earnings", sign: 1 },
+              { rowId: "current_earnings", sign: 1 },
+            ],
+          },
+        ],
+      },
+    ],
+  };
+}
+
+/**
+ * Groups some of a group's accounts into a new group right after it (CR16): the accounts are left out of the
+ * group they came from (by account type) or taken off its list (by code),
+ * and every formula that used that group uses the new one too, with the
+ * same sign, so no total changes. Returns the new layout (the old one is
+ * left as it was) and the new row's id.
+ */
+export function groupAccounts(
+  layout: CustomReportLayout,
+  blockId: string,
+  sourceRowId: string,
+  codes: string[],
+  label: string,
+  newId = newLayoutId("r"),
+): { layout: CustomReportLayout; rowId: string } {
+  const next = structuredClone(layout);
+  const block = next.blocks.find((entry) => entry.id === blockId);
+  if (!block || block.kind !== "table") throw new Error("That table isn't in the report.");
+  const index = block.rows.findIndex((row) => row.id === sourceRowId);
+  const source = block.rows[index];
+  if (!source || source.kind !== "group") throw new Error("Choose accounts in a group.");
+  if (codes.length === 0) throw new Error("Choose at least one account.");
+  if (source.accountCodes.length > 0) {
+    source.accountCodes = source.accountCodes.filter((code) => !codes.includes(code));
+    if (source.accountCodes.length === 0) source.accountCodes = [...codes]; // grouping them all: keep the old group as it is
+  } else {
+    source.exceptCodes = [...new Set([...(source.exceptCodes ?? []), ...codes])];
+  }
+  const row: ReportRow = { id: newId, kind: "group", label, accountTypes: [], accountCodes: [...codes], showAccounts: true };
+  block.rows.splice(index + 1, 0, row);
+  for (const other of block.rows) {
+    if (other.kind !== "formula" || (other.operation ?? "sum") !== "sum") continue;
+    for (const term of [...other.terms]) {
+      if (term.rowId === sourceRowId) other.terms.push({ rowId: newId, sign: term.sign });
+    }
+  }
+  return { layout: next, rowId: newId };
+}
+
+/**
+ * Moves accounts from one group to another group in the same table (CR21), as dragging an account does. A
+ * group of chosen accounts gains or loses the codes. A group by account type
+ * leaves the accounts out (`exceptCodes`) or takes them as well
+ * (`alsoCodes`), so it still takes any new account of its types. Moving an
+ * account back where its type puts it just undoes the earlier move. A group
+ * of chosen accounts must keep at least one account. Formulas aren't
+ * changed: the two groups' totals move by the accounts' amounts.
+ */
+export function moveAccounts(layout: CustomReportLayout, blockId: string, fromRowId: string, codes: string[], toRowId: string): CustomReportLayout {
+  const next = structuredClone(layout);
+  const block = next.blocks.find((entry) => entry.id === blockId);
+  if (!block || block.kind !== "table") throw new Error("That table isn't in the report.");
+  const from = block.rows.find((row) => row.id === fromRowId);
+  const to = block.rows.find((row) => row.id === toRowId);
+  if (!from || from.kind !== "group" || !to || to.kind !== "group") throw new Error("Accounts move from one group to another group.");
+  const moving = [...new Set(codes)];
+  if (moving.length === 0) throw new Error("Choose at least one account.");
+  if (from.id === to.id) return next;
+
+  if (from.accountCodes.length > 0) {
+    const left = from.accountCodes.filter((code) => !moving.includes(code));
+    if (left.length === 0) throw new Error(`${from.label} would have no accounts left. Move the group, or delete it, instead.`);
+    from.accountCodes = left;
+  } else {
+    // Left out by code (harmless for an account that was only here because it was moved in), and no longer taken as well.
+    const also = (from.alsoCodes ?? []).filter((code) => !moving.includes(code));
+    const except = [...new Set([...(from.exceptCodes ?? []), ...moving])];
+    if (also.length > 0) from.alsoCodes = also;
+    else delete from.alsoCodes;
+    if (except.length > 0) from.exceptCodes = except;
+    else delete from.exceptCodes;
+  }
+
+  if (to.accountCodes.length > 0) {
+    to.accountCodes = [...new Set([...to.accountCodes, ...moving])];
+  } else {
+    // Coming back to the group its type puts it in: stop leaving it out. Otherwise take it as well.
+    const returning = moving.filter((code) => (to.exceptCodes ?? []).includes(code));
+    const except = (to.exceptCodes ?? []).filter((code) => !moving.includes(code));
+    const also = [...new Set([...(to.alsoCodes ?? []), ...moving.filter((code) => !returning.includes(code))])];
+    if (except.length > 0) to.exceptCodes = except;
+    else delete to.exceptCodes;
+    if (also.length > 0) to.alsoCodes = also;
+    else delete to.alsoCodes;
+  }
+  return next;
+}
+
+/** Moves a row to another place in its table (drag and drop, or the keyboard). */
+export function moveRow(layout: CustomReportLayout, blockId: string, rowId: string, toIndex: number): CustomReportLayout {
+  const next = structuredClone(layout);
+  const block = next.blocks.find((entry) => entry.id === blockId);
+  if (!block || block.kind !== "table") return next;
+  const from = block.rows.findIndex((row) => row.id === rowId);
+  if (from < 0) return next;
+  const to = Math.max(0, Math.min(block.rows.length - 1, toIndex));
+  const [row] = block.rows.splice(from, 1);
+  block.rows.splice(to, 0, row);
+  return next;
+}

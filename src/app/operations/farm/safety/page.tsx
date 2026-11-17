@@ -1,0 +1,33 @@
+"use client";
+
+import { useSearchParams } from "next/navigation";
+import { Suspense } from "react";
+import { FarmSafetyTab } from "@/components/farm-safety-tab";
+import { FarmWorkspace } from "@/components/farm-workspace";
+import { Page } from "@/components/ui";
+import { readSafetyLink } from "@/lib/safety/screens";
+
+/**
+ * Safety: the overview, or a focused screen. `?view=` chooses the
+ * screen, `?farm=` the farm, and `?hazard=`, `?report=`, `?action=`,
+ * `?equipment=` (a machine's QR code), `?induction=`, `?training=` or
+ * `?visit=` the record to open.
+ */
+function SafetyForLink() {
+  const link = readSafetyLink(useSearchParams());
+  return (
+    <FarmWorkspace title="Safety" linkedFarmId={link.farmId}>
+      {(context) => <FarmSafetyTab {...context} link={link} />}
+    </FarmWorkspace>
+  );
+}
+
+export default function FarmSafetyPage() {
+  return (
+    <Page>
+      <Suspense fallback={null}>
+        <SafetyForLink />
+      </Suspense>
+    </Page>
+  );
+}

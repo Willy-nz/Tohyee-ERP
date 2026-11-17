@@ -1,0 +1,679 @@
+"use client";
+
+import Link from "next/link";
+import { InfoTip } from "@/components/info-tip";
+import { IllustratedIcon, type IllustratedIconName } from "@/components/illustrated-icon";
+import { useRouter } from "next/navigation";
+import { type ReactNode, useState } from "react";
+import { RequireOrganisation } from "@/components/books";
+import { FarmEffluentToday } from "@/components/farm-effluent-care";
+import { lastMovedOverlays, useEffluentLog } from "@/components/farm-effluent-log";
+import { hazardOverlays } from "@/components/farm-safety";
+import { FarmSafetyTab, FarmSafetyToday } from "@/components/farm-safety-tab";
+import { FarmTasksToday, taskOverlays, useFarmTasks } from "@/components/farm-tasks";
+import { FarmPeopleCard, LocationSharingBanner, peopleMarkers, useFarmPeople } from "@/components/farm-locations";
+import { gaugeOverlays, useRainGauges } from "@/components/farm-rainfall";
+import { assetOverlays, FarmAssetsCard, type MapDrawing, MapLayerToggles, MeasureCard, shownOverlays, useMapAssets, useMapLayers } from "@/components/farm-map-assets";
+import { type MapLayer, overlayLayer } from "@/lib/farming/map-assets-rules";
+import { MapPictureSwitch, PaddockGreenness, SatelliteVegetationLink, useFarmVegetation, useMapPicture, VegetationMapNotes, vegetationRaster } from "@/components/farm-vegetation";
+import { FarmOfflineStatus, OFFLINE_PAGE } from "@/components/farm-offline";
+import { FarmRowList } from "@/components/farm-rows";
+import { FarmSelector, useCanRecordFarmWork, useSelectedFarm } from "@/components/farm-selector";
+import { PaddockMap } from "@/components/farming";
+import { PaddockPhotoDiary } from "@/components/pasture-photos";
+import { WeatherForecastCard } from "@/components/weather-forecast";
+import { useApiData } from "@/components/hooks";
+import { Button, Card, Empty, Notice, PageHeader, ui } from "@/components/ui";
+import { useWorkspace } from "@/components/workspace";
+import { CALENDAR_KIND_LABELS, type CalendarItem } from "@/lib/farming/calendar-shared";
+import { addDays, coverText, daysAgo, mobText, shortDate } from "@/lib/farming/farm-words";
+import type { FarmAppLauncher } from "@/lib/farming/launchers";
+import { bandsFor, MAP_COLOURINGS, type MapColouring, paddockBand } from "@/lib/farming/map-colours";
+import type { PaddockStatus } from "@/lib/farming/paddock-status";
+import type { Farm, FarmingSettings, Paddock } from "@/lib/farming/paddocks";
+import type { Mob } from "@/lib/farming/mobs";
+import type { RotationPlan } from "@/lib/farming/planning";
+import { paddockPlanText, useRotation } from "@/components/farm-planning";
+import type { GrazingRecord, PastureReading } from "@/lib/farming/pasture";
+import { withholdingText } from "@/lib/farming/treatment-rules";
+import { PASTURE_METHOD_LABELS } from "@/lib/farming/pasture-rules";
+import { todayInBrowser } from "@/lib/format";
+import { effluentHref } from "@/lib/effluent/screens";
+import { safetyHref } from "@/lib/safety/screens";
+import { type CurrentRecord, HAZARD_LEVEL_LABELS, type HazardData, hazardState } from "@/lib/safety/shared";
+import styles from "./farm-workspace.module.css";
+
+/*
+ * The farmer's workspace:
+ * Today · Map · Log · Safety · More, the farm being worked on always in
+ * view, and the accounting tables one tap away under More › Details. On a
+ * phone the tabs sit at the bottom of the screen.
+ */
+
+const NATURAL = new Intl.Collator("en-NZ", { numeric: true, sensitivity: "base" });
+
+/** The tabs now come from the farm pages' shared layout: src/components/farm-frame.tsx. */
+export { FARM_TABS, type FarmTab } from "@/lib/farming/farm-nav";
+
+export type FarmContext = { organisationId: string; farm: Farm; farms: Farm[] };
+
+/** `linkedFarmId` (a link's `?farm=`) opens that farm, so a link to a record opens it on the right farm. */
+/**
+ * `title` is the page's heading: the workspace shows it with the farm picker
+ * and the offline status on the same row, and that row stays
+ * in view as the page scrolls.
+ */
+export function FarmWorkspace({ title, linkedFarmId = null, children }: { title: string; linkedFarmId?: string | null; children: (context: FarmContext) => ReactNode }) {
+  return (
+    <RequireOrganisation>
+      {(organisationId) => <Workspace key={`${organisationId}:${linkedFarmId ?? ""}`} title={title} organisationId={organisationId} linkedFarmId={linkedFarmId} render={children} />}
+    </RequireOrganisation>
+  );
+}
+
+function Workspace({ title, organisationId, linkedFarmId, render }: { title: string; organisationId: string; linkedFarmId: string | null; render: (context: FarmContext) => ReactNode }) {
+  const farms = useApiData<{ farms: Farm[] }>("/api/farming/farms", { organisationId });
+  const { farm, stale, deciding, selectFarm } = useSelectedFarm(organisationId, farms.data?.farms ?? [], linkedFarmId);
+  const active = (farms.data?.farms ?? []).filter((entry) => entry.isActive);
+  return (
+    <div className={styles.workspace}>
+      <div className={styles.farmBar}>
+        <PageHeader
+          title={title}
+          actions={
+            farm ? (
+              <div className={styles.farmPicker}>
+                {active.length > 1 ? (
+                  <>
+                    {/* The picker's name stays "Farm", as before; the farm's name is what shows. */}
+                    <span id="farm-bar-label" className={styles.hiddenLabel}>
+                      Farm
+                    </span>
+                    <select value={farm.id} aria-labelledby="farm-bar-label" onChange={(event) => selectFarm(event.target.value)}>
+                    {active.map((entry) => (
+                      <option key={entry.id} value={entry.id}>
+                        {entry.name}
+                      </option>
+                    ))}
+                    </select>
+                  </>
+                ) : (
+                  <span className={styles.farmName}>{farm.name}</span>
+                )}
+                <FarmOfflineStatus organisationId={organisationId} farmId={farm.id} part="inline" />
+              </div>
+            ) : null
+          }
+        />
+      </div>
+      {farms.error ? <Notice tone="error">{farms.error}</Notice> : null}
+      {!farms.data ? <p className={ui.muted}>Loading…</p> : null}
+      {farms.data && active.length === 0 ? <Empty>No farms yet. {farms.data.farms.length ? "" : "An owner or admin adds them under Farms and paddocks."}</Empty> : null}
+      {!farm && farms.data && active.length ? <FarmSelector farms={active} farm={null} stale={stale} deciding={deciding} onChange={selectFarm} /> : null}
+      {/* While you share your location, on every farm page. */}
+      <LocationSharingBanner organisationId={organisationId} />
+      {farm ? <FarmOfflineStatus organisationId={organisationId} farmId={farm.id} part="notice" /> : null}
+      {/* Keyed by farm: anything half-filled belongs to the farm it was opened on, and goes when the farm changes. */}
+      {farm ? <div key={farm.id}>{render({ organisationId, farm, farms: active })}</div> : null}
+    </div>
+  );
+}
+
+// Shared data ---------------------------------------------------------------------------------------------
+
+function useStatuses(organisationId: string, farmId: string) {
+  return useApiData<{ paddocks: PaddockStatus[] }>(`/api/farming/farms/${farmId}/paddock-status`, { organisationId, onDate: todayInBrowser() });
+}
+
+function useShapes(organisationId: string, farmId: string) {
+  return useApiData<{ paddocks: Paddock[] }>(`/api/farming/farms/${farmId}/paddocks`, { organisationId });
+}
+
+/** The farm's hazards and no-go zones, for the map and the paddock card. */
+function useHazards(organisationId: string, farmId: string) {
+  return useApiData<{ hazards: Array<CurrentRecord<HazardData>> }>("/api/farming/safety", { organisationId, farmId });
+}
+
+function useImageryKey(organisationId: string) {
+  return useApiData<{ settings: FarmingSettings }>("/api/farming/settings", { organisationId }).data?.settings.imageryKey ?? null;
+}
+
+/** Whether the organisation's settings say there's no key (not just "still loading"), for "Add aerial photos". */
+function useNoImageryKey(organisationId: string) {
+  const settings = useApiData<{ settings: FarmingSettings }>("/api/farming/settings", { organisationId }).data?.settings;
+  return Boolean(settings && !settings.imageryKey);
+}
+
+/** Each paddock's colour for a colouring. */
+export function bandFills(statuses: PaddockStatus[], colouring: MapColouring, today: string): Record<string, string> {
+  return Object.fromEntries(statuses.map((status) => [status.paddockId, paddockBand({ inNow: Boolean(status.inNow), lastGrazedOn: status.lastGrazedOn, coverOn: status.cover?.measuredOn ?? null }, colouring, today).colour]));
+}
+
+function Legend({ colouring }: { colouring: MapColouring }) {
+  return (
+    <ul className={styles.legend} aria-label="What the colours mean">
+      {bandsFor(colouring).map((band) => (
+        <li key={band.key}>
+          <span className={styles.swatch} style={{ background: band.colour }} aria-hidden="true" />
+          {band.label}
+        </li>
+      ))}
+    </ul>
+  );
+}
+
+function ColouringSwitch({ value, onChange }: { value: MapColouring; onChange: (value: MapColouring) => void }) {
+  return (
+    <div className={ui.tabs} role="group" aria-label="Colour paddocks by">
+      {MAP_COLOURINGS.map((entry) => (
+        <button key={entry.value} type="button" aria-pressed={entry.value === value} className={`${ui.tab} ${entry.value === value ? ui.tabActive : ""}`} onClick={() => onChange(entry.value)}>
+          {entry.label}
+        </button>
+      ))}
+    </div>
+  );
+}
+
+function AppTiles({ organisationId, farmId, manage }: { organisationId: string; farmId: string; manage: boolean }) {
+  const launchers = useApiData<{ launchers: FarmAppLauncher[] }>("/api/farming/launchers", { organisationId });
+  const shown = (launchers.data?.launchers ?? []).filter((launcher) => launcher.farmId === null || launcher.farmId === farmId);
+  if (!shown.length && !manage) return null;
+  return (
+    <Card title="Farm apps" description={shown.length ? "Apps your farm uses. Each asks for its own key." : undefined}>
+      {shown.length ? (
+        <div className={styles.tiles}>
+          {shown.map((launcher) => (
+            <a key={launcher.id} className={styles.tile} href={launcher.url} target="_blank" rel="noreferrer noopener">
+              <span className={styles.tileName}>{launcher.name}</span>
+              {launcher.description ? <span className={styles.tileNote}>{launcher.description}</span> : null}
+            </a>
+          ))}
+        </div>
+      ) : (
+        <p className={ui.muted}>No app tiles yet.</p>
+      )}
+      {manage ? (
+        <p>
+          <Link href="/operations/farming/apps">Manage integrations</Link>
+        </p>
+      ) : null}
+    </Card>
+  );
+}
+
+// Today -------------------------------------------------------------------------------------------------
+
+export function FarmToday({ organisationId, farm }: FarmContext) {
+  const { can, current } = useWorkspace();
+  const today = todayInBrowser();
+  const statuses = useStatuses(organisationId, farm.id);
+  const shapes = useShapes(organisationId, farm.id);
+  const imageryKey = useImageryKey(organisationId);
+  const noKey = useNoImageryKey(organisationId);
+  const calendar = useApiData<{ items: CalendarItem[] }>("/api/farming/calendar", { organisationId, from: today, to: addDays(today, 6), farmId: farm.id });
+  const [mapOpen, setMapOpen] = useState(false);
+  const jobs = (calendar.data?.items ?? []).filter((item) => item.state !== "cancelled" && item.state !== "dismissed");
+  const todays = jobs.filter((item) => item.date === today);
+  const later = jobs.filter((item) => item.date !== today);
+  const inNow = (statuses.data?.paddocks ?? []).filter((status) => status.inNow).sort((a, b) => NATURAL.compare(a.name, b.name));
+  const fills = statuses.data ? bandFills(statuses.data.paddocks, "grazed", today) : undefined;
+  const farmWorker = current?.role === "farm_worker";
+  return (
+    <div className={styles.grid}>
+      <Card title="Today's jobs" description={todays.length ? undefined : "From the farm calendar."}>
+        {calendar.error ? <Notice tone="error">{calendar.error}</Notice> : null}
+        {calendar.data && !todays.length ? <p>Nothing on the calendar for today.</p> : null}
+        {todays.length ? <JobList items={todays} today={today} /> : null}
+        {later.length ? (
+          <>
+            <h3>Next few days</h3>
+            <JobList items={later.slice(0, 6)} today={today} />
+          </>
+        ) : null}
+        <p>
+          <Link href="/operations/farming/calendar">Open the farm calendar</Link>
+        </p>
+      </Card>
+      <WeatherForecastCard organisationId={organisationId} farm={farm} />
+      <FarmTasksToday organisationId={organisationId} farm={farm} />
+      <FarmSafetyToday organisationId={organisationId} farm={farm} />
+      <FarmEffluentToday organisationId={organisationId} farm={farm} />
+      <Card title="Mobs in now" href="/operations/farm/mobs">
+        {statuses.error ? <Notice tone="error">{statuses.error}</Notice> : null}
+        {statuses.data && !inNow.length ? <p>No mobs recorded in a paddock.</p> : null}
+        {inNow.length ? (
+          <FarmRowList
+            label="Mobs in now"
+            rows={inNow.map((status) => ({
+              key: status.paddockId,
+              title: status.name,
+              parts: [mobText(status.inNow!.mob, status.inNow!.head), `in ${shortDate(status.inNow!.inOn, today)}`, daysAgo(status.inNow!.inOn, today)],
+            }))}
+          />
+        ) : null}
+      </Card>
+      <Card title="Map" description="Coloured by days since grazed.">
+        {shapes.data && statuses.data ? (
+          <>
+            <div className={mapOpen ? undefined : styles.compactMap}>
+              <PaddockMap paddocks={shapes.data.paddocks.filter((paddock) => paddock.status === "active")} selected={null} imageryKey={mapOpen ? imageryKey : null} offerImagery={mapOpen && noKey} fills={fills} label="Map of the paddocks, coloured by days since grazed" />
+            </div>
+            {mapOpen ? <Legend colouring="grazed" /> : null}
+            <div className={styles.actions}>
+              <Button variant="secondary" aria-expanded={mapOpen} onClick={() => setMapOpen(!mapOpen)}>
+                {mapOpen ? "Show less" : "Show the whole map"}
+              </Button>
+              <Link href="/operations/farm/map" className={ui.linkButton}>
+                Open Map
+              </Link>
+            </div>
+          </>
+        ) : (
+          <p className={ui.muted}>Loading…</p>
+        )}
+      </Card>
+      <AppTiles organisationId={organisationId} farmId={farm.id} manage={false} />
+      {!farmWorker && can("viewer") ? (
+        <Card title="Money and year-end">
+          <div className={styles.actions}>
+            <Link href="/operations">Accounting</Link>
+            <Link href="/operations/farming/benchmarks">Farm benchmarks</Link>
+          </div>
+        </Card>
+      ) : null}
+    </div>
+  );
+}
+
+function JobList({ items, today }: { items: CalendarItem[]; today: string }) {
+  return (
+    <FarmRowList
+      label="Jobs"
+      rows={items.map((item) => ({
+        key: item.key,
+        title: item.date && item.date !== today ? shortDate(item.date, today) : (item.startTime ?? "Today"),
+        parts: [item.title, CALENDAR_KIND_LABELS[item.kind], item.tentative ? "to confirm" : null],
+      }))}
+    />
+  );
+}
+
+// Map ----------------------------------------------------------------------------------------------------
+
+export function FarmMapTab({ organisationId, farm }: FarmContext) {
+  const today = todayInBrowser();
+  const statuses = useStatuses(organisationId, farm.id);
+  const shapes = useShapes(organisationId, farm.id);
+  const imageryKey = useImageryKey(organisationId);
+  const noKey = useNoImageryKey(organisationId);
+  const [colouring, setColouring] = useState<MapColouring>("grazed");
+  // Round length and the next planned move, beside days since grazed.
+  const rotation = useRotation(organisationId, farm.id, 0);
+  const [selected, setSelected] = useState<string | null>(null);
+  // Paddocks in the order people say them: 1, 2 … 10, not 1, 10, 2.
+  const list = [...(statuses.data?.paddocks ?? [])].sort((a, b) => NATURAL.compare(a.name, b.name));
+  const fills = bandFills(list, colouring, today);
+  const status = list.find((entry) => entry.paddockId === selected) ?? null;
+  const shaped = (shapes.data?.paddocks ?? []).filter((paddock) => paddock.status === "active");
+  const router = useRouter();
+  const hazards = useHazards(organisationId, farm.id);
+  const activeHazards = (hazards.data?.hazards ?? []).filter((hazard) => hazardState(hazard) === "active");
+  // Hazards and no-go zones over the paddocks: a tap opens that hazard in Safety.
+  const overlays = hazardOverlays(activeHazards, (id) => router.push(safetyHref({ farmId: farm.id, screen: "hazards", hazard: id })));
+  // Where each effluent system's pods or irrigator were last moved: a tap opens the irrigation log.
+  const effluent = useEffluentLog(organisationId, farm.id);
+  overlays.push(...lastMovedOverlays(effluent.data?.lastMoved ?? []).map((overlay) => ({ ...overlay, onSelect: () => router.push(effluentHref({ farmId: farm.id, screen: "log" })) })));
+  // Sprayed paddocks not safe to graze yet: outlined, and a tap opens the paddock.
+  overlays.push(...sprayOverlays(list, shaped, today, setSelected));
+  // Rain gauges placed on the map: a tap opens Rainfall.
+  const gauges = useRainGauges(organisationId, farm.id);
+  overlays.push(...gaugeOverlays(gauges.data?.gauges ?? [], () => router.push(`/operations/farming/rainfall?farm=${farm.id}`)));
+  // Farm members who chose to share their location: a tap opens their card under People on the map.
+  const people = useFarmPeople(organisationId, farm.id);
+  const [person, setPerson] = useState<string | null>(null);
+  const markers = peopleMarkers(people.people ?? [], new Date(), people.offline, person, (id) => {
+    setPerson(id);
+    requestAnimationFrame(() => document.getElementById("people-card")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  });
+  // Tasks pinned on the map: a tap opens Tasks.
+  const tasks = useFarmTasks(organisationId, farm.id);
+  overlays.push(...taskOverlays(tasks.data?.tasks ?? [], () => router.push(`/operations/farming/tasks?farm=${farm.id}`)));
+  // Farm assets: a tap picks it in Farm assets.
+  const assets = useMapAssets(organisationId, farm.id);
+  const [asset, setAsset] = useState<string | null>(null);
+  overlays.push(...assetOverlays(assets.data?.assets ?? [], (id) => {
+    setAsset(id);
+    requestAnimationFrame(() => document.getElementById("assets-card")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  }));
+  // Layers: each kind of thing on the map can be turned off; remembered on this device.
+  const layers = useMapLayers();
+  const present = [...new Set<MapLayer>([...overlays.map(overlayLayer), ...(markers.length ? (["people"] as const) : [])])];
+  const shown = shownOverlays(overlays, layers.isOn);
+  const shownPeople = layers.isOn("people") ? markers : [];
+  // Measuring or placing an asset: taps on the map go to it.
+  const [drawing, setDrawing] = useState<MapDrawing | null>(null);
+  const [measuring, setMeasuring] = useState(false);
+  // Satellite vegetation: Aerial / Vegetation / Change, once it's set up for this farm.
+  const { can } = useWorkspace();
+  const [picture, setPicture] = useMapPicture();
+  const [sceneId, setSceneId] = useState<string | null>(null);
+  const vegetation = useFarmVegetation(organisationId, farm.id, sceneId);
+  const vegetationOn = Boolean(vegetation.data && vegetation.data.vegetation.state !== "not_set_up");
+  const shownPicture = vegetationOn ? picture : "aerial";
+  const raster = vegetationRaster(vegetation.data, shownPicture);
+  const mapFills = raster ? Object.fromEntries(shaped.map((paddock) => [paddock.id, "rgba(0, 0, 0, 0)"])) : fills;
+  const greenness = selected && vegetationOn ? (vegetation.data!.vegetation.observations.find((observation) => observation.paddockId === selected) ?? null) : null;
+  return (
+    <div className={styles.grid}>
+      <div style={{ display: "grid", gap: 16, alignContent: "start" }}>
+      <Card
+        title="Paddocks"
+        description={
+        <>
+          Tap a paddock for its cover, mob and records.{" "}
+          <InfoTip label="Map colours">Colours show what was recorded, not whether it&apos;s good or bad. Red and amber triangles and dashed outlines are hazards and no-go zones.</InfoTip>
+        </>
+      }
+        actions={
+          <>
+            <button type="button" className={styles.bigButton} aria-pressed={measuring} onClick={() => setMeasuring(!measuring)}>
+              Measure
+            </button>
+            <Link className={styles.bigButton} href={`/operations/farm/tractor?farm=${farm.id}`}>
+              Tractor mode
+            </Link>
+          </>
+        }
+      >
+        {vegetationOn ? <MapPictureSwitch value={shownPicture} onChange={setPicture} /> : null}
+        {shownPicture === "aerial" ? <ColouringSwitch value={colouring} onChange={setColouring} /> : null}
+        <MapLayerToggles present={present} isOn={layers.isOn} toggle={layers.toggle} />
+        {statuses.error ? <Notice tone="error">{statuses.error}</Notice> : null}
+        {shapes.data && statuses.data ? (
+          <PaddockMap
+            paddocks={shaped}
+            selected={selected}
+            onSelect={setSelected}
+            imageryKey={imageryKey}
+            offerImagery={noKey}
+            fills={mapFills}
+            raster={raster}
+            overlays={shown}
+            people={shownPeople}
+            drawing={drawing?.points ?? null}
+            drawingShape={drawing?.shape}
+            onMapTap={drawing?.onTap}
+            label={`Map of the paddocks, ${raster ? `with the satellite ${shownPicture === "change" ? "change" : "greenness"} picture${vegetation.data?.vegetation.scene ? ` from ${vegetation.data.vegetation.scene.acquiredOn}` : ""}` : `coloured by ${colouring === "grazed" ? "days since grazed" : "cover reading age"}`}, with ${shown.length} hazards, assets and other marks${shownPeople.length ? ` and ${shownPeople.length} people sharing their location (listed under People on the map)` : ""}${drawing ? ". Tap to add a point" : ""}`}
+          />
+        ) : (
+          <p className={ui.muted}>Loading…</p>
+        )}
+        {shownPicture === "aerial" ? <Legend colouring={colouring} /> : null}
+        {vegetationOn && shownPicture !== "aerial" ? <VegetationMapNotes organisationId={organisationId} answer={vegetation.data!} picture={shownPicture} onScene={setSceneId} canSetUp={can("admin")} /> : null}
+      </Card>
+      {measuring ? <MeasureCard onDrawing={setDrawing} onClose={() => setMeasuring(false)} /> : null}
+      <div id="assets-card" style={{ scrollMarginTop: 64 }}>
+        {assets.data && !measuring ? <FarmAssetsCard organisationId={organisationId} farm={farm} assets={assets.data.assets} selected={asset} onSelect={setAsset} onChanged={assets.reload} onDrawing={setDrawing} /> : null}
+      </div>
+      {vegetation.data || vegetation.error ? <SatelliteVegetationLink state={vegetation.data?.vegetation.state ?? null} /> : null}
+      </div>
+      <div>
+        <div id="paddock-card" style={{ scrollMarginTop: 64 }}>
+          {status && vegetationOn && shownPicture !== "aerial" ? <PaddockGreenness organisationId={organisationId} paddockId={status.paddockId} observation={greenness} /> : null}
+          {status ? <PaddockCard organisationId={organisationId} farm={farm} status={status} hazards={activeHazards} plan={rotation.data?.plan ?? null} onClose={() => setSelected(null)} /> : null}
+        </div>
+        <div id="people-card" style={{ scrollMarginTop: 64 }}>
+          <FarmPeopleCard organisationId={organisationId} farm={farm} people={people} selected={person} onSelect={setPerson} />
+        </div>
+        <Card title="All paddocks">
+          <FarmRowList
+            label="Paddocks"
+            rows={list.map((entry) => {
+              const band = paddockBand({ inNow: Boolean(entry.inNow), lastGrazedOn: entry.lastGrazedOn, coverOn: entry.cover?.measuredOn ?? null }, colouring, today);
+              return {
+                key: entry.paddockId,
+                title: (
+                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
+                    <span className={styles.swatch} style={{ background: band.colour }} aria-hidden="true" />
+                    {entry.name}
+                  </span>
+                ),
+                parts: [entry.cover ? `${entry.cover.cover.toLocaleString("en-NZ")} · ${shortDate(entry.cover.measuredOn, today)}` : "No cover", entry.inNow ? `${entry.inNow.mob} in` : entry.lastGrazedOn ? `grazed ${shortDate(entry.lastGrazedOn, today)}` : null, entry.notSafeUntil ? `not safe to graze until ${shortDate(entry.notSafeUntil.until, today)}` : null, paddockPlanText(entry, rotation.data?.plan ?? null, today) || null],
+                onOpen: () => {
+                  setSelected(entry.paddockId);
+                  // The card opens above the list: bring it into view.
+                  requestAnimationFrame(() => document.getElementById("paddock-card")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+                },
+              };
+            })}
+          />
+        </Card>
+      </div>
+    </div>
+  );
+}
+
+/** Sprayed paddocks with a grazing withholding still in force, as warning outlines on the map. */
+function sprayOverlays(statuses: PaddockStatus[], shapes: Paddock[], today: string, onSelect: (id: string) => void) {
+  return statuses
+    .filter((status) => status.notSafeUntil)
+    .flatMap((status) => {
+      const geometry = shapes.find((paddock) => paddock.id === status.paddockId)?.geometry;
+      const ring = geometry ? (geometry.type === "Polygon" ? geometry.coordinates[0] : geometry.coordinates[0]?.[0]) : null;
+      return ring ? [{ id: `spray-${status.paddockId}`, label: `${status.name}: not safe to graze until ${shortDate(status.notSafeUntil!.until, today)}`, tone: "warning" as const, ring, onSelect: () => onSelect(status.paddockId) }] : [];
+    });
+}
+
+/** The withholding of mobs in this paddock now. */
+function PaddockMobsWithholding({ organisationId, farmId, paddockId }: { organisationId: string; farmId: string; paddockId: string }) {
+  const today = todayInBrowser();
+  const mobs = useApiData<{ mobs: Mob[] }>(`/api/farming/farms/${farmId}/mobs`, { organisationId });
+  const here = (mobs.data?.mobs ?? []).filter((mob) => mob.paddock?.id === paddockId && withholdingText(mob.withholding, today));
+  if (!here.length) return null;
+  return (
+    <Notice tone="warning">
+      {here.map((mob) => `${mob.name}: ${withholdingText(mob.withholding, today, (iso) => shortDate(iso, today))!.replace(/^Withholding: /, "")}`).join(". ")}.
+    </Notice>
+  );
+}
+
+/** A paddock's card: cover and how old it is, the mob, recent records and buttons to record. */
+export function PaddockCard({ organisationId, farm, status, hazards = [], plan = null, onClose }: { organisationId: string; farm: Farm; status: PaddockStatus; hazards?: Array<CurrentRecord<HazardData>>; plan?: RotationPlan | null; onClose: () => void }) {
+  const here = hazards.filter((hazard) => hazard.data.paddockIds.includes(status.paddockId));
+  const today = todayInBrowser();
+  const canRecord = useCanRecordFarmWork();
+  const history = useApiData<{ pasture: { readings: PastureReading[]; grazings: GrazingRecord[] } }>(`/api/farming/paddocks/${status.paddockId}/pasture`, { organisationId });
+  const recent = [
+    ...(history.data?.pasture.readings.slice(0, 3).map((reading) => ({ date: reading.measuredOn, text: `Cover ${coverText(reading.cover)}`, key: `r${reading.id}` })) ?? []),
+    ...(history.data?.pasture.grazings.slice(0, 3).map((grazing) => ({ date: grazing.inOn, text: `${mobText(grazing.mob, grazing.head)} in${grazing.outOn ? `, out ${shortDate(grazing.outOn, today)}` : ""}`, key: `g${grazing.id}` })) ?? []),
+  ]
+    .sort((a, b) => b.date.localeCompare(a.date))
+    .slice(0, 4);
+  const logHref = (record: string, extra = "") => `/operations/farm/log?record=${record}&paddock=${status.paddockId}${extra}`;
+  return (
+    <Card title={`Paddock ${status.name}`} description={`${farm.name}${status.hectares ? ` · ${status.hectares} ha` : ""}`} actions={<Button variant="secondary" onClick={onClose}>Close</Button>}>
+      {status.notSafeUntil ? (
+        <Notice tone="warning">
+          Not safe to graze until {shortDate(status.notSafeUntil.until, today)}
+          {status.notSafeUntil.product ? `: sprayed with ${status.notSafeUntil.product}` : ""}. <Link href={`/operations/farm/tractor/${status.notSafeUntil.jobId}`}>The spray job</Link>
+        </Notice>
+      ) : null}
+      <PaddockMobsWithholding organisationId={organisationId} farmId={farm.id} paddockId={status.paddockId} />
+      <dl className={styles.facts}>
+        <dt>Cover</dt>
+        <dd>{status.cover ? `${coverText(status.cover.cover)}, ${daysAgo(status.cover.measuredOn, today)} (${PASTURE_METHOD_LABELS[status.cover.method]})` : "No reading yet"}</dd>
+        <dt>Mob</dt>
+        <dd>
+          {status.inNow ? `${mobText(status.inNow.mob, status.inNow.head)}, in since ${shortDate(status.inNow.inOn, today)}` : "None in now"}
+          {status.inNow?.mobs.some((entry) => entry.mobId) ? (
+            <>
+              {" "}
+              <Link href="/operations/farm/mobs">Mobs</Link>
+            </>
+          ) : null}
+        </dd>
+        <dt>Last grazed</dt>
+        <dd>{status.inNow ? "Being grazed now" : status.lastGrazedOn ? `${shortDate(status.lastGrazedOn, today)} (${daysAgo(status.lastGrazedOn, today)})` : "No grazing recorded"}</dd>
+        {plan?.nextByPaddock[status.paddockId] || plan?.roundDays ? (
+          <>
+            <dt>Planned</dt>
+            <dd>{paddockPlanText(status, plan, today) || "Nothing planned"}</dd>
+          </>
+        ) : null}
+        <dt>Hazards</dt>
+        <dd>
+          {here.length ? (
+            <ul style={{ margin: 0, paddingLeft: 18 }}>
+              {here.map((hazard) => (
+                <li key={hazard.recordId}>
+                  <Link href={safetyHref({ farmId: farm.id, screen: "hazards", hazard: hazard.recordId })}>
+                    <strong>{hazard.data.noGo ? "No-go: " : ""}{hazard.data.title}</strong>
+                  </Link>{" "}
+                  ({HAZARD_LEVEL_LABELS[hazard.data.level]}){hazard.data.controls ? `: ${hazard.data.controls}` : ""}
+                </li>
+              ))}
+            </ul>
+          ) : (
+            "None recorded for this paddock. "
+          )}
+          <Link href={safetyHref({ farmId: farm.id, screen: "hazards" })}>All hazards on {farm.name}</Link>
+        </dd>
+      </dl>
+      {recent.length ? (
+        <>
+          <h3>Recent</h3>
+          <FarmRowList label="Recent records" rows={recent.map((entry) => ({ key: entry.key, title: shortDate(entry.date, today), parts: [entry.text] }))} />
+        </>
+      ) : null}
+      <h3>Photo diary</h3>
+      <PaddockPhotoDiary organisationId={organisationId} paddockId={status.paddockId} readings={history.data?.pasture.readings ?? []} />
+      {canRecord ? (
+        <div className={styles.actions}>
+          <Link className={styles.bigButton} href={logHref("hazard")}>
+            Report a hazard
+          </Link>
+          <Link className={styles.bigButton} href={logHref("cover")}>
+            Add cover
+          </Link>
+          <Link className={styles.bigButton} href={logHref("photo")}>
+            Add photo
+          </Link>
+          {status.inNow ? (
+            <Link className={styles.bigButton} href={logHref("out", `&grazing=${status.inNow.grazingId}`)}>
+              Mob out
+            </Link>
+          ) : (
+            <Link className={styles.bigButton} href={logHref("in")}>
+              Mob in
+            </Link>
+          )}
+          <Link className={styles.bigButton} href={`/operations/farm/mobs?farm=${farm.id}`}>
+            Move a mob
+          </Link>
+        </div>
+      ) : null}
+      <p>
+        <Link href={`/operations/farming/pasture?farm=${farm.id}`}>Details: readings and grazings</Link> · <Link href={`/operations/farm/timeline?farm=${farm.id}&paddock=${status.paddockId}`}>Timeline</Link>
+      </p>
+    </Card>
+  );
+}
+
+// Safety, More ----------------------------------------------------------------------------------------------
+
+export { FarmSafetyTab };
+
+type MoreLink = { icon?: IllustratedIconName; href: string; label: string; note?: string; staff?: boolean; minRole?: "viewer" | "bookkeeper" | "admin" };
+
+/** The Farm menu's big buttons: the farm work that isn't one of the five tabs, Effluent first. */
+const FARM_WORK: MoreLink[] = [
+  { href: "/operations/farm/effluent", icon: "effluent", label: "Effluent", note: "Irrigation log, ponds, checks, incidents, council pack", staff: true },
+  { href: "/operations/farm/tractor", icon: "location", label: "Tractor mode", note: "Spreading, spraying and mowing from phone GPS", staff: true },
+  { href: "/operations/farm/security", icon: "camera", label: "Security", note: "Camera photos and clips", staff: true },
+  { href: "/operations/farm/mobs", icon: "livestock", label: "Mobs", note: "Moves, weights, sales and stocking rate", staff: true },
+  { href: "/operations/farm/animals", icon: "scales", label: "Animals", note: "Tags, weights, body condition and quick entry", staff: true },
+  { href: "/operations/farming/pasture", icon: "farm", label: "Pasture and feed", note: "Readings, grazings and feed", staff: true },
+  { href: "/operations/farming/rainfall", icon: "effluent", label: "Rainfall", note: "Rain gauges, by month and season", staff: true },
+  { href: "/operations/farm/weather", icon: "weather", label: "Weather", note: "MetService forecast for the next 7 days", staff: true },
+  { href: "/operations/farming/calendar", icon: "calendar", label: "Farm calendar", note: "Jobs, due dates and reminders", staff: true },
+  { href: "/operations/farming/tasks", icon: "checklist", label: "Tasks", note: "Jobs for the farm team, with reminders", staff: true },
+  { href: "/operations/farm/timeline", icon: "clock", label: "Farm timeline", note: "Moves, treatments, sales, weights and sprays", staff: true },
+  { href: "/operations/farming/soil", icon: "flask", label: "Soil tests", staff: true },
+  { href: "/operations/farming", icon: "maps", label: "Farms and paddocks", note: "Areas, boundaries, drawing paddocks", staff: true },
+];
+
+const DETAILS: MoreLink[] = [
+  { href: "/operations/farming/fertiliser", icon: "farm", label: "Fertiliser plans" },
+  { href: "/operations/farming/notebook", icon: "documents", label: "Farm notebook" },
+  { href: "/operations/livestock", icon: "livestock", label: "Livestock" },
+  { href: "/operations/farming/compare", icon: "analytics", label: "All farms compared" },
+];
+
+const YEAR_END: MoreLink[] = [
+  { href: "/operations/farming/benchmarks", icon: "analytics", label: "Benchmarks" },
+  { href: "/operations/farming/co-op-shares", icon: "coins", label: "Co-op shares" },
+  { href: "/operations/livestock/valuation", icon: "price", label: "Livestock valuation" },
+  { href: "/operations/farming/import", icon: "maps", label: "Import paddock shapes", minRole: "bookkeeper" },
+];
+
+export function FarmMore({ organisationId, farm }: FarmContext) {
+  const { can, current } = useWorkspace();
+  const farmWorker = current?.role === "farm_worker";
+  const shown = (links: MoreLink[]) => links.filter((link) => (farmWorker ? link.staff : can(link.minRole ?? "viewer")));
+  const details = shown(DETAILS);
+  return (
+    <div className={styles.grid}>
+      {/* The full Farm menu: everything on the farm, so Effluent is found without searching. */}
+      <Card title="Farm menu">
+        <nav aria-label="Farm menu" className={styles.menuTiles}>
+          {shown(FARM_WORK).map((link) => (
+            <Link key={link.href} href={link.href} className={styles.menuTile}>
+              {link.icon ? <IllustratedIcon name={link.icon} size={48} /> : null}
+              <span className={styles.menuTileText}><strong>{link.label}</strong>
+                {link.note ? <small>{link.note}</small> : null}
+              </span>
+              <span aria-hidden="true" className={styles.menuArrow}>›</span>
+            </Link>
+          ))}
+        </nav>
+      </Card>
+      {details.length ? (
+        <Card title="Details">
+          <LinkList links={details} />
+        </Card>
+      ) : null}
+      {farmWorker ? null : (
+        <Card title="Year-end and setup">
+          <LinkList links={shown(YEAR_END)} />
+        </Card>
+      )}
+      <AppTiles organisationId={organisationId} farmId={farm.id} manage />
+      <Card title="This phone or tablet" description="Put Tohyee on the Home Screen as a web app. The farm pages then open without a signal.">
+        <LinkList
+          links={[
+            { href: "/get-tohyee", icon: "documents", label: "Get Tohyee on this device", staff: true },
+            { href: OFFLINE_PAGE, icon: "offline", label: "Offline on this device", note: "What's kept, and when it was updated", staff: true },
+          ]}
+        />
+      </Card>
+    </div>
+  );
+}
+
+function LinkList({ links }: { links: MoreLink[] }) {
+  return (
+    <ul className={styles.links}>
+      {links.map((link) => (
+        <li key={link.href}>
+          <Link href={link.href}>
+            {link.icon ? <IllustratedIcon name={link.icon} size={32} /> : null}
+            <span>
+              {link.label}
+              {link.note ? <span className={ui.muted}> · {link.note}</span> : null}
+            </span>
+          </Link>
+        </li>
+      ))}
+    </ul>
+  );
+}

@@ -1,0 +1,83 @@
+# Weekly dependency updates, one grouped pull request per ecosystem so
+# they can be read and merged together. Security updates still arrive on
+# their own as soon as GitHub knows of them.
+version: 2
+updates:
+  - package-ecosystem: npm
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    open-pull-requests-limit: 5
+    groups:
+      npm:
+        patterns: ["*"]
+        update-types: [minor, patch]
+    ignore:
+      # Node's types follow the Node the server runs on (22), not the newest.
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+      # Needs Node 24; the server runs Node 22.
+      - dependency-name: "unpdf"
+        update-types: ["version-update:semver-major"]
+      # Not yet supported by eslint-config-next's plugins or typescript-eslint.
+      - dependency-name: "eslint"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: npm
+    directory: /relay
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      relay:
+        patterns: ["*"]
+    ignore:
+      # Cloudflare's test pool needs vitest 4; the relay's types follow Node 22.
+      - dependency-name: "vitest"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "typescript"
+        update-types: ["version-update:semver-major"]
+      - dependency-name: "@types/node"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: github-actions
+    directory: /
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      actions:
+        patterns: ["*"]
+  - package-ecosystem: gradle
+    directory: /android
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      android:
+        patterns: ["*"]
+    ignore:
+      # Gradle 9.6+ needs Android Gradle plugin 9.6+, a migration of its own.
+      - dependency-name: "gradle-wrapper"
+        update-types: ["version-update:semver-major"]
+  - package-ecosystem: nuget
+    directory: /installer/windows/tray
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      tray:
+        patterns: ["*"]
+  - package-ecosystem: docker
+    directories: ["/", "/postbox"]
+    schedule:
+      interval: weekly
+      day: monday
+    groups:
+      docker:
+        patterns: ["*"]
+    ignore:
+      # The images stay on a long-term-support Node, moved by hand with the checks' Node versions.
+      - dependency-name: "node"
+        update-types: ["version-update:semver-major"]

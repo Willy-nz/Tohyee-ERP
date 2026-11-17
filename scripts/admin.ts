@@ -1,0 +1,905 @@
+/**
+ * Server settings from the command line, run on the server itself, straight
+ * against the database (no web login needed). It covers everything the
+ * Windows server app does, for Docker and Linux servers, plus the break-glass
+ * commands for a locked-out admin. Run `npm run admin -- help` for the list.
+ *
+ * Passwords and tokens are read from environment variables or asked for
+ * (without showing what you type), so they don't end up in shell history.
+ * Every change is recorded in the server's audit trail as "cli".
+ */
+import { existsSync, readFileSync, statSync, writeFileSync } from "node:fs";
+import path from "node:path";
+import { createInterface } from "node:readline";
+import { stdin, stdout } from "node:process";
+import { COMMAND_LINE_ADMIN } from "@/lib/audit";
+import { revokeUserAiKeys } from "@/lib/ai/tokens";
+import { endPasskeys } from "@/lib/auth/passkey-end";
+import { hashPassword, validateNewPassword } from "@/lib/auth/password";
+import { normaliseEmail, parseDisplayName } from "@/lib/auth/service";
+import { createSetupLink, emailSetupLink, sendSetupLink } from "@/lib/auth/setup-links";
+import { twoStepRequired } from "@/lib/auth/sessions";
+import { resetTwoStep } from "@/lib/auth/two-step";
+import { randomBytes } from "node:crypto";
+import { closeAllPools } from "@/lib/db/pools";
+import { grantServiceAccess, WINDOWS_SERVICE_ACCOUNT } from "@/lib/server-admin/folder-access";
+import { coreQuery, withCoreTransaction } from "@/lib/db/transactions";
+import { getLocalMailRelay, updateLocalMailRelay } from "@/lib/email/local-relay";
+import { getEmailSettings, sendEmail, updateEmailSettings } from "@/lib/email/mailer";
+import {
+  createOrganisation,
+  listAllOrganisations,
+  retryProvisioning,
+  updateOrganisation,
+} from "@/lib/organisations/admin";
+import { getRemoteAccess, getTohyeeAddress, releaseTohyeeAddress, updateRemoteAccess } from "@/lib/remote/settings";
+import { getLatestReleaseCheck } from "@/lib/updates/server-updates";
+import { checkStoredBackups } from "@/lib/backups/checks";
+import { backupOverview } from "@/lib/backups/overview";
+import { checkRecoveryKit, exportRecoveryKit, recoveryKitStatus, rotateRecoveryKey } from "@/lib/backups/recovery-kit";
+import {
+  backUpNow,
+  backupStatus,
+  checkBackup,
+  decryptBackupTo,
+  getBackupSettings,
+  listBackupFiles,
+  restoreBackup,
+  resumeOrganisationJobs,
+  updateBackupSettings,
+} from "@/lib/backups/service";
+import { recoverPeople, recoveryMaterial, testRestore } from "@/lib/backups/recovery";
+import { listUsers, updateUser } from "@/lib/users/admin";
+
+const actor = COMMAND_LINE_ADMIN.user;
+
+const HELP = `Tohyee server settings from the command line.
+
+  npm run admin -- <area> <command> [options]
+  (Docker: docker compose exec tohyee node tohyee-admin.cjs <area> <command> [options])
+
+Organisations
+  organisations list [--json]
+  organisations create --id ID --name NAME [--currency NZD] [--owner EMAIL]
+  organisations rename --id ID --name NAME
+  organisations take-out-of-use --id ID
+  organisations put-back --id ID
+  organisations repair --id ID              retry a failed set-up or upgrade
+
+Users
+  users list [--json]
+  users create --email EMAIL --name NAME [--server-admin]   prints their setup link (with two-step sign-in on;
+                                            otherwise password: TOHYEE_PASSWORD or asked)
+  users rename --email EMAIL --name NAME
+  users set-password --email EMAIL          password: TOHYEE_PASSWORD or asked
+  users login --email EMAIL --on|--off      allow or stop them signing in
+  users server-admin --email EMAIL --on|--off
+  users reset-two-step --email EMAIL        lost phone: prints a setup link to set it up again
+  users setup-link --email EMAIL            a new setup link for a login that hasn't set up two-step
+
+Remote access (use Tohyee from anywhere; one way at a time)
+  remote-access show [--json]
+  remote-access address --on|--off          a Tohyee address (run by the Tohyee project, no sign-up)
+  remote-access address release             give the Tohyee address back
+  remote-access set --on|--off [--token] [--url https://books.example.nz]
+                                            your own domain: a Cloudflare Tunnel token
+                                            --token: TOHYEE_TUNNEL_TOKEN or asked
+  remote-access clear
+  (Restart Tohyee afterwards: the running server starts or stops the tunnel when it starts.)
+
+Email (for security alerts and two-step reset links)
+  email show [--json]
+  email set --host HOST --port 465|587 --username USER [--from ADDRESS] [--from-name NAME]
+                                            password: TOHYEE_EMAIL_PASSWORD or asked (blank keeps the saved one)
+  email test --to EMAIL
+  email clear
+  email local-relay [--on|--off]            let organisations send through a mail server on this
+                                            computer or its local network (off by default)
+
+Backups (encrypted with the server's recovery key: save the recovery kit somewhere safe, not with the backups)
+  backups status [--json]                   each database's latest and last good backup, the checks, and
+                                            what isn't proven (such as off-site copies)
+  backups verify [--id ORGANISATION]        read the newest backup files back and check them again
+  backups set [--on|--off] [--folder PATH] [--time 02:00]
+                                            --folder "" goes back to the default folder
+  backups run [--id ORGANISATION]           back up now (everything, or one organisation)
+  backups list [--id ORGANISATION] [--json]
+  backups check --file FILE                 prove a backup opens and PostgreSQL can read it
+  backups restore --file FILE [--id NEW-ID] [--name NAME] [--owner EMAIL] [--other-key | --kit-file PATH]
+                                            restores as a new organisation (a copy); nothing is overwritten;
+                                            stored secrets re-encrypted for this server; automatic jobs paused
+  backups resume --id ORGANISATION          turns on a restored copy's automatic jobs
+  backups test-restore [--id ORGANISATION]  restores the newest backups into a scratch database, checks, removes
+  backups recover-people --file SERVER-BACKUP [--other-key | --kit-file PATH] [--replace EMAIL,…] [--apply]
+                                            a replacement computer: people, logins and memberships from a
+                                            server backup (without --apply it only says what it would do)
+  backups decrypt --file FILE --out DUMP [--other-key]
+                                            a plain pg_dump file, for a database administrator
+                                            --other-key: the backup was made on another server; its
+                                            recovery code from TOHYEE_RECOVERY_CODE or asked
+  backups kit show                          the recovery kit as a recovery code, to save somewhere safe
+  backups kit file --out PATH [--random-name]
+                                            the recovery kit as a file encrypted with a passphrase
+                                            (TOHYEE_KIT_PASSPHRASE or asked); keep the passphrase elsewhere
+  backups kit check [--file PATH]           checks your saved kit: the code (TOHYEE_RECOVERY_CODE or
+                                            asked), or the file and its passphrase
+  backups kit new                           a new recovery key for backups from now on
+  analytics folders [--json]                each organisation's analytics folder
+  analytics folder --id ORGANISATION --folder PATH   choose it (--folder "" clears it)
+  bank folders [--json]                     each organisation's bank files folder
+  bank folder --id ORGANISATION --folder PATH        choose it (--folder "" clears it)
+
+Demo farm (Kōwhai Dairies Ltd: made-up data to try Tohyee on; one each)
+  demo list [--json]
+  demo add --owner EMAIL                    makes it for them (about a minute; it shows progress)
+  demo reset --owner EMAIL --yes            deletes theirs and makes it again from the start
+  demo delete --owner EMAIL --yes           removes theirs for good
+  (TOHYEE_DEMO_FARM=off in the server's environment turns adding the demo farm off.)
+
+Updates
+  updates check [--json]
+
+The older forms still work: create-user, set-password, reset-two-step.`;
+
+// ------------------------------------------------------------------ input
+
+class UsageError extends Error {}
+
+function option(args: string[], name: string): string | null {
+  const index = args.indexOf(`--${name}`);
+  if (index === -1) return null;
+  const value = args[index + 1];
+  if (value === undefined || value.startsWith("--")) throw new UsageError(`--${name} needs a value.`);
+  return value;
+}
+
+function required(args: string[], name: string): string {
+  const value = option(args, name);
+  if (value === null) throw new UsageError(`--${name} is required.`);
+  return value;
+}
+
+function flag(args: string[], name: string): boolean {
+  return args.includes(`--${name}`);
+}
+
+/** --on or --off, exactly one. */
+function onOff(args: string[]): boolean {
+  const on = flag(args, "on");
+  const off = flag(args, "off");
+  if (on === off) throw new UsageError("Say --on or --off.");
+  return on;
+}
+
+/** Asks for a secret without showing what's typed (when it's a terminal). */
+async function askSecret(prompt: string): Promise<string> {
+  if (!stdin.isTTY) {
+    throw new UsageError(`${prompt.replace(/:\s*$/, "")}: set it in an environment variable (see help); there's no terminal to ask in.`);
+  }
+  const rl = createInterface({ input: stdin, output: stdout, terminal: true });
+  const writer = rl as unknown as { _writeToOutput: (text: string) => void };
+  let muted = false;
+  writer._writeToOutput = (text: string) => {
+    if (!muted || text.includes("\n")) stdout.write(muted ? "\n" : text);
+  };
+  try {
+    return await new Promise<string>((resolve) => {
+      rl.question(prompt, (answer) => resolve(answer));
+      muted = true;
+    });
+  } finally {
+    rl.close();
+  }
+}
+
+async function secret(envName: string, prompt: string): Promise<string> {
+  const fromEnv = process.env[envName];
+  if (fromEnv !== undefined) return fromEnv;
+  return askSecret(prompt);
+}
+
+const readPassword = () => secret("TOHYEE_PASSWORD", "New password (10+ characters): ");
+
+// ------------------------------------------------------------------ output
+
+function table(rows: Record<string, string>[]): void {
+  if (rows.length === 0) {
+    console.log("(none)");
+    return;
+  }
+  const headers = Object.keys(rows[0]);
+  const widths = headers.map((h) => Math.max(h.length, ...rows.map((r) => r[h].length)));
+  const line = (cells: string[]) => cells.map((c, i) => c.padEnd(widths[i])).join("  ").trimEnd();
+  console.log(line(headers));
+  console.log(line(widths.map((w) => "-".repeat(w))));
+  for (const row of rows) console.log(line(headers.map((h) => row[h])));
+}
+
+function show(args: string[], value: unknown, print: () => void): void {
+  if (flag(args, "json")) console.log(JSON.stringify(value, null, 2));
+  else print();
+}
+
+// ------------------------------------------------------------------ helpers
+
+async function audit(eventType: string, userId: string, details: Record<string, unknown>) {
+  await coreQuery(
+    `insert into admin_audit_events (event_type, entity_type, entity_id, actor_email, details)
+     values ($1, 'user', $2, 'cli', $3::jsonb)`,
+    [eventType, userId, JSON.stringify(details)],
+  );
+}
+
+async function userIdFor(emailInput: string): Promise<string> {
+  const email = normaliseEmail(emailInput);
+  const found = await coreQuery<{ id: string }>("select id from users where email = $1", [email]);
+  const id = found.rows[0]?.id;
+  if (!id) throw new Error(`No user with the email ${email}.`);
+  return id;
+}
+
+function organisationStatus(o: { isActive: boolean; provisioningStatus: string; migrationStatus: string }): string {
+  if (o.provisioningStatus === "failed") return "set-up failed (run repair)";
+  if (o.migrationStatus === "failed") return "upgrade failed (run repair)";
+  if (o.provisioningStatus !== "ready") return "being set up";
+  return o.isActive ? "in use" : "out of use";
+}
+
+// ------------------------------------------------------------------ commands
+
+async function organisations(command: string | undefined, args: string[]) {
+  if (command === "list") {
+    const list = await listAllOrganisations();
+    show(args, list, () =>
+      table(
+        list.map((o) => ({
+          ID: o.id,
+          Name: o.displayName,
+          Currency: o.baseCurrency,
+          Members: String(o.memberCount),
+          Status: organisationStatus(o),
+          Database: o.databaseName,
+        })),
+      ),
+    );
+    return;
+  }
+  if (command === "create") {
+    const ownerEmail = option(args, "owner");
+    if (!ownerEmail) throw new UsageError("--owner EMAIL is required: the command-line tool isn't a user, so say who owns the new organisation.");
+    const organisation = await createOrganisation(actor, {
+      id: required(args, "id"),
+      displayName: required(args, "name"),
+      baseCurrency: option(args, "currency") ?? undefined,
+      ownerEmail,
+    });
+    if (organisation.provisioningStatus === "ready") {
+      console.log(`Created ${organisation.displayName} (${organisation.id}), owned by ${normaliseEmail(ownerEmail)}.`);
+    } else {
+      console.log(`Registered ${organisation.id}, but setting up its database failed: ${organisation.provisioningError ?? "see the server log"}. Run "organisations repair --id ${organisation.id}" to try again.`);
+      process.exitCode = 1;
+    }
+    return;
+  }
+  if (command === "rename") {
+    const organisation = await updateOrganisation(actor, required(args, "id"), { displayName: required(args, "name") });
+    console.log(`Renamed ${organisation.id} to ${organisation.displayName}.`);
+    return;
+  }
+  if (command === "take-out-of-use" || command === "put-back") {
+    const isActive = command === "put-back";
+    const organisation = await updateOrganisation(actor, required(args, "id"), { isActive });
+    console.log(isActive ? `${organisation.displayName} is back in use.` : `${organisation.displayName} is out of use: nobody can open its books until it's put back.`);
+    return;
+  }
+  if (command === "repair") {
+    const organisation = await retryProvisioning(actor, required(args, "id"));
+    console.log(`${organisation.displayName}: ${organisationStatus(organisation)}.`);
+    if (organisation.provisioningStatus !== "ready" || organisation.migrationStatus !== "current") process.exitCode = 1;
+    return;
+  }
+  throw new UsageError(`Unknown organisations command${command ? ` "${command}"` : ""}.`);
+}
+
+async function createUserCommand(args: string[]) {
+  const email = normaliseEmail(required(args, "email"));
+  const displayName = parseDisplayName(required(args, "name"));
+  const isServerAdmin = flag(args, "server-admin");
+  // With two-step sign-in on, they choose their own password through a setup link.
+  const withLink = twoStepRequired();
+  const passwordHash = await hashPassword(withLink ? randomBytes(32).toString("base64url") : validateNewPassword(await readPassword()));
+  const created = await withCoreTransaction(async (client) => {
+    const inserted = await client.query<{ id: string }>(
+      `insert into users (email, display_name, password_hash, is_server_admin)
+       values ($1, $2, $3, $4)
+       on conflict (email) do nothing
+       returning id`,
+      [email, displayName, passwordHash, isServerAdmin],
+    );
+    if (!inserted.rows[0]) throw new Error(`There's already a user with the email ${email}.`);
+    return { id: inserted.rows[0].id, link: withLink ? await createSetupLink(client, inserted.rows[0].id, actor) : null };
+  });
+  await audit("user.created_via_cli", created.id, { email, isServerAdmin });
+  console.log(`Created ${email}${isServerAdmin ? " (server admin)" : ""}.`);
+  if (created.link) await printSetupLink({ email, displayName }, created.link);
+}
+
+async function printSetupLink(user: { email: string; displayName: string }, link: { url: string; expiresAt: string; localOnly: boolean }) {
+  const emailed = await emailSetupLink(user, link, actor.email);
+  console.log(`Setup link (works once, until ${link.expiresAt.slice(0, 16).replace("T", " ")} UTC)${emailed ? ", also emailed to them" : ""}:`);
+  console.log(`  ${link.url}`);
+  if (link.localOnly) console.log("Remote access is off, so the link only works on the same network as this server.");
+}
+
+async function setPasswordCommand(args: string[]) {
+  const email = normaliseEmail(required(args, "email"));
+  const passwordHash = await hashPassword(validateNewPassword(await readPassword()));
+  const done = await withCoreTransaction(async (client) => {
+    const updated = await client.query<{ id: string }>(
+      `update users
+          set password_hash = $2, google_only = false, password_changed_at = now(), failed_login_count = 0,
+              locked_until = null, is_active = true, updated_at = now()
+        where email = $1
+        returning id`,
+      [email, passwordHash],
+    );
+    const id = updated.rows[0]?.id;
+    if (!id) return null;
+    await client.query("delete from sessions where user_id = $1", [id]);
+    // As a server admin's password reset does: apps disconnect and passkeys end.
+    const aiKeysRevoked = await revokeUserAiKeys(client, id);
+    const passkeysEnded = await endPasskeys(client, id);
+    return { id, aiKeysRevoked, passkeysEnded };
+  });
+  if (!done) throw new Error(`No user with the email ${email}.`);
+  await audit("user.password_set_via_cli", done.id, { email, aiKeysRevoked: done.aiKeysRevoked, passkeysEnded: done.passkeysEnded });
+  const ended = [done.aiKeysRevoked ? "their AI and farm app keys stopped" : "", done.passkeysEnded ? `their ${done.passkeysEnded === 1 ? "passkey was" : "passkeys were"} removed` : ""].filter(Boolean);
+  console.log(`Password updated for ${email}; their other sessions were signed out${ended.length ? `, ${ended.join(" and ")}` : ""}.`);
+}
+
+async function resetTwoStepCommand(args: string[]) {
+  // For someone who has lost their phone and backup codes and can't use an
+  // emailed reset link (e.g. the only server admin, with no email set up).
+  const email = normaliseEmail(required(args, "email"));
+  const userId = await userIdFor(email);
+  const link = await withCoreTransaction(async (client) => {
+    await resetTwoStep(client, userId, { userId: null, email: "admin-cli" }, "command_line");
+    return twoStepRequired() ? createSetupLink(client, userId, actor) : null;
+  });
+  console.log(`Two-step sign-in reset for ${email}.`);
+  if (link) {
+    const user = (await coreQuery<{ display_name: string }>("select display_name from users where id = $1", [userId])).rows[0];
+    await printSetupLink({ email, displayName: user.display_name }, link);
+  }
+}
+
+async function setupLinkCommand(args: string[]) {
+  const email = normaliseEmail(required(args, "email"));
+  const link = await sendSetupLink(actor, await userIdFor(email));
+  console.log(`New setup link for ${email} (works once, until ${link.expiresAt.slice(0, 16).replace("T", " ")} UTC)${link.emailed ? ", also emailed to them" : ""}:`);
+  console.log(`  ${link.url}`);
+  if (link.localOnly) console.log("Remote access is off, so the link only works on the same network as this server.");
+}
+
+async function users(command: string | undefined, args: string[]) {
+  if (command === "list") {
+    const list = await listUsers();
+    show(args, list, () =>
+      table(
+        list.map((u) => ({
+          Email: u.email,
+          Name: u.displayName,
+          Login: u.isActive ? "on" : "off",
+          "Server admin": u.isServerAdmin ? "yes" : "",
+          "Two-step": u.twoStepEnabled ? "set up" : "not yet",
+          Organisations: String(u.organisationCount),
+          "Last sign-in": u.lastLoginAt ? new Date(u.lastLoginAt).toISOString().slice(0, 16).replace("T", " ") : "never",
+        })),
+      ),
+    );
+    return;
+  }
+  if (command === "create") return createUserCommand(args);
+  if (command === "set-password") return setPasswordCommand(args);
+  if (command === "reset-two-step") return resetTwoStepCommand(args);
+  if (command === "setup-link") return setupLinkCommand(args);
+  if (command === "rename") {
+    const user = await updateUser(actor, await userIdFor(required(args, "email")), { displayName: required(args, "name") });
+    console.log(`${user.email} is now called ${user.displayName}.`);
+    return;
+  }
+  if (command === "login") {
+    const isActive = onOff(args);
+    const user = await updateUser(actor, await userIdFor(required(args, "email")), { isActive });
+    console.log(isActive ? `${user.email} can sign in.` : `${user.email} can't sign in any more, and was signed out.`);
+    return;
+  }
+  if (command === "server-admin") {
+    const isServerAdmin = onOff(args);
+    const user = await updateUser(actor, await userIdFor(required(args, "email")), { isServerAdmin });
+    console.log(isServerAdmin ? `${user.email} is a server admin.` : `${user.email} is no longer a server admin.`);
+    return;
+  }
+  throw new UsageError(`Unknown users command${command ? ` "${command}"` : ""}.`);
+}
+
+async function remoteAccess(command: string | undefined, args: string[]) {
+  if (command === "show") {
+    const remote = await getRemoteAccess();
+    // The tunnel itself runs inside the Tohyee server, not this command, so
+    // its live state isn't known here.
+    show(args, { ...remote, tunnel: undefined }, () => {
+      const how =
+        remote.method === "tohyee"
+          ? "a Tohyee address"
+          : remote.method === "tailscale"
+            ? "Tailscale Funnel, set up in the Windows server app"
+            : "your own domain, Cloudflare Tunnel";
+      console.log(`Remote access: ${remote.enabled ? "on" : "off"} (${how})`);
+      console.log(`Public address: ${remote.publicUrl ?? "(not set)"}`);
+      console.log(`Tohyee address: ${remote.tohyeeAddress ?? "none"} (address service ${remote.addressService})`);
+      if (remote.method === "tailscale") {
+        console.log("Tailscale's free plan is for non-commercial use only; businesses need a paid Tailscale plan (https://tailscale.com/pricing).");
+      }
+      console.log(`Tunnel token: ${remote.hasToken ? `saved (tunnel ${remote.tunnelId ?? "unknown"})` : "not saved"}`);
+      console.log(`Give Cloudflare this service address: ${remote.localService}`);
+      if (!remote.twoStepRequired) console.log("Two-step sign-in isn't in force (TOHYEE_SECRET_KEY isn't set), so the tunnel won't start.");
+      console.log("Whether the tunnel is connected right now shows in the server's log.");
+    });
+    return;
+  }
+  if (command === "address") {
+    if (args[0] === "release") {
+      await releaseTohyeeAddress(COMMAND_LINE_ADMIN, { apply: false });
+      console.log("The Tohyee address was given back. Restart Tohyee to stop a running tunnel.");
+      return;
+    }
+    const remote = onOff(args)
+      ? await getTohyeeAddress(COMMAND_LINE_ADMIN, { apply: false })
+      : await updateRemoteAccess(COMMAND_LINE_ADMIN, { method: "tohyee", enabled: false }, { apply: false });
+    console.log(
+      remote.enabled
+        ? `Your Tohyee address is ${remote.publicUrl}. Restart Tohyee for the tunnel to start. Run by the Tohyee project; your books still stay on this computer and the address service never sees them.`
+        : `The Tohyee address is off (kept: ${remote.tohyeeAddress ?? "none"}). Restart Tohyee for the tunnel to stop.`,
+    );
+    return;
+  }
+  if (command === "set") {
+    const enabled = onOff(args);
+    const tunnelToken = flag(args, "token") ? await secret("TOHYEE_TUNNEL_TOKEN", "Tunnel token (the eyJ… code from Cloudflare): ") : undefined;
+    const url = option(args, "url");
+    const remote = await updateRemoteAccess(COMMAND_LINE_ADMIN, {
+      enabled,
+      tunnelToken,
+      ...(url !== null ? { publicUrl: url } : {}),
+    }, { apply: false });
+    console.log(`Remote access saved: ${remote.enabled ? "on" : "off"}${remote.publicUrl ? `, ${remote.publicUrl}` : ""}. Restart Tohyee for the tunnel to ${remote.enabled ? "start" : "stop"}.`);
+    return;
+  }
+  if (command === "clear") {
+    await updateRemoteAccess(COMMAND_LINE_ADMIN, { clear: true }, { apply: false });
+    console.log("Remote access removed (token and address). Restart Tohyee to stop a running tunnel.");
+    return;
+  }
+  throw new UsageError(`Unknown remote-access command${command ? ` "${command}"` : ""}.`);
+}
+
+async function email(command: string | undefined, args: string[]) {
+  if (command === "show") {
+    const settings = await getEmailSettings();
+    show(args, settings, () => {
+      if (!settings.configured) {
+        console.log("Email isn't set up.");
+        return;
+      }
+      console.log(`SMTP server: ${settings.host}:${settings.port}${settings.secure ? " (SSL)" : " (STARTTLS)"}`);
+      console.log(`Username: ${settings.username}`);
+      console.log(`From: "${settings.fromName}" <${settings.fromAddress}>`);
+      console.log(`Password: ${settings.hasPassword ? "saved" : "not saved"}`);
+    });
+    return;
+  }
+  if (command === "set") {
+    const password = await secret("TOHYEE_EMAIL_PASSWORD", "Email password (for Gmail, an app password; blank keeps the saved one): ");
+    const settings = await updateEmailSettings(COMMAND_LINE_ADMIN, {
+      host: required(args, "host"),
+      port: required(args, "port"),
+      username: required(args, "username"),
+      password,
+      fromAddress: option(args, "from") ?? undefined,
+      fromName: option(args, "from-name") ?? undefined,
+    });
+    console.log(`Email saved: sending from ${settings.fromAddress} through ${settings.host}. Try it with "email test --to you@example.com".`);
+    return;
+  }
+  if (command === "test") {
+    const to = normaliseEmail(required(args, "to"));
+    await sendEmail({
+      to,
+      subject: "Tohyee: test email",
+      text: "This is a test email from your Tohyee server. Email is working: security alerts and two-step sign-in reset links will be sent from this address.",
+    });
+    console.log(`Sent a test email to ${to}.`);
+    return;
+  }
+  if (command === "clear") {
+    await updateEmailSettings(COMMAND_LINE_ADMIN, { clear: true });
+    console.log("Email settings removed.");
+    return;
+  }
+  if (command === "local-relay") {
+    if (!flag(args, "on") && !flag(args, "off")) {
+      console.log(`Allow local mail relay: ${(await getLocalMailRelay()).allowed ? "on" : "off"}`);
+      return;
+    }
+    const relay = await updateLocalMailRelay(COMMAND_LINE_ADMIN, { allowed: onOff(args) });
+    console.log(
+      relay.allowed
+        ? "Local mail relay allowed: organisations can send through a mail server on this computer or its local network."
+        : "Local mail relay not allowed: organisations' mail servers must be on the internet.",
+    );
+    return;
+  }
+  throw new UsageError(`Unknown email command${command ? ` "${command}"` : ""}.`);
+}
+
+/** With --other-key: the recovery code of the server that made the backup (TOHYEE_RECOVERY_CODE, or asked). */
+async function otherKey(args: string[]): Promise<string | undefined> {
+  if (!flag(args, "other-key")) return undefined;
+  return secret("TOHYEE_RECOVERY_CODE", "The recovery code of the server that made this backup: ");
+}
+
+/** --other-key (a recovery code) or --kit-file PATH with its passphrase (TOHYEE_KIT_PASSPHRASE or asked). */
+async function cliMaterial(args: string[]) {
+  const kitFile = option(args, "kit-file");
+  if (kitFile) {
+    return recoveryMaterial({ kitFile: readFileSync(kitFile, "utf8"), passphrase: await secret("TOHYEE_KIT_PASSPHRASE", "The recovery file's passphrase: ") });
+  }
+  return recoveryMaterial({ key: await otherKey(args) });
+}
+
+function megabytes(bytes: number | null): string {
+  return bytes === null ? "" : `${(bytes / 1024 / 1024).toFixed(2)} MB`;
+}
+
+function when(iso: string | null): string {
+  return iso ? new Date(iso).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "";
+}
+
+async function backups(command: string | undefined, args: string[]) {
+  if (command === "status") {
+    const settings = await getBackupSettings();
+    const status = await backupStatus();
+    const { overview } = await backupOverview();
+    const kit = await recoveryKitStatus();
+    show(args, { settings, recoveryKit: kit, status, overview }, () => {
+      console.log(`Nightly backups: ${settings.enabled ? `on, at ${settings.time} (${settings.timeZone})` : "off"}`);
+      console.log(`Folder: ${settings.folder}${settings.folder === settings.defaultFolder ? " (the default)" : ""}, ${overview.destination.description}`);
+      console.log(`Off-site: ${overview.offSite.note}`);
+      console.log(
+        `Files checked again: ${overview.integrity.failed > 0 ? `${overview.integrity.failed} FAILED` : overview.integrity.allCheckedAt ? `all, by ${when(overview.integrity.allCheckedAt)}` : "not all yet (backups verify)"}`,
+      );
+      console.log(`Space: ${overview.storage.fileCount} files, ${megabytes(overview.storage.usedBytes)}${overview.storage.freeBytes !== null ? `; ${megabytes(overview.storage.freeBytes)} free` : ""}`);
+      if (!settings.keySet) console.log("TOHYEE_SECRET_KEY isn't set, so backups can't be made (they're encrypted with it).");
+      else if (kit.version && kit.needsSaving) console.log("Nobody has checked a saved recovery kit yet. Without one, backups can't be opened if this server is lost: run backups kit show.");
+      console.log("");
+      table(
+        status.map((s) => ({
+          Database: s.organisationId ?? "(server: users and settings)",
+          "Last good backup": s.lastGood ? when(s.lastGood.finishedAt) : "never",
+          Size: megabytes(s.lastGood?.sizeBytes ?? null),
+          "Latest attempt": s.latest ? `${s.latest.status}${s.latest.status === "failed" ? `: ${s.latest.error}` : ""}` : "",
+          "Checked again": (() => {
+            const check = overview.targets.find((t) => t.organisationId === s.organisationId)?.lastCheck;
+            return check ? `${check.ok ? "ok" : `FAILED: ${check.error}`} ${when(check.at)}` : "";
+          })(),
+        })),
+      );
+      if (overview.attention.length > 0) {
+        console.log("");
+        console.log("Needs attention:");
+        for (const item of overview.attention) console.log(`- ${item.text}`);
+      }
+      if (overview.notProven.length > 0) {
+        console.log("");
+        console.log("Not proven yet:");
+        for (const item of overview.notProven) console.log(`- ${item}`);
+      }
+    });
+    return;
+  }
+  if (command === "verify") {
+    const checks = await checkStoredBackups({ requestedByEmail: "cli", organisationId: option(args, "id") ?? undefined });
+    if (checks.length === 0) console.log("There are no backups to check yet.");
+    for (const check of checks) {
+      const name = check.organisationId ?? "server";
+      console.log(check.status === "ok" ? `${name}: OK, ${check.fileName} is whole and unchanged` : `${name}: FAILED: ${check.error}`);
+    }
+    if (checks.some((check) => check.status !== "ok")) process.exitCode = 1;
+    return;
+  }
+  if (command === "set") {
+    const input: { enabled?: boolean; folder?: string; time?: string } = {};
+    if (flag(args, "on") || flag(args, "off")) input.enabled = onOff(args);
+    const folderIndex = args.indexOf("--folder");
+    if (folderIndex !== -1) {
+      const value = args[folderIndex + 1];
+      if (value === undefined) throw new UsageError("--folder needs a path (or \"\" for the default).");
+      input.folder = value;
+    }
+    const time = option(args, "time");
+    if (time !== null) input.time = time;
+    if (Object.keys(input).length === 0) throw new UsageError("Say what to change: --on/--off, --folder or --time.");
+    if (input.folder) giveServiceAccess(input.folder, "write");
+    const settings = await updateBackupSettings(COMMAND_LINE_ADMIN, input);
+    console.log(`Backups saved: ${settings.enabled ? `nightly at ${settings.time}` : "off"}, into ${settings.folder}.`);
+    return;
+  }
+  if (command === "run") {
+    const organisationId = option(args, "id") ?? undefined;
+    const runs = await backUpNow({ trigger: "manual", requestedByEmail: "cli", organisationId });
+    for (const run of runs) {
+      const name = run.organisationId ?? "server";
+      console.log(run.status === "ok" ? `${name}: backed up to ${run.filePath} (${megabytes(run.sizeBytes)})` : `${name}: FAILED: ${run.error}`);
+    }
+    if (runs.some((run) => run.status !== "ok")) process.exitCode = 1;
+    return;
+  }
+  if (command === "list") {
+    const files = await listBackupFiles(option(args, "id") ?? undefined);
+    show(args, files, () =>
+      table(
+        files.map((f) => ({
+          File: f.path,
+          Organisation: f.header ? (f.header.organisationId ?? "(server)") : "",
+          Made: f.header ? when(f.header.createdAt) : "",
+          Size: megabytes(f.sizeBytes),
+          Problem: f.problem ?? "",
+        })),
+      ),
+    );
+    return;
+  }
+  if (command === "check") {
+    const file = required(args, "file");
+    const header = await checkBackup(file);
+    console.log(`OK: ${header.organisationId ?? "the server's own database"}, made ${when(header.createdAt)} by Tohyee ${header.tohyeeVersion}. It opens with this server's key and PostgreSQL can read it.`);
+    return;
+  }
+  if (command === "restore") {
+    const file = required(args, "file");
+    const { organisation, report } = await restoreBackup(COMMAND_LINE_ADMIN.user, {
+      file,
+      material: await cliMaterial(args),
+      id: option(args, "id") ?? undefined,
+      displayName: option(args, "name") ?? undefined,
+      ownerEmail: option(args, "owner") ?? undefined,
+    });
+    console.log(`Restored as ${organisation.displayName} (${organisation.id}). Check it in the books; the original hasn't been touched.`);
+    console.log(`Stored secrets: ${report.secrets.reEncrypted} re-encrypted for this server, ${report.secrets.current} already readable, ${report.secrets.unreadable} unreadable${report.reconnect.length ? ` (connect again: ${report.reconnect.join(", ")})` : ""}.`);
+    console.log(`Private mail copies: ${report.privateMail.copies}, still their owners'${report.privateMail.ownersNotHere ? `; ${report.privateMail.ownersNotHere} belong to people not on this server yet (backups recover-people)` : ""}.`);
+    console.log(`Automatic jobs are paused (${report.queuedEmails} queued emails). Once the original isn't running them: backups resume --id ${organisation.id}`);
+    return;
+  }
+  if (command === "resume") {
+    await resumeOrganisationJobs(COMMAND_LINE_ADMIN, required(args, "id"));
+    console.log("Automatic jobs are on.");
+    return;
+  }
+  if (command === "test-restore") {
+    const checks = await testRestore({ requestedByEmail: "cli", organisationId: option(args, "id") ?? undefined });
+    if (checks.length === 0) console.log("There are no backups to test yet.");
+    for (const check of checks) {
+      console.log(check.status === "ok" ? `${check.organisationId ?? "server"}: OK, ${check.fileName} restored into a scratch database, checked and removed` : `${check.organisationId ?? "server"}: FAILED: ${check.error}`);
+    }
+    if (checks.some((check) => check.status !== "ok")) process.exitCode = 1;
+    return;
+  }
+  if (command === "recover-people") {
+    const plan = await recoverPeople(COMMAND_LINE_ADMIN, {
+      file: required(args, "file"),
+      material: await cliMaterial(args),
+      apply: flag(args, "apply"),
+      replace: (option(args, "replace") ?? "").split(",").map((e) => e.trim()).filter(Boolean),
+    });
+    console.log(`${plan.applied ? "Added" : "Would add"}: ${plan.add.map((p) => p.email).join(", ") || "nobody"}`);
+    if (plan.alreadyHere.length) console.log(`Already here: ${plan.alreadyHere.join(", ")}`);
+    for (const conflict of plan.conflicts) console.log(`Here under another account: ${conflict.email}${conflict.replacing ? " (replaced)" : " (left alone; --replace it to use the backup's)"}`);
+    console.log(`Memberships ${plan.applied ? "added" : "to add"}: ${plan.memberships.length}`);
+    for (const c of plan.roleChanges) console.log(`Role from the backup for ${c.email} in ${c.organisationId}: ${c.roleHere} -> ${c.role}`);
+    for (const g of plan.googleNotRestored) {
+      console.log(`Sign in with Google not restored for ${g.email}: ${g.googleEmail} is linked to ${g.linkedTo} here${g.needsSetupLink ? " (they had only Google: send them a setup link)" : ""}`);
+    }
+    if (plan.googleMoved.length) console.log(`Google sign-in linked here kept (the backup has none): ${plan.googleMoved.join(", ")}`);
+    if (plan.organisationsNotHere.length) console.log(`Not restored here yet: ${plan.organisationsNotHere.map((o) => o.id).join(", ")} (restore each keeping its ID, then run this again)`);
+    if (plan.settingsNotCopied.length) console.log(`Server settings not copied (set them up again): ${plan.settingsNotCopied.join(", ")}`);
+    if (!plan.applied) console.log("Nothing was changed. Run again with --apply to do it.");
+    return;
+  }
+  if (command === "decrypt") {
+    const out = required(args, "out");
+    const file = required(args, "file");
+    const header = await decryptBackupTo(file, out, await otherKey(args));
+    console.log(`Wrote ${out}: a pg_dump (custom format) of ${header.databaseName}. Restore it with pg_restore. It isn't encrypted, so delete it when you're done.`);
+    return;
+  }
+  if (command === "kit") {
+    const [what] = args;
+    if (what === "show") {
+      const kit = await exportRecoveryKit(COMMAND_LINE_ADMIN, { form: "code" });
+      if (kit.form !== "code") throw new Error("unexpected");
+      console.log(`The recovery kit: recovery key version ${kit.version} (fingerprint ${kit.id}). The backups can be opened on another computer with it.`);
+      console.log("Save it somewhere safe that isn't the backup folder (a password manager, or printed and kept safe), then run: backups kit check");
+      console.log("");
+      console.log(kit.code);
+      return;
+    }
+    if (what === "file") {
+      const out = required(args, "out");
+      const passphrase = await secret("TOHYEE_KIT_PASSPHRASE", "A passphrase for the file (14+ characters; keep it somewhere other than the file): ");
+      if (process.env.TOHYEE_KIT_PASSPHRASE === undefined && (await askSecret("The passphrase again: ")) !== passphrase) throw new UsageError("The passphrases don't match.");
+      const kit = await exportRecoveryKit(COMMAND_LINE_ADMIN, { form: "file", passphrase, randomName: flag(args, "random-name") });
+      if (kit.form !== "file") throw new Error("unexpected");
+      const target = existsSync(out) && statSync(out).isDirectory() ? path.join(out, kit.fileName) : out;
+      writeFileSync(target, kit.content, { mode: 0o600, flag: "wx" });
+      console.log(`Wrote ${target}: recovery key version ${kit.version} (fingerprint ${kit.id}), encrypted with your passphrase.`);
+      console.log("Keep the passphrase somewhere other than the file. If every copy of the passphrase is lost, the file can't be opened. Then run: backups kit check --file " + target);
+      return;
+    }
+    if (what === "check") {
+      const file = option(args, "file");
+      const status = file
+        ? await checkRecoveryKit(COMMAND_LINE_ADMIN, { file: readFileSync(file, "utf8"), passphrase: await secret("TOHYEE_KIT_PASSPHRASE", "The recovery file's passphrase: ") })
+        : await checkRecoveryKit(COMMAND_LINE_ADMIN, { code: await secret("TOHYEE_RECOVERY_CODE", "Paste or type the recovery code: ") });
+      console.log(`That's the right kit for recovery key version ${status.version} (fingerprint ${status.id}). This proves your copy was right just now, not that it will still be there.`);
+      return;
+    }
+    if (what === "new") {
+      const status = await rotateRecoveryKey(COMMAND_LINE_ADMIN, undefined);
+      console.log(`Made recovery key version ${status.version} (fingerprint ${status.id}). Backups from now on use it: save its kit (backups kit show), and keep the earlier kits until the backups made with them age out (up to 12 months).`);
+      return;
+    }
+    const status = await recoveryKitStatus();
+    if (!status.keySet) console.log("TOHYEE_SECRET_KEY isn't set, so there's no recovery key yet.");
+    else if (!status.version) console.log("There's no recovery key yet: the first backup (or backups kit show) makes one.");
+    else console.log(status.checkedAt ? `Recovery key version ${status.version}: a saved kit was checked ${when(status.checkedAt)} by ${status.checkedByEmail}.` : `Recovery key version ${status.version}: nobody has checked a saved kit yet. Run backups kit show, save it, then backups kit check.`);
+    return;
+  }
+  throw new UsageError(`Unknown backups command${command ? ` "${command}"` : ""}.`);
+}
+
+async function updates(command: string | undefined, args: string[]) {
+  if (command !== "check") throw new UsageError(`Unknown updates command${command ? ` "${command}"` : ""}.`);
+  const check = await getLatestReleaseCheck();
+  show(args, check, () => {
+    console.log(`This server runs v${check.currentVersion}. The latest release is v${check.latestVersion}${check.updateAvailable ? " (update available)" : " (up to date)"}.`);
+    console.log(`Release notes: ${check.release.htmlUrl}`);
+    if (check.release.preferredAsset) console.log(`Download: ${check.release.preferredAsset.downloadUrl}`);
+  });
+}
+
+/**: on Windows the service runs as its own limited account; a chosen folder is given to it. */
+function giveServiceAccess(folder: string, access: "read" | "write") {
+  const problem = grantServiceAccess(folder, access);
+  if (problem) console.warn(`Couldn't give Tohyee's service (${WINDOWS_SERVICE_ACCOUNT}) access to ${folder}: ${problem}`);
+}
+
+async function analytics(command: string | undefined, args: string[]) {
+  const { listSourceFolders, setSourceFolder } = await import("@/lib/analytics/folders");
+  if (command === "folders") {
+    const rows = await listSourceFolders();
+    if (flag(args, "json")) return console.log(JSON.stringify(rows, null, 2));
+    for (const row of rows) {
+      console.log(`${row.organisationId}: ${row.folder ? `${row.folder}${row.readable ? "" : " (can't open it)"}` : "no folder"}`);
+    }
+    return;
+  }
+  if (command === "folder") {
+    const id = option(args, "id");
+    const folder = option(args, "folder");
+    if (!id || folder === null) throw new UsageError("Use: analytics folder --id ORGANISATION --folder PATH");
+    if (folder) giveServiceAccess(folder, "read");
+    const saved = await setSourceFolder(COMMAND_LINE_ADMIN, id, folder);
+    console.log(saved ? `${id} reads analytics files from ${saved}.` : `${id} has no analytics folder now.`);
+    return;
+  }
+  throw new UsageError(`Unknown analytics command${command ? ` "${command}"` : ""}.`);
+}
+
+async function bank(command: string | undefined, args: string[]) {
+  const { listBankFileFolders, setBankFilesFolder } = await import("@/lib/bank/file-folders");
+  if (command === "folders") {
+    const rows = await listBankFileFolders();
+    if (flag(args, "json")) return console.log(JSON.stringify(rows, null, 2));
+    for (const row of rows) {
+      console.log(`${row.organisationId}: ${row.folder ? `${row.folder}${row.readable ? "" : " (can't open it)"}` : "no folder"}`);
+    }
+    return;
+  }
+  if (command === "folder") {
+    const id = option(args, "id");
+    const folder = option(args, "folder");
+    if (!id || folder === null) throw new UsageError("Use: bank folder --id ORGANISATION --folder PATH");
+    if (folder) giveServiceAccess(folder, "read");
+    const saved = await setBankFilesFolder(COMMAND_LINE_ADMIN, id, folder);
+    console.log(saved ? `${id} reads bank statement files from ${saved}.` : `${id} has no bank files folder now.`);
+    return;
+  }
+  throw new UsageError(`Unknown bank command${command ? ` "${command}"` : ""}.`);
+}
+
+async function demo(command: string | undefined, args: string[]) {
+  const { addDemoFarm, deleteDemoFarm, getDemoFarm, listDemoFarms } = await import("@/lib/demo/service");
+  if (command === "list") {
+    const rows = await listDemoFarms();
+    if (flag(args, "json")) return console.log(JSON.stringify(rows, null, 2));
+    if (rows.length === 0) return console.log("No demo farms.");
+    for (const row of rows) console.log(`${row.email}: ${row.organisationId} ${row.status}${row.error ? ` (${row.error})` : ""}`);
+    return;
+  }
+  if (command !== "add" && command !== "reset" && command !== "delete") throw new UsageError(`Unknown demo command${command ? ` "${command}"` : ""}.`);
+  const email = normaliseEmail(required(args, "owner"));
+  const found = await coreQuery<{ id: string }>("select id from users where email = $1 and is_active", [email]);
+  if (!found.rows[0]) throw new UsageError(`There's no active user with the email ${email}.`);
+  const person = { id: found.rows[0].id, email };
+  if (command !== "add" && !flag(args, "yes")) {
+    throw new UsageError(`${command === "reset" ? "Reset deletes everything in their demo farm and makes it again" : "Delete removes their demo farm for good"}. Add --yes to go ahead.`);
+  }
+  if (command === "delete") {
+    await deleteDemoFarm(person);
+    console.log(`Deleted ${email}'s demo farm.`);
+    return;
+  }
+  const started = performance.now();
+  let last = "";
+  const timer = setInterval(() => {
+    void getDemoFarm(person.id).then((demo) => {
+      const line = demo ? `${demo.percent}% ${demo.step ?? ""}` : "";
+      if (line && line !== last) console.log(line);
+      last = line;
+    });
+  }, 1000);
+  try {
+    await addDemoFarm(person, { reset: command === "reset", wait: true });
+  } finally {
+    clearInterval(timer);
+  }
+  const made = await getDemoFarm(person.id);
+  if (made?.status !== "ready") throw new Error(made?.error ?? "Making the demo farm failed.");
+  console.log(`${made.displayName} (${made.organisationId}) is ready for ${email}, made in ${Math.round((performance.now() - started) / 1000)} s.`);
+}
+
+async function main(argv: string[]): Promise<void> {
+  const [area, command, ...rest] = argv;
+  // The older one-word commands.
+  if (area === "create-user") return createUserCommand([command, ...rest].filter((a) => a !== undefined));
+  if (area === "set-password") return setPasswordCommand([command, ...rest].filter((a) => a !== undefined));
+  if (area === "reset-two-step") return resetTwoStepCommand([command, ...rest].filter((a) => a !== undefined));
+
+  if (area === "organisations") return organisations(command, rest);
+  if (area === "users") return users(command, rest);
+  if (area === "remote-access") return remoteAccess(command, rest);
+  if (area === "email") return email(command, rest);
+  if (area === "updates") return updates(command, rest);
+  if (area === "backups") return backups(command, rest);
+  if (area === "analytics") return analytics(command, rest);
+  if (area === "bank") return bank(command, rest);
+  if (area === "demo") return demo(command, rest);
+  if (area === undefined || area === "help" || area === "--help" || area === "-h") {
+    console.log(HELP);
+    if (area === undefined) process.exitCode = 1;
+    return;
+  }
+  throw new UsageError(`Unknown area "${area}".`);
+}
+
+main(process.argv.slice(2))
+  .catch((error) => {
+    if (error instanceof UsageError) {
+      console.error(`${error.message}\nRun with "help" to see the commands.`);
+    } else {
+      console.error(error instanceof Error ? error.message : error);
+    }
+    process.exitCode = 1;
+  })
+  .finally(() => closeAllPools());

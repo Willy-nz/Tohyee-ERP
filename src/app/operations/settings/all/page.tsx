@@ -1,0 +1,43 @@
+"use client";
+
+import Link from "next/link";
+import { RequireOrganisation } from "@/components/books";
+import { useModules } from "@/components/modules";
+import { visibleSettings } from "@/components/navigation";
+import { Card, Notice, Page, PageHeader, ui } from "@/components/ui";
+import { useWorkspace } from "@/components/workspace";
+import styles from "./all-settings.module.css";
+
+/** Every setting someone may open, grouped as cards. */
+function AllSettings({ organisationId }: { organisationId: string }) {
+  const { can } = useWorkspace();
+  const modules = useModules(organisationId);
+  if (!modules) return <p className={ui.muted}>Loading…</p>;
+  const groups = visibleSettings({ can, modules });
+  return (
+    <div className={styles.cards}>
+      {groups.map((group) => (
+        <Card key={group.heading} title={group.heading}>
+          <ul className={styles.links}>
+            {group.links.map((link) => (
+              <li key={`${link.href}|${link.label}`}>
+                <Link href={link.href}>{link.label}</Link>
+              </li>
+            ))}
+          </ul>
+        </Card>
+      ))}
+    </div>
+  );
+}
+
+export default function AllSettingsPage() {
+  const { can } = useWorkspace();
+  return (
+    <Page>
+      <PageHeader title="All settings" />
+      {can("admin") ? null : <Notice>Admins see more settings.</Notice>}
+      <RequireOrganisation>{(organisationId) => <AllSettings key={organisationId} organisationId={organisationId} />}</RequireOrganisation>
+    </Page>
+  );
+}

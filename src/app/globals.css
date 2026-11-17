@@ -1,0 +1,586 @@
+/*
+ * Tohyee's design tokens (2026 redesign).
+ *
+ * Light is the default. Dark applies when the computer asks for it, unless
+ * someone picked Light in the user menu, or always when they picked Dark.
+ * The choice is `data-theme="light|dark"` on <html>, set before paint by the
+ * inline script in src/app/layout.tsx (no attribute = follow the computer).
+ *
+ * The accent is a deep blue (8 Oct 2026: blue rather than green), and
+ * the neutrals are cool slate greys to match it.
+ */
+:root {
+  color-scheme: light;
+
+  /* Surfaces */
+  --bg: #f5f7fa;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sunken: #eef1f5;
+  --surface-hover: #eef1f5;
+  --overlay: rgba(15, 23, 35, 0.38);
+
+  /* Lines */
+  --border: #dde2e9;
+  --border-strong: #7a8594;
+
+  /* Text */
+  --text: #1b2533;
+  --text-muted: #546072;
+  --link: #1f5fae;
+
+  /* Accent */
+  --accent: #1f5fae;
+  --accent-hover: #184d8f;
+  --accent-text: #ffffff;
+  --accent-soft: #e6eef9;
+  --accent-soft-text: #1b2533;
+
+  /* Status */
+  --success-bg: #e7f4eb;
+  --success-text: #146c2e;
+  --success-border: #b7dfc3;
+  --warning-bg: #fff3d6;
+  --warning-text: #825500;
+  --warning-border: #efd28f;
+  --danger-bg: #fbedeb;
+  --danger-text: #b33832;
+  --danger-border: #f3c1bc;
+  --info-bg: #e9f0fb;
+  --info-text: #1d4e89;
+  /* Charts: from src/lib/charts/theme.ts; a test checks they match. */
+  --chart-surface: #ffffff;
+  --chart-text: #1b2533;
+  --chart-text-secondary: #3c4757;
+  --chart-text-muted: #546072;
+  --chart-grid: #e9edf2;
+  --chart-axis: #c5cdd8;
+  --chart-hover: rgba(31, 95, 174, 0.06);
+  --chart-muted: #8b94a1;
+  --chart-1: #1f5fae;
+  --chart-2: #d66919;
+  --chart-3: #009e98;
+  --chart-4: #e2a520;
+  --chart-5: #d4679f;
+  --chart-6: #057836;
+  --chart-7: #694daf;
+  --chart-8: #ba3e3c;
+  --chart-blues-1: #004085;
+  --chart-blues-2: #1f5fae;
+  --chart-blues-3: #5388cd;
+  --chart-blues-4: #7ab0f9;
+  --chart-seq-1: #dbe9fc;
+  --chart-seq-2: #b9d0ef;
+  --chart-seq-3: #93b3df;
+  --chart-seq-4: #6e97cf;
+  --chart-seq-5: #497bbf;
+  --chart-seq-6: #205fad;
+  --chart-seq-7: #01458e;
+  --chart-diverging-below: #d66919;
+  --chart-diverging-middle: #e4e8ed;
+  --chart-diverging-above: #1f5fae;
+  --chart-good: #0ca30c;
+  --chart-warning: #fab219;
+  --chart-negative: #d03b3b;
+  --chart-negative-wash: rgba(208, 59, 59, 0.07);
+  --info-border: #c6d8f1;
+  --neutral-bg: #eef1f5;
+  --neutral-text: #3c4757;
+
+  /* The logo's square (same in both themes) */
+  --brand: #1f5fae;
+
+  /* Topbar */
+  --topbar-bg: #ffffff;
+
+  /* Shape */
+  --radius-sm: 6px;
+  --radius: 8px;
+  --radius-lg: 10px;
+  --radius-pill: 999px;
+
+  /* Elevation */
+  --shadow-sm: 0 1px 2px rgba(15, 23, 35, 0.05);
+  --shadow: none;
+  --shadow-lg: 0 2px 6px rgba(15, 23, 35, 0.06), 0 16px 40px rgba(15, 23, 35, 0.14);
+  --focus-ring: 0 0 0 2px var(--surface), 0 0 0 4px var(--accent);
+
+  /* Spacing (4px steps) */
+  --space-1: 4px;
+  --space-2: 8px;
+  --space-3: 12px;
+  --space-4: 16px;
+  --space-5: 20px;
+  --space-6: 24px;
+  --space-8: 32px;
+
+  /* Type scale */
+  --text-xs: 0.75rem;
+  --text-sm: 0.875rem;
+  --text-base: 0.875rem;
+  --text-md: 0.9375rem;
+  --text-lg: 1.125rem;
+  --text-xl: 1.375rem;
+  --text-2xl: 2rem;
+
+  --font:
+    var(--font-inter, Inter), var(--font-inter-ext, Inter), ui-sans-serif, system-ui, -apple-system, BlinkMacSystemFont, "Segoe UI", Roboto,
+    "Helvetica Neue", Arial, sans-serif;
+  --mono: ui-monospace, SFMono-Regular, Menlo, Consolas, monospace;
+
+  /* Older names, still used by many screens' inline styles. */
+  --background: var(--bg);
+  --foreground: var(--text);
+  --muted: var(--text-muted);
+  --line: var(--border);
+  --line-strong: var(--border-strong);
+  --surface-muted: var(--surface-sunken);
+  --accent-strong: var(--link);
+  --danger: var(--danger-text);
+  --danger-soft: var(--danger-bg);
+  --success: var(--success-text);
+  --success-soft: var(--success-bg);
+  --warning: var(--warning-text);
+  --warning-soft: var(--warning-bg);
+  --radius-small: var(--radius-sm);
+  /* Tractor mode's map: worked, overlap, not covered, the track and gaps. */
+  --tractor-worked: #1f9d55;
+  --tractor-overlap: #e8590c;
+  --tractor-missed: #c2255c;
+  --tractor-track: #1c4f8f;
+  --tractor-gap: #c92a2a;
+  /* The signature box is paper-white in both themes, so a drawn signature looks as it will print. */
+  --signature-paper: #ffffff;
+  --signature-ink: #14213d;
+  --signature-line: #9aa3b2;
+  --tractor-map-bg: #e9efe4;
+  --tractor-paddock: #4f7a3a;
+}
+
+/* Dark: the computer's setting, unless Light was picked… */
+@media (prefers-color-scheme: dark) {
+  :root:not([data-theme="light"]) {
+    color-scheme: dark;
+    --bg: #0b1018;
+    --surface: #121925;
+    --surface-raised: #18202e;
+    --surface-sunken: #0f1520;
+    --surface-hover: #1d2635;
+    --overlay: rgba(0, 0, 0, 0.6);
+    --border: #263041;
+    --border-strong: #6b7a90;
+    --text: #e4e9f1;
+    --text-muted: #9ba6b6;
+    --link: #7fb3f5;
+    --accent: #5b9cf0;
+    --accent-hover: #82b4f5;
+    --accent-text: #06172e;
+    --accent-soft: #14243d;
+    --accent-soft-text: #a9cbf7;
+    --success-bg: #0f281b;
+    --success-text: #74d89a;
+    --success-border: #1f4c33;
+    --warning-bg: #2b2110;
+    --warning-text: #f0c26a;
+    --warning-border: #574317;
+    --danger-bg: #301615;
+    --danger-text: #ff9d93;
+    --danger-border: #5c2723;
+    --info-bg: #13213a;
+    --info-text: #91bbf5;
+    /* Charts: from src/lib/charts/theme.ts; a test checks they match. */
+    --chart-surface: #121925;
+    --chart-text: #e4e9f1;
+    --chart-text-secondary: #c5cdd8;
+    --chart-text-muted: #9ba6b6;
+    --chart-grid: #1f2836;
+    --chart-axis: #3a4658;
+    --chart-hover: rgba(91, 156, 240, 0.08);
+    --chart-muted: #6b7686;
+    --chart-1: #518fe9;
+    --chart-2: #cf630d;
+    --chart-3: #05908a;
+    --chart-4: #bd8703;
+    --chart-5: #cd6199;
+    --chart-6: #17843f;
+    --chart-7: #7f65ca;
+    --chart-8: #c04442;
+    --chart-blues-1: #b4d4fe;
+    --chart-blues-2: #70adfe;
+    --chart-blues-3: #4c87d5;
+    --chart-blues-4: #215da7;
+    --chart-seq-1: #01458e;
+    --chart-seq-2: #205fad;
+    --chart-seq-3: #497bbf;
+    --chart-seq-4: #6e97cf;
+    --chart-seq-5: #93b3df;
+    --chart-seq-6: #b9d0ef;
+    --chart-seq-7: #dbe9fc;
+    --chart-diverging-below: #cf630d;
+    --chart-diverging-middle: #2e333b;
+    --chart-diverging-above: #518fe9;
+    --chart-good: #0ca30c;
+    --chart-warning: #fab219;
+    --chart-negative: #e66767;
+    --chart-negative-wash: rgba(230, 103, 103, 0.1);
+    --info-border: #284470;
+    --neutral-bg: #1f2733;
+    --neutral-text: #c5cdd8;
+    --topbar-bg: rgba(19, 26, 24, 0.86);
+    --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+    --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
+    --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 18px 48px rgba(0, 0, 0, 0.5);
+    --tractor-worked: #40c070;
+    --tractor-overlap: #ff922b;
+    --tractor-missed: #f06595;
+    --tractor-track: #8fb8ff;
+    --tractor-gap: #ff6b6b;
+    /* The signature box is paper-white in both themes, so a drawn signature looks as it will print. */
+    --signature-paper: #ffffff;
+    --signature-ink: #14213d;
+    --signature-line: #9aa3b2;
+    --tractor-map-bg: #1d2620;
+    --tractor-paddock: #8cc06c;
+  }
+}
+
+/* …or always, when Dark was picked. */
+:root[data-theme="dark"] {
+  color-scheme: dark;
+  --bg: #0b1018;
+  --surface: #121925;
+  --surface-raised: #18202e;
+  --surface-sunken: #0f1520;
+  --surface-hover: #1d2635;
+  --overlay: rgba(0, 0, 0, 0.6);
+  --border: #263041;
+  --border-strong: #6b7a90;
+  --text: #e4e9f1;
+  --text-muted: #9ba6b6;
+  --link: #7fb3f5;
+  --accent: #5b9cf0;
+  --accent-hover: #82b4f5;
+  --accent-text: #06172e;
+  --accent-soft: #14243d;
+  --accent-soft-text: #a9cbf7;
+  --success-bg: #0f281b;
+  --success-text: #74d89a;
+  --success-border: #1f4c33;
+  --warning-bg: #2b2110;
+  --warning-text: #f0c26a;
+  --warning-border: #574317;
+  --danger-bg: #301615;
+  --danger-text: #ff9d93;
+  --danger-border: #5c2723;
+  --info-bg: #13213a;
+  --info-text: #91bbf5;
+  /* Charts: from src/lib/charts/theme.ts; a test checks they match. */
+  --chart-surface: #121925;
+  --chart-text: #e4e9f1;
+  --chart-text-secondary: #c5cdd8;
+  --chart-text-muted: #9ba6b6;
+  --chart-grid: #1f2836;
+  --chart-axis: #3a4658;
+  --chart-hover: rgba(91, 156, 240, 0.08);
+  --chart-muted: #6b7686;
+  --chart-1: #518fe9;
+  --chart-2: #cf630d;
+  --chart-3: #05908a;
+  --chart-4: #bd8703;
+  --chart-5: #cd6199;
+  --chart-6: #17843f;
+  --chart-7: #7f65ca;
+  --chart-8: #c04442;
+  --chart-blues-1: #b4d4fe;
+  --chart-blues-2: #70adfe;
+  --chart-blues-3: #4c87d5;
+  --chart-blues-4: #215da7;
+  --chart-seq-1: #01458e;
+  --chart-seq-2: #205fad;
+  --chart-seq-3: #497bbf;
+  --chart-seq-4: #6e97cf;
+  --chart-seq-5: #93b3df;
+  --chart-seq-6: #b9d0ef;
+  --chart-seq-7: #dbe9fc;
+  --chart-diverging-below: #cf630d;
+  --chart-diverging-middle: #2e333b;
+  --chart-diverging-above: #518fe9;
+  --chart-good: #0ca30c;
+  --chart-warning: #fab219;
+  --chart-negative: #e66767;
+  --chart-negative-wash: rgba(230, 103, 103, 0.1);
+  --info-border: #284470;
+  --neutral-bg: #1f2733;
+  --neutral-text: #c5cdd8;
+  --topbar-bg: rgba(19, 26, 24, 0.86);
+  --shadow-sm: 0 1px 2px rgba(0, 0, 0, 0.4);
+  --shadow: 0 1px 2px rgba(0, 0, 0, 0.35), 0 2px 8px rgba(0, 0, 0, 0.2);
+  --shadow-lg: 0 2px 6px rgba(0, 0, 0, 0.4), 0 18px 48px rgba(0, 0, 0, 0.5);
+  --tractor-worked: #40c070;
+  --tractor-overlap: #ff922b;
+  --tractor-missed: #f06595;
+  --tractor-track: #8fb8ff;
+  --tractor-gap: #ff6b6b;
+  /* The signature box is paper-white in both themes, so a drawn signature looks as it will print. */
+  --signature-paper: #ffffff;
+  --signature-ink: #14213d;
+  --signature-line: #9aa3b2;
+  --tractor-map-bg: #1d2620;
+  --tractor-paddock: #8cc06c;
+}
+
+* {
+  box-sizing: border-box;
+  margin: 0;
+  padding: 0;
+}
+
+html,
+body {
+  max-width: 100vw;
+  overflow-x: hidden;
+}
+
+body {
+  min-height: 100vh;
+  background: var(--bg);
+  color: var(--text);
+  font-family: var(--font);
+  font-size: var(--text-md);
+  line-height: 1.5;
+  font-feature-settings: "cv11", "ss01";
+  -webkit-font-smoothing: antialiased;
+  -moz-osx-font-smoothing: grayscale;
+  text-rendering: optimizeLegibility;
+}
+
+h1,
+h2,
+h3 {
+  letter-spacing: -0.012em;
+}
+
+a {
+  color: var(--link);
+  text-decoration: none;
+}
+
+a:hover {
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+input,
+select,
+textarea,
+button {
+  font: inherit;
+  color: inherit;
+}
+
+input,
+select,
+textarea {
+  width: 100%;
+  min-height: 40px;
+  border: 1px solid var(--border-strong);
+  border-radius: var(--radius-sm);
+  background-color: var(--surface);
+  padding: 6px 10px;
+  outline: none;
+  font-size: var(--text-base);
+  transition:
+    border-color 120ms ease,
+    box-shadow 120ms ease;
+}
+
+textarea {
+  line-height: 1.45;
+}
+
+input::placeholder,
+textarea::placeholder {
+  color: var(--text-muted);
+  opacity: 1;
+}
+
+input:hover:not(:disabled):not(:focus),
+select:hover:not(:disabled):not(:focus),
+textarea:hover:not(:disabled):not(:focus) {
+  border-color: color-mix(in srgb, var(--border-strong) 60%, var(--text-muted));
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible,
+input:focus,
+select:focus,
+textarea:focus {
+  border-color: var(--accent);
+  box-shadow: var(--focus-ring);
+}
+
+/* A calm chevron on every select, drawn in the current text colour. */
+select:not([multiple]):not([size]) {
+  appearance: none;
+  padding-right: 30px;
+  background-image:
+    linear-gradient(45deg, transparent 50%, var(--text-muted) 50%),
+    linear-gradient(135deg, var(--text-muted) 50%, transparent 50%);
+  background-position:
+    calc(100% - 15px) 50%,
+    calc(100% - 10px) 50%;
+  background-size:
+    5px 5px,
+    5px 5px;
+  background-repeat: no-repeat;
+}
+
+input[type="checkbox"],
+input[type="radio"] {
+  width: auto;
+  min-height: 0;
+  accent-color: var(--accent);
+}
+
+input[type="checkbox"]:focus,
+input[type="radio"]:focus {
+  box-shadow: none;
+}
+
+input[type="file"] {
+  padding: 5px 8px;
+}
+
+input[type="color"] {
+  padding: 2px;
+}
+
+input:disabled,
+select:disabled,
+textarea:disabled {
+  background-color: var(--surface-sunken);
+  color: var(--text-muted);
+}
+
+button {
+  cursor: pointer;
+}
+
+button:disabled {
+  cursor: not-allowed;
+  opacity: 0.55;
+}
+
+:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 2px;
+}
+
+input:focus-visible,
+select:focus-visible,
+textarea:focus-visible {
+  outline: none;
+}
+
+code {
+  font-family: var(--mono);
+  font-size: 0.88em;
+  background: var(--surface-sunken);
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  padding: 1px 5px;
+}
+
+table {
+  font-variant-numeric: tabular-nums;
+}
+
+hr {
+  border: 0;
+  border-top: 1px solid var(--border);
+}
+
+::selection {
+  background: color-mix(in srgb, var(--accent) 28%, transparent);
+}
+
+/* Printing (custom reports' "Print or save as PDF"): only the page itself, always light. */
+@media print {
+  [data-print="hide"] {
+    display: none !important;
+  }
+
+  :root:root {
+    color-scheme: light;
+    --bg: #ffffff;
+    --surface: #ffffff;
+    --surface-raised: #ffffff;
+    --surface-sunken: #f6f8fb;
+    --surface-hover: #eef1f5;
+    --border: #dde2e9;
+    --border-strong: #c3cbd6;
+    --text: #1b2533;
+    --text-muted: #546072;
+    --link: #1a56a0;
+    --accent: #1f5fae;
+    --accent-text: #ffffff;
+    --accent-soft: #e6eef9;
+    --accent-soft-text: #173f73;
+    --success-bg: #e7f4eb;
+    --success-text: #146c2e;
+    --warning-bg: #fdf4de;
+    --warning-text: #84500a;
+    --danger-bg: #fcecea;
+    --danger-text: #b42318;
+    --info-bg: #e9f0fb;
+    --info-text: #1d4e89;
+    /* Charts: from src/lib/charts/theme.ts; a test checks they match. */
+    --chart-surface: #ffffff;
+    --chart-text: #1b2533;
+    --chart-text-secondary: #3c4757;
+    --chart-text-muted: #546072;
+    --chart-grid: #e9edf2;
+    --chart-axis: #c5cdd8;
+    --chart-hover: rgba(31, 95, 174, 0.06);
+    --chart-muted: #8b94a1;
+    --chart-1: #1f5fae;
+    --chart-2: #d66919;
+    --chart-3: #009e98;
+    --chart-4: #e2a520;
+    --chart-5: #d4679f;
+    --chart-6: #057836;
+    --chart-7: #694daf;
+    --chart-8: #ba3e3c;
+    --chart-blues-1: #004085;
+    --chart-blues-2: #1f5fae;
+    --chart-blues-3: #5388cd;
+    --chart-blues-4: #7ab0f9;
+    --chart-seq-1: #dbe9fc;
+    --chart-seq-2: #b9d0ef;
+    --chart-seq-3: #93b3df;
+    --chart-seq-4: #6e97cf;
+    --chart-seq-5: #497bbf;
+    --chart-seq-6: #205fad;
+    --chart-seq-7: #01458e;
+    --chart-diverging-below: #d66919;
+    --chart-diverging-middle: #e4e8ed;
+    --chart-diverging-above: #1f5fae;
+    --chart-good: #0ca30c;
+    --chart-warning: #fab219;
+    --chart-negative: #d03b3b;
+    --chart-negative-wash: rgba(208, 59, 59, 0.07);
+    --neutral-bg: #eef1f5;
+    --neutral-text: #3c4757;
+    --shadow: none;
+    --shadow-sm: none;
+  }
+
+  body {
+    background: #fff !important;
+  }
+}
+
+@media (prefers-reduced-motion: reduce) {
+  *, *::before, *::after { transition: none !important; animation: none !important; scroll-behavior: auto !important; }
+}

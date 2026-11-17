@@ -1,0 +1,913 @@
+"use client";
+
+import Link from "next/link";
+import { usePathname, useRouter, useSearchParams } from "next/navigation";
+import {
+  Fragment,
+  type ReactNode,
+  type RefObject,
+  Suspense,
+  useCallback,
+  useEffect,
+  useId,
+  useLayoutEffect,
+  useMemo,
+  useRef,
+  useState,
+  useSyncExternalStore,
+} from "react";
+import { type AppKey, AppSwitcher } from "@/components/app-switcher";
+import { DestinationArt } from "@/components/destination-art";
+import { BrandMark } from "@/components/brand-mark";
+import { CommandPalette } from "@/components/command-palette";
+import { useConfirm } from "@/components/confirm-dialog";
+import { useApiData } from "@/components/hooks";
+import { type Modules, useModules } from "@/components/modules";
+import { OfflineSupport, prepareSignOut } from "@/components/offline-support";
+import {
+  AI_LINK,
+  appForPath,
+  type Destination,
+  destinations,
+  FARM_WORK_PATHS,
+  farmWorkAllowsPath,
+  inArea,
+  isCurrent,
+  type Menu,
+  type MenuGroup,
+  menuSections,
+  visibleMenus,
+  visibleSettings,
+  visibleNewActions,
+} from "@/components/navigation";
+import { ThemeSwitch } from "@/components/theme";
+import { Notice, Page, PageHeader } from "@/components/ui";
+import { ROLE_LABELS } from "@/lib/auth/roles";
+import { handleFormKeys } from "@/lib/form-keys";
+import { cancelReminders } from "@/lib/native/notifications";
+import { NativeAppSupport } from "@/components/native-app";
+import styles from "./app-shell.module.css";
+import {
+  useWorkspace,
+  type WorkspaceOrganisation,
+  WorkspaceProvider,
+  type WorkspaceUser,
+} from "./workspace";
+
+/** Closes a popover on Escape (returning focus to its button), an outside click, or focus moving away. */
+function useDismiss(open: boolean, close: () => void, container: RefObject<HTMLElement | null>, button: () => HTMLElement | null) {
+  useEffect(() => {
+    if (!open) return;
+    function onPointer(event: PointerEvent) {
+      if (container.current && !container.current.contains(event.target as Node)) close();
+    }
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        close();
+        button()?.focus();
+      }
+    }
+    function onFocus(event: FocusEvent) {
+      if (container.current && event.target instanceof Node && !container.current.contains(event.target)) close();
+    }
+    document.addEventListener("pointerdown", onPointer);
+    document.addEventListener("keydown", onKey);
+    document.addEventListener("focusin", onFocus);
+    return () => {
+      document.removeEventListener("pointerdown", onPointer);
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("focusin", onFocus);
+    };
+  }, [open, close, container, button]);
+}
+
+function Caret() {
+  return (
+    <svg className={styles.caret} width="10" height="10" viewBox="0 0 10 10" aria-hidden focusable="false">
+      <path d="M2 3.5 5 6.5 8 3.5" fill="none" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" strokeLinejoin="round" />
+    </svg>
+  );
+}
+
+function SearchIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden focusable="false">
+      <circle cx="7" cy="7" r="4.75" fill="none" stroke="currentColor" strokeWidth="1.5" />
+      <path d="m10.5 10.5 3 3" stroke="currentColor" strokeWidth="1.5" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function BellIcon() {
+  return (
+    <svg width="16" height="16" viewBox="0 0 16 16" aria-hidden focusable="false">
+      <path d="M8 2.2a3.2 3.2 0 0 0-3.2 3.2v1.4c0 1.2-.3 2.4-1 3.4l-.8 1.1h10l-.8-1.1c-.7-1-.9-2.2-.9-3.4V5.4A3.2 3.2 0 0 0 8 2.2Z" fill="none" stroke="currentColor" strokeWidth="1.2" />
+      <path d="M6.4 12.3a1.6 1.6 0 0 0 3.2 0" fill="none" stroke="currentColor" strokeWidth="1.2" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function PlusIcon() {
+  return (
+    <svg width="14" height="14" viewBox="0 0 14 14" aria-hidden focusable="false">
+      <path d="M7 2.5v9M2.5 7h9" stroke="currentColor" strokeWidth="1.75" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+function SparkIcon() {
+  return (
+    <svg width="15" height="15" viewBox="0 0 16 16" aria-hidden focusable="false">
+      <path
+        d="M8 1.5c.4 2.9 1.6 4.1 4.5 4.5-2.9.4-4.1 1.6-4.5 4.5-.4-2.9-1.6-4.1-4.5-4.5 2.9-.4 4.1-1.6 4.5-4.5ZM12.5 10c.2 1.4.8 2 2.2 2.2-1.4.2-2 .8-2.2 2.2-.2-1.4-.8-2-2.2-2.2 1.4-.2 2-.8 2.2-2.2Z"
+        fill="currentColor"
+      />
+    </svg>
+  );
+}
+
+/** A dropdown's links, arranged as labelled columns. */
+function MenuPanel({
+  id,
+  groups,
+  pathname,
+  search,
+  onNavigate,
+  label,
+  align = "start",
+}: {
+  id: string;
+  groups: MenuGroup[];
+  pathname: string;
+  search: URLSearchParams;
+  onNavigate: () => void;
+  label: string;
+  align?: "start" | "end";
+}) {
+  const panel = useRef<HTMLDivElement>(null);
+  // Keep the panel inside the window: wide panels near the right edge shift left.
+  useLayoutEffect(() => {
+    const element = panel.current;
+    if (!element) return;
+    if (getComputedStyle(element).position === "fixed") return;
+    const rect = element.getBoundingClientRect();
+    element.style.maxHeight = `${Math.max(160, window.innerHeight - Math.max(12, rect.top) - 12)}px`;
+    const overflow = rect.right - (window.innerWidth - 12);
+    if (overflow > 0) element.style.setProperty("translate", `-${Math.min(overflow, Math.max(0, rect.left - 12))}px 0`);
+    else if (rect.left < 12) element.style.setProperty("translate", `${12 - rect.left}px 0`);
+  }, []);
+  return (
+    <div
+      id={id}
+      ref={panel}
+      className={`${styles.dropdown} ${align === "end" ? styles.dropdownEnd : ""}`}
+      style={{ gridTemplateColumns: `repeat(${Math.min(groups.length, 4)}, minmax(176px, auto))` }}
+      aria-label={label}
+      role="group"
+    >
+      {groups.map((group, groupIndex) => {
+        const headingId = `${id}-g${groupIndex}`;
+        return (
+          <div key={group.heading} className={styles.dropdownGroup} role="group" aria-labelledby={headingId}>
+            <div className={styles.dropdownHeading} id={headingId}>
+              {group.heading}
+            </div>
+            {menuSections(group).map((section, sectionIndex) => {
+              const links = section.links.map((link) => {
+                const current = isCurrent(pathname, search, link.href);
+                return (
+                  <Link
+                    key={`${link.href}|${link.label}`}
+                    href={link.href}
+                    className={`${styles.dropdownLink} ${current ? styles.dropdownLinkActive : ""}`}
+                    aria-current={current ? "page" : undefined}
+                    onClick={onNavigate}
+                  >
+                    <DestinationArt href={link.href} /><span>{link.label}</span>
+                  </Link>
+                );
+              });
+              if (!section.heading) return <Fragment key={`s${sectionIndex}`}>{links}</Fragment>;
+              // A sub-heading labels its own group, so screen readers announce it with its links.
+              const sectionId = `${headingId}-s${sectionIndex}`;
+              return (
+                <div key={`s${sectionIndex}`} className={styles.dropdownSection} role="group" aria-labelledby={sectionId}>
+                  <div className={styles.dropdownSubheading} id={sectionId}>
+                    {section.heading}
+                  </div>
+                  {links}
+                </div>
+              );
+            })}
+          </div>
+        );
+      })}
+    </div>
+  );
+}
+
+function DesktopMenus({ menus }: { menus: Menu[] }) {
+  const pathname = usePathname();
+  const search = useSearchParams();
+  const [open, setOpen] = useState<string | null>(null);
+  const bar = useRef<HTMLElement>(null);
+  const buttons = useRef<Record<string, HTMLButtonElement | null>>({});
+  const idPrefix = useId();
+  const close = useCallback(() => setOpen(null), []);
+  const openButton = useCallback(() => (open ? (buttons.current[open] ?? null) : null), [open]);
+  useDismiss(open !== null, close, bar, openButton);
+
+  return (
+    <nav aria-label="Main" className={styles.menuBar} ref={bar}>
+      {menus.map((menu) => {
+        const active = inArea(pathname, menu);
+        if (menu.href) {
+          return (
+            <Link
+              key={menu.label}
+              href={menu.href}
+              className={`${styles.menuButton} ${active ? styles.menuButtonActive : ""}`}
+              aria-current={active ? "page" : undefined}
+              onClick={close}
+            >
+              {menu.label}
+            </Link>
+          );
+        }
+        const panelId = `${idPrefix}-${menu.label}`;
+        const isOpen = open === menu.label;
+        return (
+          <div key={menu.label} className={styles.menu}>
+            <button
+              type="button"
+              ref={(element) => {
+                buttons.current[menu.label] = element;
+              }}
+              className={`${styles.menuButton} ${active ? styles.menuButtonActive : ""}`}
+              aria-expanded={isOpen}
+              aria-controls={panelId}
+              onClick={() => setOpen(isOpen ? null : menu.label)}
+            >
+              {menu.label}
+              <Caret />
+            </button>
+            {isOpen ? (
+              <MenuPanel
+                id={panelId}
+                label={menu.label}
+                groups={menu.groups}
+                pathname={pathname}
+                search={search}
+                onNavigate={close}
+              />
+            ) : null}
+          </div>
+        );
+      })}
+    </nav>
+  );
+}
+
+/** "+ New": every create action in one place (the books for bookkeepers and up; the farm's quick records). */
+function NewMenu({ groups }: { groups: MenuGroup[] }) {
+  const pathname = usePathname();
+  const search = useSearchParams();
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+  const close = useCallback(() => setOpen(false), []);
+  const focusButton = useCallback(() => button.current, []);
+  useDismiss(open, close, wrap, focusButton);
+  if (groups.length === 0) return null;
+  return (
+    <div className={styles.menu} ref={wrap}>
+      <button
+        type="button"
+        ref={button}
+        className={styles.newButton}
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-label="New"
+        onClick={() => setOpen((value) => !value)}
+      >
+        <PlusIcon />
+        <span className={styles.newLabel}>New</span>
+      </button>
+      {open ? (
+        <MenuPanel
+          id={panelId}
+          label="New"
+          groups={groups}
+          pathname={pathname}
+          search={search}
+          onNavigate={close}
+          align="end"
+        />
+      ) : null}
+    </div>
+  );
+}
+
+function subscribeNothing() {
+  return () => undefined;
+}
+
+/** "⌘K" on a Mac, "Ctrl K" elsewhere (Ctrl K until the browser says otherwise). */
+function useShortcutLabel() {
+  return useSyncExternalStore(
+    subscribeNothing,
+    () => (/Mac|iPhone|iPad/.test(navigator.platform || navigator.userAgent) ? "⌘K" : "Ctrl K"),
+    () => "Ctrl K",
+  );
+}
+
+function initials(name: string): string {
+  const parts = name.trim().split(/\s+/).filter(Boolean);
+  if (parts.length === 0) return "?";
+  return (parts[0][0] + (parts.length > 1 ? parts[parts.length - 1][0] : "")).toUpperCase();
+}
+
+function UserMenu({ onSignOut }: { onSignOut: () => void }) {
+  const { user, current, can } = useWorkspace();
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+  const close = useCallback(() => setOpen(false), []);
+  const focusButton = useCallback(() => button.current, []);
+  useDismiss(open, close, wrap, focusButton);
+  return (
+    <div className={styles.menu} ref={wrap}>
+      <button
+        type="button"
+        ref={button}
+        className={styles.avatarButton}
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-label={`${user.displayName}: profile, theme and sign out`}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <span className={styles.avatar} aria-hidden>
+          {initials(user.displayName)}
+        </span>
+      </button>
+      {open ? (
+        <div id={panelId} className={`${styles.dropdown} ${styles.dropdownEnd} ${styles.userPanel}`} role="group" aria-label="Your account">
+          <div className={styles.userSummary}>
+            <div className={styles.userName}>{user.displayName}</div>
+            <div className={styles.userEmail}>{user.email}</div>
+            {current ? (
+              <div className={styles.userEmail}>
+                {ROLE_LABELS[current.role]} · {current.baseCurrency}
+              </div>
+            ) : null}
+          </div>
+          <Link href="/operations/profile" className={styles.dropdownLink} onClick={close}>
+            Profile and two-step sign-in
+          </Link>
+          <Link href="/get-tohyee" className={styles.dropdownLink} onClick={close}>
+            Get Tohyee on this device
+          </Link>
+          {current?.role === "owner" ? (
+            // An Owner's private copy of their own mail.
+            <Link href="/operations/my-mail" className={styles.dropdownLink} onClick={close}>
+              My mail
+            </Link>
+          ) : null}
+          {current && can("admin") ? (
+            // Reachable from every app, even with Accounting off (MOD2).
+            <Link href="/operations/modules" className={styles.dropdownLink} onClick={close}>
+              Modules
+            </Link>
+          ) : null}
+          <div className={styles.userTheme}>
+            <ThemeSwitch />
+          </div>
+          <button type="button" className={`${styles.dropdownLink} ${styles.signOut}`} onClick={onSignOut}>
+            Sign out
+          </button>
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+type TopNotice = { id: string; message: string; href: string };
+
+function NoticesMenu({ notices }: { notices: Array<{ id: string; message: string; href?: string }> }) {
+  const [open, setOpen] = useState(false);
+  const wrap = useRef<HTMLDivElement>(null);
+  const button = useRef<HTMLButtonElement>(null);
+  const panelId = useId();
+  const close = useCallback(() => setOpen(false), []);
+  const focusButton = useCallback(() => button.current, []);
+  useDismiss(open, close, wrap, focusButton);
+  if (notices.length === 0) return null;
+  return (
+    <div className={styles.menu} ref={wrap}>
+      <button
+        type="button"
+        ref={button}
+        className={`${styles.iconButton} ${styles.noticeButton}`}
+        aria-expanded={open}
+        aria-controls={panelId}
+        aria-label={`Notices (${notices.length})`}
+        onClick={() => setOpen((value) => !value)}
+      >
+        <BellIcon />
+        <span className={styles.noticeDot} aria-hidden />
+      </button>
+      {open ? (
+        <div id={panelId} className={`${styles.dropdown} ${styles.dropdownEnd} ${styles.noticePanel}`} role="group" aria-label="Notices">
+          {notices.map((notice) =>
+            notice.href ? (
+              <Link key={notice.id} href={notice.href} className={styles.dropdownLink} onClick={close}>
+                {notice.message}
+              </Link>
+            ) : (
+              <p key={notice.id} className={styles.noticeText}>
+                {notice.message}
+              </p>
+            ),
+          )}
+        </div>
+      ) : null}
+    </div>
+  );
+}
+
+/** Phones and narrow windows: a ☰ button opens every section as a full-screen list. */
+function PhoneMenu({ app, modules, menus, onSignOut }: { app: AppKey; modules: Modules | null; menus: Menu[]; onSignOut: () => void }) {
+  const pathname = usePathname();
+  const search = useSearchParams();
+  const { user, current } = useWorkspace();
+  const reportViewer = current?.role === "report_viewer";
+  const farmWorker = current?.role === "farm_worker";
+  const [open, setOpen] = useState(false);
+  const [expanded, setExpanded] = useState<string | null>(null);
+  const trigger = useRef<HTMLButtonElement>(null);
+  const dialog = useRef<HTMLDivElement>(null);
+  // The list opens under the top bar.
+  const [top, setTop] = useState(56);
+
+  useEffect(() => {
+    if (!open) return;
+    const previous = document.body.style.overflow;
+    const returnFocus = trigger.current;
+    document.body.style.overflow = "hidden";
+    // Keep keyboard focus inside the open menu, and give it back to the button when it closes.
+    const focusable = () => Array.from(dialog.current?.querySelectorAll<HTMLElement>('a[href], button:not([disabled]), select, input, [tabindex="0"]') ?? []);
+    focusable()[0]?.focus();
+    function onKey(event: KeyboardEvent) {
+      if (event.key === "Escape") {
+        event.preventDefault();
+        setOpen(false);
+      }
+      if (event.key === "Tab") {
+        const elements = focusable();
+        const first = elements[0];
+        const last = elements.at(-1);
+        if (event.shiftKey && document.activeElement === first) {
+          event.preventDefault();
+          last?.focus();
+        } else if (!event.shiftKey && document.activeElement === last) {
+          event.preventDefault();
+          first?.focus();
+        }
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    return () => {
+      document.body.style.overflow = previous;
+      document.removeEventListener("keydown", onKey);
+      returnFocus?.focus();
+    };
+  }, [open]);
+
+  function close() {
+    setOpen(false);
+    setExpanded(null);
+  }
+
+  return (
+    <>
+      <button
+        type="button"
+        ref={trigger}
+        className={`${styles.iconButton} ${styles.phoneMenuButton}`}
+        aria-expanded={open}
+        aria-label={open ? "Close menu" : "Open menu"}
+        onClick={(event) => {
+          if (open) {
+            close();
+            return;
+          }
+          const bar = event.currentTarget.closest("header");
+          setTop(bar ? Math.round(bar.getBoundingClientRect().bottom) : 56);
+          setOpen(true);
+        }}
+      >
+        <span aria-hidden className={styles.phoneMenuGlyph}>
+          {open ? "✕" : "☰"}
+        </span>
+      </button>
+      {open ? (
+        <div ref={dialog} className={styles.phoneMenu} style={{ top }} role="dialog" aria-modal="true" aria-label="Menu">
+          <div className={styles.phoneApps}>
+            <AppSwitcher current={app} modules={modules} reportViewer={reportViewer} farmWorker={farmWorker} />
+          </div>
+          <nav aria-label="Main">
+            {menus.map((menu) => {
+              if (menu.href) {
+                return (
+                  <Link
+                    key={menu.label}
+                    href={menu.href}
+                    className={styles.phoneSection}
+                    aria-current={inArea(pathname, menu) ? "page" : undefined}
+                    onClick={close}
+                  >
+                    <span className={styles.sectionIdentity}><DestinationArt menu={menu} size={32} /><span>{menu.label}</span></span>
+                  </Link>
+                );
+              }
+              const isExpanded = expanded === menu.label || (expanded === null && inArea(pathname, menu));
+              return (
+                <div key={menu.label}>
+                  <button
+                    type="button"
+                    className={styles.phoneSection}
+                    aria-expanded={isExpanded}
+                    onClick={() => setExpanded(isExpanded ? "" : menu.label)}
+                  >
+                    <span className={styles.sectionIdentity}><DestinationArt menu={menu} size={32} /><span>{menu.label}</span></span>
+                    <span aria-hidden className={isExpanded ? styles.phoneCaretOpen : styles.phoneCaret}>
+                      <Caret />
+                    </span>
+                  </button>
+                  {isExpanded ? (
+                    <div className={styles.phoneGroups}>
+                      {menu.groups.map((group) => (
+                        <div key={group.heading}>
+                          <div className={styles.phoneHeading}>{group.heading}</div>
+                          {menuSections(group).map((section, sectionIndex) => (
+                            <div key={`s${sectionIndex}`} className={section.heading ? styles.phoneSubsection : undefined}>
+                              {section.heading ? <div className={styles.phoneSubheading}>{section.heading}</div> : null}
+                              {section.links.map((link) => (
+                                <Link
+                                  key={`${link.href}|${link.label}`}
+                                  href={link.href}
+                                  className={`${styles.phoneLink} ${isCurrent(pathname, search, link.href) ? styles.phoneLinkActive : ""}`}
+                                  aria-current={isCurrent(pathname, search, link.href) ? "page" : undefined}
+                                  onClick={close}
+                                >
+                                  <DestinationArt href={link.href} /><span>{link.label}</span>
+                                </Link>
+                              ))}
+                            </div>
+                          ))}
+                        </div>
+                      ))}
+                    </div>
+                  ) : null}
+                </div>
+              );
+            })}
+            <Link
+              href={AI_LINK.href}
+              className={styles.phoneSection}
+              aria-current={pathname === AI_LINK.href ? "page" : undefined}
+              onClick={close}
+            >
+              <span className={styles.sectionIdentity}><DestinationArt href={AI_LINK.href} size={32} /><span>{AI_LINK.label}</span></span>
+            </Link>
+          </nav>
+          <div className={styles.phoneFooter}>
+            <div>
+              <div className={styles.userName}>{user.displayName}</div>
+              <div className={styles.userEmail}>{user.email}</div>
+            </div>
+            <Link href="/operations/profile" onClick={close}>
+              Profile and two-step sign-in
+            </Link>
+            <Link href="/get-tohyee" onClick={close}>
+              Get Tohyee on this device
+            </Link>
+            {current?.role === "owner" ? (
+              <Link href="/operations/my-mail" onClick={close}>
+                My mail
+              </Link>
+            ) : null}
+            <ThemeSwitch />
+            <button type="button" className={styles.linkButton} onClick={onSignOut}>
+              Sign out
+            </button>
+          </div>
+        </div>
+      ) : null}
+    </>
+  );
+}
+
+/**
+ * The organisation menu. The demo farm is added on the server, where
+ * organisations are added: this menu doesn't offer it, but one
+ * already made opens from here like any other, marked DEMO.
+ */
+export function OrganisationPicker() {
+  const { organisations, current, selectOrganisation } = useWorkspace();
+  if (organisations.length === 0) {
+    return <span className={styles.orgMeta}>No organisations yet</span>;
+  }
+  return (
+    <div className={`${styles.orgPicker} ${current?.isDemo ? styles.orgPickerDemo : ""}`}>
+      {current?.isDemo ? (
+        <DemoBadge />
+      ) : (
+        <span className={styles.orgInitial} aria-hidden>
+          {(current?.displayName ?? "?").trim().charAt(0).toUpperCase()}
+        </span>
+      )}
+      <select
+        id="organisation-picker"
+        aria-label="Organisation"
+        title={current ? `${current.displayName} · ${ROLE_LABELS[current.role]} · ${current.baseCurrency}${current.isDemo ? " · demo farm (made-up data)" : ""}` : undefined}
+        value={current?.id ?? ""}
+        onChange={(event) => selectOrganisation(event.target.value)}
+      >
+        {organisations.map((organisation) => (
+          <option key={organisation.id} value={organisation.id}>
+            {organisation.isDemo ? `${organisation.displayName} (demo)` : organisation.displayName}
+          </option>
+        ))}
+      </select>
+    </div>
+  );
+}
+
+/**
+ * Marks the demo farm on every page, where the organisation's initial would be: made-up data, and nothing is sent or imported.
+ * A server admin resets or deletes it in the server settings.
+ */
+function DemoBadge() {
+  return (
+    <span
+      className={styles.demoBadge}
+      title="The demo farm: made-up data. Nothing is emailed, imported or connected. A server admin can reset or delete it in the server settings."
+      role="img"
+      aria-label="Demo farm: made-up data; nothing is sent or imported."
+    >
+      DEMO
+    </span>
+  );
+}
+
+/** A short fade and rise of the page on each navigation, so moving around doesn't feel abrupt. */
+function usePageEntrance(target: RefObject<HTMLElement | null>, pathname: string, still = false) {
+  useEffect(() => {
+    const element = target.current;
+    // Farm pages don't slide in: the Farm tabs are fixed to the screen, and a moving page would carry them with it.
+    if (still || !element || typeof element.animate !== "function") return;
+    if (window.matchMedia("(prefers-reduced-motion: reduce)").matches) return;
+    const animation = element.animate(
+      [
+        { opacity: 0, transform: "translateY(6px)" },
+        { opacity: 1, transform: "none" },
+      ],
+      { duration: 180, easing: "cubic-bezier(0.2, 0.7, 0.2, 1)" },
+    );
+    return () => animation.cancel();
+  }, [target, pathname, still]);
+}
+
+function TopBarActions({
+  newActions,
+  notices,
+  onSearch,
+  onSignOut,
+}: {
+  newActions: MenuGroup[];
+  notices: Array<{ id: string; message: string; href?: string }>;
+  onSearch: () => void;
+  onSignOut: () => void;
+}) {
+  const pathname = usePathname();
+  const shortcut = useShortcutLabel();
+  const aiCurrent = pathname === AI_LINK.href || pathname.startsWith(`${AI_LINK.href}/`);
+  // Farm staff don't use the AI assistant: it reads the books.
+  const farmWorker = useWorkspace().current?.role === "farm_worker";
+  return (
+    <div className={styles.actions}>
+      <NewMenu groups={newActions} />
+      <button type="button" className={styles.searchButton} onClick={onSearch} aria-label={`Search (${shortcut})`} aria-keyshortcuts="Control+K Meta+K">
+        <SearchIcon />
+        <span className={styles.searchText}>Search</span>
+        <kbd className={styles.kbd}>{shortcut}</kbd>
+      </button>
+      {farmWorker ? null : (
+        <Link href={AI_LINK.href} className={`${styles.aiLink} ${aiCurrent ? styles.aiLinkActive : ""}`} aria-current={aiCurrent ? "page" : undefined}>
+          <SparkIcon />
+          {AI_LINK.label}
+        </Link>
+      )}
+      <NoticesMenu notices={notices} />
+      <div className={styles.desktopOnly}>
+        <UserMenu onSignOut={onSignOut} />
+      </div>
+    </div>
+  );
+}
+
+/** Pages under /operations that work with Accounting off (MOD2): your profile, the organisation's members and its modules. */
+const ACCOUNTING_OFF_PAGES = ["/operations/profile", "/operations/members", "/operations/modules"];
+
+/** Shown instead of an Accounting page while Accounting is off (MOD2). */
+function AccountingOff() {
+  const { current, can } = useWorkspace();
+  const pathname = usePathname();
+  if (pathname === "/operations") return null;
+  return (
+    <Page>
+      <PageHeader title={`Accounting is off for ${current?.displayName ?? "this organisation"}`} />
+      <Notice>
+        {can("admin") ? (
+          <>
+            An admin can turn it on under <Link href="/operations/modules">Modules</Link>. Everything entered before is kept.
+          </>
+        ) : (
+          "An admin can turn it on under Modules. Everything entered before is kept."
+        )}
+      </Notice>
+    </Page>
+  );
+}
+
+function Shell({ app: layoutApp, children, warnings }: { app: AppKey; children: ReactNode; warnings: string[] }) {
+  const router = useRouter();
+  const pathname = usePathname();
+  // Farm pages live under /operations but are the Farm app, with its own top bar.
+  const app = appForPath(layoutApp, pathname);
+  const { can, current, user, organisations } = useWorkspace();
+  const confirm = useConfirm();
+  const modules = useModules(current?.id ?? null);
+  const reportViewer = current?.role === "report_viewer";
+  const owner = current?.role === "owner";
+  // Sales reps and managers have the CRM and their own profile only.
+  const salesRole = current?.role === "sales_rep" || current?.role === "sales_manager";
+  const salesAway = salesRole && app !== "crm" && !pathname.startsWith("/operations/profile");
+  // Farm staff have the field-work pages only; the server refuses them everything else anyway.
+  const farmWorker = current?.role === "farm_worker";
+  const farmAway = farmWorker && !(layoutApp === "accounting" && farmWorkAllowsPath(pathname));
+  const noticeData = useApiData<{ notices: TopNotice[] }>(
+    current?.id && !reportViewer && !salesRole && !farmWorker ? "/api/notices" : null,
+    current?.id ? { organisationId: current.id } : {},
+  );
+  const notices = useMemo(
+    () => [
+      ...warnings.map((warning, index) => ({ id: `server-warning-${index}`, message: warning })),
+      ...((noticeData.data?.notices ?? []).map((notice) => ({ id: notice.id, message: notice.message, href: notice.href })) as Array<{
+        id: string;
+        message: string;
+        href?: string;
+      }>),
+    ],
+    [warnings, noticeData.data],
+  );
+  const menus = useMemo(() => visibleMenus(app, { can, modules, farmWorker }), [app, can, modules, farmWorker]);
+  // Ctrl K finds the farm's pages from any app.
+  const farmMenus = useMemo(() => (app === "farm" ? [] : visibleMenus("farm", { can, modules, farmWorker })), [app, can, modules, farmWorker]);
+  const newActions = useMemo(() => visibleNewActions({ can, modules, farmWorker }), [can, modules, farmWorker]);
+  const settings = useMemo(() => (app === "accounting" ? visibleSettings({ can, modules }) : []), [app, can, modules]);
+  const items = useMemo<Destination[]>(
+    () =>
+      destinations(menus, newActions, [
+        // Settings that are only on the All settings page stay searchable.
+        ...settings.flatMap((group) => group.links.map((link) => ({ href: link.href, label: link.label, group: `Settings › ${group.heading}` }))),
+        { href: AI_LINK.href, label: "AI assistant", group: "AI" },
+        { href: "/operations/profile", label: "Profile and two-step sign-in", group: "You" },
+        ...(owner ? [{ href: "/operations/my-mail", label: "My mail", group: "You" }] : []),
+        ...destinations(farmMenus, []).map((item) => ({ ...item, group: item.group === item.label ? "Farm" : `Farm › ${item.group}` })),
+        ...(app !== "accounting" && !reportViewer && !farmWorker && modules?.accounting !== false ? [{ href: "/operations", label: "Accounting", group: "Apps" }] : []),
+        ...(app !== "farm" && !reportViewer && modules?.farming && modules.accounting !== false ? [{ href: "/operations/farm", label: "Farm", group: "Apps" }] : []),
+        ...(app !== "crm" && modules?.crm ? [{ href: "/crm", label: "CRM", group: "Apps" }] : []),
+        ...(app !== "analytics" && modules?.analytics ? [{ href: "/analytics", label: "Analytics", group: "Apps" }] : []),
+      ]),
+    [menus, farmMenus, newActions, settings, app, modules, reportViewer, owner, farmWorker],
+  );
+  const [paletteOpen, setPaletteOpen] = useState(false);
+
+  // Report viewers see only the dashboards shared with them: anywhere else goes to Analytics.
+  useEffect(() => {
+    if (reportViewer && app !== "analytics") router.replace("/analytics");
+  }, [reportViewer, app, router]);
+  useEffect(() => {
+    if (salesAway) router.replace("/crm");
+  }, [salesAway, router]);
+  useEffect(() => {
+    if (farmAway) router.replace(FARM_WORK_PATHS[0]);
+  }, [farmAway, router]);
+  // MOD2: with Accounting off, its home goes to the app that's on, and its other pages say it's off.
+  const accountingOff = layoutApp === "accounting" && !reportViewer && modules?.accounting === false;
+  const accountingPageOff = accountingOff && !ACCOUNTING_OFF_PAGES.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+  useEffect(() => {
+    if (accountingOff && pathname === "/operations") router.replace(modules?.crm ? "/crm" : "/analytics");
+  }, [accountingOff, pathname, modules, router]);
+  const page = useRef<HTMLDivElement>(null);
+  usePageEntrance(page, pathname, app === "farm");
+
+  useEffect(() => {
+    function onKey(event: KeyboardEvent) {
+      if ((event.metaKey || event.ctrlKey) && !event.altKey && event.key.toLowerCase() === "k") {
+        event.preventDefault();
+        setPaletteOpen((value) => !value);
+      }
+    }
+    document.addEventListener("keydown", onKey);
+    // Ctrl/Cmd+Enter saves the form you're in; Enter moves along a line table.
+    document.addEventListener("keydown", handleFormKeys);
+    return () => {
+      document.removeEventListener("keydown", onKey);
+      document.removeEventListener("keydown", handleFormKeys);
+    };
+  }, []);
+
+  async function signOut() {
+    // Unsent work is offered for sending first, and kept if it can't go.
+    if (!(await prepareSignOut(confirm, user.id, organisations.map((organisation) => organisation.id)))) return;
+    // The Android app's reminders are this person's: off the phone when they sign out.
+    await cancelReminders().catch(() => undefined);
+    await fetch("/api/auth/logout", { method: "POST" }).catch(() => undefined);
+    router.replace("/login");
+    router.refresh();
+  }
+
+  return (
+    <div className={styles.shell}>
+      <a href="#main-content" className={styles.skipLink} data-print="hide">
+        Skip to content
+      </a>
+      <header className={styles.topbar} data-print="hide">
+        <div className={styles.topRow}>
+          <Link href={app === "crm" ? "/crm" : app === "analytics" ? "/analytics" : app === "farm" || farmWorker ? "/operations/farm" : "/operations"} className={styles.brand} aria-label="Tohyee home">
+            <BrandMark size={26} className={styles.brandMark} />
+            <span className={styles.brandText}>Tohyee</span>
+          </Link>
+          <div className={styles.desktopOnly}>
+            <AppSwitcher current={app} modules={modules} reportViewer={reportViewer} farmWorker={farmWorker} />
+          </div>
+          <OrganisationPicker />
+          <span className={styles.divider} aria-hidden />
+          <Suspense fallback={<nav aria-label="Main" className={styles.menuBar} />}>
+            <DesktopMenus menus={menus} />
+          </Suspense>
+          <Suspense fallback={<div className={styles.actions} />}>
+            <TopBarActions newActions={newActions} notices={notices} onSearch={() => setPaletteOpen(true)} onSignOut={() => void signOut()} />
+          </Suspense>
+          <Suspense fallback={null}>
+            <PhoneMenu app={app} modules={modules} menus={menus} onSignOut={() => void signOut()} />
+          </Suspense>
+        </div>
+      </header>
+      <OfflineSupport userId={user.id} organisationId={current?.id ?? null} />
+      <NativeAppSupport />
+      <main id="main-content" className={styles.content} tabIndex={-1}>
+        <div ref={page} className={styles.page}>
+          {/* Not rendered for a report viewer outside Analytics, so the page doesn't ask for anything before the redirect. */}
+          {(reportViewer && app !== "analytics") || salesAway || farmAway ? null : accountingPageOff ? <AccountingOff /> : children}
+        </div>
+      </main>
+      <CommandPalette open={paletteOpen} onClose={() => setPaletteOpen(false)} items={items} />
+    </div>
+  );
+}
+
+export function AppShell({
+  app = "accounting",
+  user,
+  organisations,
+  serverSettingsUrl = null,
+  warnings = [],
+  accessNotes = [],
+  children,
+}: {
+  /** Which app's top bar and menus to show. */
+  app?: AppKey;
+  user: WorkspaceUser;
+  organisations: WorkspaceOrganisation[];
+  /** Where server settings open on the server computer (passed for server admins). */
+  serverSettingsUrl?: string | null;
+  /** Server problems shown on every page (only passed for server admins). */
+  warnings?: string[];
+  /** Organisations the person can't open now because of their access dates, and why. */
+  accessNotes?: string[];
+  children: ReactNode;
+}) {
+  return (
+    <WorkspaceProvider user={user} organisations={organisations} serverSettingsUrl={serverSettingsUrl} accessNotes={accessNotes}>
+      <Shell app={app} warnings={warnings}>
+        {children}
+      </Shell>
+    </WorkspaceProvider>
+  );
+}

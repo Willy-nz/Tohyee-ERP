@@ -1,0 +1,409 @@
+import { afterAll, beforeAll, expect, it } from "vitest";
+import * as companyRoute from "@/app/api/crm/companies/[contactId]/route";
+import * as homeRoute from "@/app/api/crm/home/route";
+import * as peopleRoute from "@/app/api/crm/people/route";
+import type { SessionUser } from "@/lib/auth/sessions";
+import { createContact, getContact, updateContact } from "@/lib/contacts/service";
+import {
+  companyTimeline,
+  createActivity,
+  createOpportunity,
+  createPerson,
+  createTask,
+  type CrmHome,
+  listCompanies,
+  listOpportunities,
+  makeInvoiceFromOpportunity,
+  makeSalesOrderFromOpportunity,
+  updateOpportunity,
+  updatePerson,
+  updateTask,
+} from "@/lib/crm/service";
+import { todayIsoDate } from "@/lib/dates";
+import type { OrgTx } from "@/lib/db/org-transaction";
+import { coreQuery } from "@/lib/db/transactions";
+import { approveInvoice, createInvoice } from "@/lib/invoices/service";
+import { postJournal } from "@/lib/ledger/journals";
+import { updateOrganisationSettings } from "@/lib/organisations/settings";
+import { profitAndLossSplit } from "@/lib/reports/financial";
+import { createTrackingCategory, createTrackingValue } from "@/lib/tracking/service";
+import {
+  apiRequest,
+  createTestOrganisation,
+  createTestUser,
+  describeWithDatabase,
+  inOrganisation,
+  key,
+  sessionCookieFor,
+  startTestServer,
+  type TestServer,
+} from "../helpers/test-server";
+
+const noContext = undefined as unknown;
+
+/** Examples MOD1, NFP1 and CRM1-CRM9 in docs/ACCOUNTING-EXAMPLES.md ("Modules and the CRM"). Each test gets its own organisation. */
+describeWithDatabase("modules and the CRM", () => {
+  let server: TestServer;
+  let owner: SessionUser;
+  let viewer: SessionUser;
+  let outsider: SessionUser;
+  let organisations = 0;
+
+  beforeAll(async () => {
+    server = await startTestServer();
+    owner = await createTestUser("jemma@example.com", { serverAdmin: true, displayName: "Jemma" });
+    viewer = await createTestUser("viewer@example.com");
+    outsider = await createTestUser("outsider@example.com");
+  });
+
+  afterAll(async () => {
+    await server?.teardown();
+  });
+
+  async function setup(options: { crm?: boolean } = {}) {
+    organisations += 1;
+    const org = `crm-${organisations}-co`;
+    await createTestOrganisation(owner, org);
+    await coreQuery("insert into organisation_members (organisation_id, user_id, role) values ($1, $2, 'viewer')", [org, viewer.id]);
+    const as = <T>(work: (tx: OrgTx) => Promise<T>) => inOrganisation(org, { userId: owner.id, email: owner.email }, work);
+    if (options.crm !== false) await as((tx) => updateOrganisationSettings(tx, { crmEnabled: true }));
+    return { org, as };
+  }
+
+  async function withVets() {
+    const w = await setup();
+    const vets = (await w.as((tx) => createContact(tx, { idempotencyKey: key("c"), name: "Mānuka Vets", isProspect: true }))).contact;
+    const aroha = await w.as((tx) =>
+      createPerson(tx, { contactId: vets.id, firstName: "Aroha", lastName: "Ngata", jobTitle: "Practice manager", email: "aroha@manukavets.nz" }),
+    );
+    const deal = await w.as((tx) =>
+      createOpportunity(tx, {
+        name: "Memorial pendants 2027",
+        contactId: vets.id,
+        pointOfContactId: aroha.id,
+        ownerUserId: owner.id,
+        amount: "2400",
+        closeDate: "2026-12-15",
+      }),
+    );
+    return { ...w, vets, aroha, deal };
+  }
+
+  it("MOD1: the CRM and Advanced reporting start off; switching is recorded; commands are refused while off", async () => {
+    const w = await setup({ crm: false });
+    const settings = await w.as((tx) => tx.query<{ crm_enabled: boolean; advanced_features: boolean }>("select crm_enabled, advanced_features from organisation_settings"));
+    expect(settings.rows[0]).toEqual({ crm_enabled: false, advanced_features: false });
+    await expect(w.as((tx) => createPerson(tx, { firstName: "Aroha" }))).rejects.toThrow("The CRM is off");
+    await w.as((tx) => updateOrganisationSettings(tx, { crmEnabled: true }));
+    const person = await w.as((tx) => createPerson(tx, { firstName: "Aroha" }));
+    await w.as((tx) => updateOrganisationSettings(tx, { crmEnabled: false }));
+    await expect(w.as((tx) => updatePerson(tx, person.id, { jobTitle: "Manager" }))).rejects.toThrow("The CRM is off");
+    const history = await w.as((tx) =>
+      tx.query<{ details: { crmEnabled: boolean } }>("select details from audit_events where event_type = 'organisation.settings_updated' order by id"),
+    );
+    expect(history.rows.map((row) => row.details.crmEnabled)).toEqual([true, false]);
+  });
+
+  it("NFP1: fund segment tags split activity and the module switch is kept in the organisation", async () => {
+    const w = await setup({ crm: false });
+    const initial = await w.as((tx) => tx.query<{ not_for_profit_enabled: boolean }>("select not_for_profit_enabled from organisation_settings"));
+    expect(initial.rows[0].not_for_profit_enabled).toBe(false);
+
+    await w.as((tx) => updateOrganisationSettings(tx, { notForProfitEnabled: true, advancedFeatures: true }));
+    let tracking = await w.as((tx) => createTrackingCategory(tx, { name: "Fund" }));
+    const fund = tracking.categories.find((category) => category.name === "Fund")!;
+    tracking = await w.as((tx) => createTrackingValue(tx, { categoryId: fund.id, name: "Restricted" }));
+    const restricted = tracking.categories.find((category) => category.id === fund.id)!.values[0];
+    tracking = await w.as((tx) =>
+      createTrackingValue(tx, { categoryId: fund.id, name: "Community workshops", parentId: restricted.id }),
+    );
+    const workshops = tracking.categories.find((category) => category.id === fund.id)!.values.find((value) => value.name === "Community workshops")!;
+    await w.as((tx) =>
+      postJournal(tx, {
+        idempotencyKey: key("journal"),
+        postingDate: "2026-06-15",
+        reference: "Community workshops",
+        lines: [
+          { accountCode: "1000", debitAmount: "1000.00" },
+          { accountCode: "4000", creditAmount: "1000.00", tracking: { [fund.id]: workshops.id } },
+          { accountCode: "6010", debitAmount: "400.00", tracking: { [fund.id]: workshops.id } },
+          { accountCode: "1000", creditAmount: "400.00" },
+        ],
+      }),
+    );
+    const split = await w.as((tx) => profitAndLossSplit(tx, { from: "2026-06-01", to: "2026-06-30", categoryId: fund.id }));
+    expect(split.revenue.totals[restricted.id]).toBe("1000.00");
+    expect(split.expenses.totals[restricted.id]).toBe("400.00");
+    expect(split.netProfit[restricted.id]).toBe("600.00");
+
+    await w.as((tx) => updateOrganisationSettings(tx, { notForProfitEnabled: false }));
+    const history = await w.as((tx) =>
+      tx.query<{ details: { notForProfitEnabled: boolean } }>("select details from audit_events where event_type = 'organisation.settings_updated' order by id"),
+    );
+    expect(history.rows.map((row) => row.details.notForProfitEnabled)).toEqual([true, false]);
+    const stillTagged = await w.as((tx) =>
+      tx.query<{ tracking: Record<string, string> }>(
+        "select tracking from ledger_journal_lines where account_id = (select id from accounts where code = '4000')",
+      ),
+    );
+    expect(stillTagged.rows[0].tracking).toEqual({ [fund.id]: workshops.id });
+  });
+
+  it("CRM1: prospects", async () => {
+    const w = await setup();
+    const vets = (await w.as((tx) => createContact(tx, { idempotencyKey: key("c"), name: "Mānuka Vets", isProspect: true }))).contact;
+    expect([vets.isProspect, vets.isCustomer, vets.isSupplier]).toEqual([true, false, false]);
+    await expect(
+      w.as((tx) =>
+        createInvoice(tx, {
+          idempotencyKey: key("i"),
+          contactId: vets.id,
+          invoiceDate: "2026-09-01",
+          dueDate: "2026-09-20",
+          amountsMode: "exclusive",
+          lines: [{ description: "Kit", quantity: "1", unitPrice: "10", accountCode: "4000", taxCode: "GST" }],
+        }),
+      ),
+    ).rejects.toThrow("isn't marked as a customer");
+    await expect(w.as((tx) => createContact(tx, { idempotencyKey: key("c"), name: "Nobody" }))).rejects.toThrow(
+      "A contact must be a customer, a supplier or a prospect.",
+    );
+    await w.as((tx) => updateOrganisationSettings(tx, { crmEnabled: false }));
+    await expect(w.as((tx) => createContact(tx, { idempotencyKey: key("c"), name: "Rata", isProspect: true }))).rejects.toThrow(
+      "The CRM is off, so a contact can't be made a prospect.",
+    );
+    // One that already is stays one.
+    expect((await w.as((tx) => updateContact(tx, vets.id, { phone: "03 477 0000" }))).isProspect).toBe(true);
+  });
+
+  it("CRM2: people", async () => {
+    const { as, vets, aroha } = await withVets();
+    expect([aroha.fullName, aroha.jobTitle, aroha.email, aroha.contactName]).toEqual(["Aroha Ngata", "Practice manager", "aroha@manukavets.nz", "Mānuka Vets"]);
+    await expect(as((tx) => createPerson(tx, { contactId: "999999", firstName: "Ben" }))).rejects.toThrow("There's no contact #999999.");
+    await expect(as((tx) => createPerson(tx, { contactId: vets.id, firstName: "Ben", email: "not an email" }))).rejects.toThrow("valid email");
+    await expect(as((tx) => tx.query("delete from crm_people where id = $1", [aroha.id]))).rejects.toThrow(/can't be deleted/);
+    expect((await as((tx) => updatePerson(tx, aroha.id, { isArchived: true }))).isArchived).toBe(true);
+  });
+
+  it("CRM3: opportunities", async () => {
+    const { as, vets, deal } = await withVets();
+    expect([deal.name, deal.contactName, deal.pointOfContactName, deal.ownerUserId, deal.amount, deal.closeDate, deal.stage]).toEqual([
+      "Memorial pendants 2027",
+      "Mānuka Vets",
+      "Aroha Ngata",
+      owner.id,
+      "2400.00",
+      "2026-12-15",
+      "new",
+    ]);
+    const other = (await as((tx) => createContact(tx, { idempotencyKey: key("c"), name: "Rata Ltd", isCustomer: true }))).contact;
+    const ben = await as((tx) => createPerson(tx, { contactId: other.id, firstName: "Ben" }));
+    await expect(as((tx) => createOpportunity(tx, { name: "X", contactId: vets.id, pointOfContactId: ben.id }))).rejects.toThrow(
+      "Ben doesn't work at that company.",
+    );
+    await expect(as((tx) => createOpportunity(tx, { name: "X", contactId: vets.id, amount: "-5" }))).rejects.toThrow("can't be negative");
+    await expect(as((tx) => createOpportunity(tx, { name: "X", contactId: vets.id, ownerUserId: outsider.id }))).rejects.toThrow(
+      "The owner must be a member of the organisation.",
+    );
+  });
+
+  it("CRM4: stage changes are in the history and the timeline", async () => {
+    const { as, vets, deal } = await withVets();
+    for (const stage of ["proposal", "lost", "proposal"]) await as((tx) => updateOpportunity(tx, deal.id, { stage }));
+    const timeline = await as((tx) => companyTimeline(tx, vets.id));
+    expect(timeline.filter((e) => e.kind === "opportunity_stage").map((e) => e.title)).toEqual([
+      "Opportunity Memorial pendants 2027: Lost → Proposal",
+      "Opportunity Memorial pendants 2027: Proposal → Lost",
+      "Opportunity Memorial pendants 2027: New → Proposal",
+    ]);
+  });
+
+  it("CRM5: a won opportunity makes a draft invoice", async () => {
+    const { as, vets, deal } = await withVets();
+    await expect(as((tx) => makeInvoiceFromOpportunity(tx, deal.id))).rejects.toThrow("Only a won opportunity can make an invoice.");
+    await as((tx) => updateOpportunity(tx, deal.id, { stage: "won" }));
+    const { created, invoice } = await as((tx) => makeInvoiceFromOpportunity(tx, deal.id));
+    expect(created).toBe(true);
+    expect([invoice.status, invoice.contactId, invoice.invoiceDate, invoice.total, invoice.approvalJournalId]).toEqual([
+      "draft",
+      vets.id,
+      todayIsoDate(),
+      "2760.00",
+      null,
+    ]);
+    expect(invoice.lines.map((l) => [l.description, l.quantity, l.unitPrice, l.accountCode, l.taxCode])).toEqual([
+      ["Memorial pendants 2027", "1", "2400", "4000", "GST"],
+    ]);
+    const contact = await as((tx) => getContact(tx, vets.id));
+    expect([contact.isCustomer, contact.isProspect]).toEqual([true, true]);
+    const again = await as((tx) => makeInvoiceFromOpportunity(tx, deal.id));
+    expect([again.created, again.invoice.id]).toEqual([false, invoice.id]);
+    await expect(as((tx) => updateOpportunity(tx, deal.id, { stage: "lost" }))).rejects.toThrow("has made an invoice");
+    const journals = await as((tx) => tx.query("select id from ledger_journals"));
+    expect(journals.rowCount).toBe(0);
+  });
+
+  it("CRM5b: a won opportunity can make a draft sales order instead", async () => {
+    const { as, vets, deal } = await withVets();
+    await expect(as((tx) => makeSalesOrderFromOpportunity(tx, deal.id))).rejects.toThrow("Only a won opportunity can make a sales order.");
+    await as((tx) => updateOpportunity(tx, deal.id, { stage: "won" }));
+    const { created, salesOrder } = await as((tx) => makeSalesOrderFromOpportunity(tx, deal.id));
+    expect(created).toBe(true);
+    expect([salesOrder.status, salesOrder.contactId, salesOrder.orderDate, salesOrder.total, salesOrder.reference]).toEqual([
+      "draft",
+      vets.id,
+      todayIsoDate(),
+      "2760.00",
+      "Memorial pendants 2027",
+    ]);
+    expect(salesOrder.lines.map((l) => [l.description, l.quantity, l.unitPrice, l.accountCode, l.taxCode])).toEqual([
+      ["Memorial pendants 2027", "1", "2400", "4000", "GST"],
+    ]);
+    const again = await as((tx) => makeSalesOrderFromOpportunity(tx, deal.id));
+    expect([again.created, again.salesOrder.id]).toEqual([false, salesOrder.id]);
+    await expect(as((tx) => makeInvoiceFromOpportunity(tx, deal.id))).rejects.toThrow("This opportunity already has a sales order.");
+    await expect(as((tx) => updateOpportunity(tx, deal.id, { stage: "lost" }))).rejects.toThrow("has made a sales order");
+    await expect(as((tx) => tx.query("update crm_opportunities set stage = 'proposal' where id = $1", [deal.id]))).rejects.toThrow(
+      "has made a sales order, so its stage can't change",
+    );
+    expect((await as((tx) => tx.query("select id from ledger_journals"))).rowCount).toBe(0);
+    // And the other way round: an opportunity with an invoice can't make a sales order.
+    const other = await withVets();
+    await other.as((tx) => updateOpportunity(tx, other.deal.id, { stage: "won" }));
+    await other.as((tx) => makeInvoiceFromOpportunity(tx, other.deal.id));
+    await expect(other.as((tx) => makeSalesOrderFromOpportunity(tx, other.deal.id))).rejects.toThrow("This opportunity already has an invoice.");
+  });
+
+  it("CRM6: tasks", async () => {
+    const { as, deal } = await withVets();
+    const task = await as((tx) => createTask(tx, { title: "Send sample kit", dueDate: "2026-10-01", assigneeUserId: owner.id, opportunityId: deal.id }));
+    expect([task.status, task.opportunityName, task.completedAt]).toEqual(["todo", "Memorial pendants 2027", null]);
+    const done = await as((tx) => updateTask(tx, task.id, { status: "done" }));
+    expect(done.status).toBe("done");
+    expect(done.completedAt).not.toBeNull();
+    await expect(as((tx) => createTask(tx, { title: "X", assigneeUserId: outsider.id }))).rejects.toThrow("The assignee must be a member");
+    await expect(as((tx) => tx.query("delete from crm_tasks where id = $1", [task.id]))).rejects.toThrow(/can't be deleted/);
+  });
+
+  it("CRM7: activities", async () => {
+    const { as, vets, aroha } = await withVets();
+    const call = await as((tx) =>
+      createActivity(tx, { kind: "call", happenedAt: "2026-09-28T10:00:00+13:00", subject: "Talked about pricing", personId: aroha.id }),
+    );
+    expect([call.kind, call.happenedAt, call.personName]).toEqual(["call", "2026-09-27T21:00:00.000Z", "Aroha Ngata"]);
+    await as((tx) => createActivity(tx, { kind: "meeting", happenedAt: "2026-09-29T09:00:00+13:00", subject: "Clinic visit", contactId: vets.id }));
+    await as((tx) => createActivity(tx, { kind: "note", subject: "Prefers email", contactId: vets.id }));
+    await expect(as((tx) => createActivity(tx, { kind: "note", subject: "About nothing" }))).rejects.toThrow("must be about a company");
+  });
+
+  it("CRM8: the company timeline and list", async () => {
+    const { as, vets, aroha, deal } = await withVets();
+    await as((tx) => updateOpportunity(tx, deal.id, { stage: "won" }));
+    const { invoice } = await as((tx) => makeInvoiceFromOpportunity(tx, deal.id));
+    await as((tx) => createTask(tx, { title: "Send sample kit", opportunityId: deal.id }));
+    await as((tx) => createActivity(tx, { kind: "call", happenedAt: "2026-01-02T10:00:00Z", subject: "First call", personId: aroha.id }));
+    await as((tx) => approveInvoice(tx, invoice.id, { idempotencyKey: key("approve") }));
+    const timeline = await as((tx) => companyTimeline(tx, vets.id));
+    expect(timeline[0]).toMatchObject({ kind: "invoice", amount: "2760.00", href: `/operations/invoices/${invoice.id}` });
+    expect(timeline.map((e) => e.kind)).toEqual(expect.arrayContaining(["invoice", "task", "opportunity_created", "opportunity_stage", "activity"]));
+    expect(timeline.at(-1)).toMatchObject({ kind: "activity", title: "Call: First call" });
+    const company = (await as((tx) => listCompanies(tx))).find((c) => c.contactId === vets.id)!;
+    expect([company.people, company.openTasks, company.openPipeline]).toEqual([1, 1, "0.00"]);
+  });
+
+  it("CRM9: the pipeline in stage order with amounts", async () => {
+    const { as, vets, deal } = await withVets();
+    await as((tx) => createOpportunity(tx, { name: "Clinic display", contactId: vets.id, amount: "600", stage: "proposal" }));
+    await as((tx) => createOpportunity(tx, { name: "Staff gifts", contactId: vets.id, amount: "150.50", stage: "new" }));
+    const list = await as((tx) => listOpportunities(tx));
+    expect(list.map((o) => [o.stage, o.name])).toEqual([
+      ["new", deal.name],
+      ["new", "Staff gifts"],
+      ["proposal", "Clinic display"],
+    ]);
+    const company = (await as((tx) => listCompanies(tx))).find((c) => c.contactId === vets.id)!;
+    expect(company.openPipeline).toBe("3150.50");
+  });
+
+  it("over HTTP: viewers read; only bookkeepers and up write", async () => {
+    const { org, vets } = await withVets();
+    const viewerCookie = await sessionCookieFor(viewer);
+    const read = await companyRoute.GET(apiRequest(`/api/crm/companies/${vets.id}?organisationId=${org}`, { cookie: viewerCookie }), {
+      params: Promise.resolve({ contactId: vets.id }),
+    });
+    expect(read.status).toBe(200);
+    const body = (await read.json()) as { people: unknown[]; opportunities: unknown[] };
+    expect([body.people.length, body.opportunities.length]).toEqual([1, 1]);
+    const post = await peopleRoute.POST(
+      apiRequest("/api/crm/people", { method: "POST", cookie: viewerCookie, body: { organisationId: org, firstName: "Ben" } }),
+      noContext,
+    );
+    expect(post.status).toBe(403);
+  });
+
+  it("CRM10: Home shows only the signed-in person's open opportunities and tasks due or overdue", async () => {
+    const { org, as, vets, deal } = await withVets();
+    const acme = (await as((tx) => createContact(tx, { idempotencyKey: key("c"), name: "Acme Inc", isCustomer: true, currencyCode: "USD" }))).contact;
+    const today = todayIsoDate();
+    const day = (offset: number) => {
+      const d = new Date(`${today}T00:00:00Z`);
+      d.setUTCDate(d.getUTCDate() + offset);
+      return d.toISOString().slice(0, 10);
+    };
+    const opportunity = (name: string, contactId: string, amount: string, stage: string, ownerUserId: string | null) =>
+      as((tx) => createOpportunity(tx, { name, contactId, amount, stage, ownerUserId }));
+    await opportunity("Clinic display", vets.id, "600", "proposal", owner.id);
+    await opportunity("Logo licence", acme.id, "100", "meeting", owner.id);
+    await opportunity("Menu reprint", vets.id, "500", "won", owner.id);
+    await opportunity("Kennel cards", vets.id, "900", "new", viewer.id);
+    await opportunity("Nobody's", vets.id, "50", "new", null);
+    const task = (title: string, dueDate: string | null, status: string, assigneeUserId: string | null) =>
+      as((tx) => createTask(tx, { title, dueDate, status, assigneeUserId, contactId: vets.id }));
+    await task("Post brochure", day(1), "todo", owner.id);
+    await task("Call Aroha", today, "in_progress", owner.id);
+    await task("Send sample kit", day(-1), "todo", owner.id);
+    await task("Already sent", day(-1), "done", owner.id);
+    await task("Some day", null, "todo", owner.id);
+    await task("Ben's task", day(-1), "todo", viewer.id);
+    await task("Unassigned", day(-1), "todo", null);
+    for (let n = 1; n <= 11; n += 1) {
+      await as((tx) => createActivity(tx, { kind: "note", happenedAt: `2026-09-${String(n + 10).padStart(2, "0")}T10:00:00Z`, subject: `Note ${n}`, contactId: vets.id }));
+    }
+
+    const home = async (user: SessionUser) => {
+      const response = await homeRoute.GET(apiRequest(`/api/crm/home?organisationId=${org}`, { cookie: await sessionCookieFor(user) }), noContext);
+      expect(response.status).toBe(200);
+      return (await response.json()) as CrmHome;
+    };
+
+    const jemma = await home(owner);
+    expect(jemma.today).toBe(today);
+    expect(jemma.opportunities.map((o) => [o.name, o.stage, o.currencyCode, o.amount])).toEqual([
+      [deal.name, "new", "NZD", "2400.00"],
+      ["Logo licence", "meeting", "USD", "100.00"],
+      ["Clinic display", "proposal", "NZD", "600.00"],
+    ]);
+    expect(jemma.totals).toEqual([
+      { currencyCode: "NZD", amount: "3000.00", count: 2 },
+      { currencyCode: "USD", amount: "100.00", count: 1 },
+    ]);
+    expect(jemma.tasks.map((t) => [t.title, t.dueDate, t.status])).toEqual([
+      ["Send sample kit", day(-1), "todo"],
+      ["Call Aroha", today, "in_progress"],
+    ]);
+    expect(jemma.activities.map((a) => a.subject)).toEqual(["Note 11", "Note 10", "Note 9", "Note 8", "Note 7", "Note 6", "Note 5", "Note 4", "Note 3", "Note 2"]);
+
+    // Ben, a viewer, sees only his own work, and the same recent activities.
+    const ben = await home(viewer);
+    expect(ben.opportunities.map((o) => o.name)).toEqual(["Kennel cards"]);
+    expect(ben.totals).toEqual([{ currencyCode: "NZD", amount: "900.00", count: 1 }]);
+    expect(ben.tasks.map((t) => t.title)).toEqual(["Ben's task"]);
+    expect(ben.activities.map((a) => a.id)).toEqual(jemma.activities.map((a) => a.id));
+
+    // Someone outside the organisation, or not signed in, gets nothing.
+    const outside = await homeRoute.GET(apiRequest(`/api/crm/home?organisationId=${org}`, { cookie: await sessionCookieFor(outsider) }), noContext);
+    expect([403, 404]).toContain(outside.status);
+    const anonymous = await homeRoute.GET(apiRequest(`/api/crm/home?organisationId=${org}`), noContext);
+    expect(anonymous.status).toBe(401);
+  });
+});

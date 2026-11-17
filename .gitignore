@@ -1,0 +1,38 @@
+node_modules/
+.next/
+out/
+dist/
+coverage/
+*.log
+data/
+*.db
+*.db-wal
+*.db-shm
+.env
+.env.local
+.env.development
+.env.production
+.env.test
+.env.*.local
+.tmp/
+tmp/
+.DS_Store
+*.tsbuildinfo
+
+# Tohyee server app (Windows) build output
+installer/windows/tray/bin/
+installer/windows/tray/obj/
+.claude/worktrees/
+
+# Analytics data files made when running locally.
+/analytics/
+
+# Local backups written by a development server
+/backups/
+
+# The Android app's first-run page script, built from android-shell/src (scripts/build-android-shell.mjs).
+/android-shell/www/app.js
+
+# Farm security camera media written by a development server.
+/camera-media/
+/vegetation-imagery/

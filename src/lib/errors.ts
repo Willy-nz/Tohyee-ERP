@@ -1,0 +1,68 @@
+/**
+ * Typed errors. Services throw these; API routes turn them into HTTP responses
+ * (see src/lib/api/http.ts). Anything that is not an HttpError is treated as an
+ * unexpected failure and returned as a generic 500 without leaking details.
+ */
+export class HttpError extends Error {
+  readonly status: number;
+  readonly code: string;
+  /** Extra facts for the caller (never internal detail), sent with the message. */
+  readonly details?: Record<string, unknown>;
+
+  constructor(status: number, code: string, message: string, details?: Record<string, unknown>) {
+    super(message);
+    this.name = new.target.name;
+    this.status = status;
+    this.code = code;
+    if (details) this.details = details;
+  }
+}
+
+export class ValidationError extends HttpError {
+  constructor(message: string) {
+    super(400, "validation_error", message);
+  }
+}
+
+export class UnauthorizedError extends HttpError {
+  constructor(message = "Please sign in.") {
+    super(401, "unauthorized", message);
+  }
+}
+
+export class ForbiddenError extends HttpError {
+  constructor(message = "You don't have permission to do that.") {
+    super(403, "forbidden", message);
+  }
+}
+
+export class NotFoundError extends HttpError {
+  constructor(message: string) {
+    super(404, "not_found", message);
+  }
+}
+
+export class ConflictError extends HttpError {
+  constructor(message: string) {
+    super(409, "conflict", message);
+  }
+}
+
+export class PayloadTooLargeError extends HttpError {
+  constructor(message: string) {
+    super(413, "payload_too_large", message);
+  }
+}
+
+export class TooManyRequestsError extends HttpError {
+  /** `retryAfterSeconds`, when known, is sent as the Retry-After header and in the details. */
+  constructor(message: string, retryAfterSeconds?: number) {
+    super(429, "too_many_requests", message, retryAfterSeconds ? { retryAfterSeconds: Math.ceil(retryAfterSeconds) } : undefined);
+  }
+}
+
+export class UnavailableError extends HttpError {
+  constructor(message: string) {
+    super(503, "unavailable", message);
+  }
+}

@@ -1,0 +1,162 @@
+{
+  "about": "Announcements shown on the Home page of the Tohyee server app (Windows), next to the GitHub releases. Edit this file on main and GitHub Pages publishes it to https://willy-nz.github.io/Tohyee/news.json. Each item: date (YYYY-MM-DD), title, body, and optionally link (https) and kind (\"conference\" shows it in the conference card).",
+  "items": [
+    {
+      "date": "2026-11-16",
+      "title": "Tohyee 0.36.0: Analytics reports on paper, and rounded reports that add up",
+      "body": "Print an Analytics report or save it as a PDF, with a cover, contents, sign-off and your organisation's directory. Report layouts can round to dollars, thousands or millions and still add up. Farm staff can use an AI for field work, AI keys can be Reports only and have end dates, and an owner can have a person approve an AI's voids and deletes.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.36.0"
+    },
+    {
+      "date": "2026-11-13",
+      "title": "Tohyee 0.35.0: stock in the farm Log, and pigs",
+      "body": "Move a mob, record births, deaths and treatments from the farm Log on your phone. Livestock adds pigs, bought bobby calves, high-priced animals from before your first year, and stock bought from family who used the herd scheme. Young stock under national standard cost now follows IRD's own formula.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.35.0"
+    },
+    {
+      "date": "2026-11-12",
+      "title": "Tohyee 0.34.0: pasture cover from satellite, and daily farm rain",
+      "body": "Satellite greenness can now estimate pasture cover, from a line fitted to your own plate-meter readings and checked before you turn it on. Each farm gets daily rain and temperature from MetService, and rain can make the estimates closer. Voiding journals works on servers with a separate database login.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.34.0"
+    },
+    {
+      "date": "2026-11-12",
+      "title": "Tohyee 0.33.0: gift cards, Afterpay deposits and recoding in place",
+      "body": "Shopify gift cards and voucher products are held until they're spent, with GST when sold. Afterpay deposits are matched to their orders, with the fee. Made-to-order shops can turn off stock items. Bank transactions can be recoded in place, manual journals voided, and accounts given reporting names.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.33.0"
+    },
+    {
+      "date": "2026-11-11",
+      "title": "Tohyee 0.32.0: annual statements as one document, and a new layout editor",
+      "body": "The annual financial statements are now one document you page through: a cover, automatic contents, a compilation report, the statements, notes and a depreciation schedule, with every word editable and Save as draft. The layout editor has one toolbar, Details beside the report and Add column. Bank lines can be removed and redone.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.32.0"
+    },
+    {
+      "date": "2026-11-10",
+      "title": "Tohyee 0.31.0: Shopify sales when they're sent",
+      "body": "Shopify sales can now count when they're sent, not just when they're paid: what's still to send is held in Income in advance until Shopify marks it sent, line by line, with GST still counted on payment. Sales › To send shows the orders not yet sent, live, and Mark as sent covers one Shopify never marked fulfilled.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.31.0"
+    },
+    {
+      "date": "2026-11-07",
+      "title": "Tohyee 0.30.0: annual statements as a report, and layouts for every statement",
+      "body": "The annual financial statements are now a report you can edit, with Edit layout beside each statement, including cash flows and changes in equity. There's a general ledger report, custom reports can start from any report, the journals list shows 100 a page with click to edit, and a bank transaction opens ready to recode.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.30.0"
+    },
+    {
+      "date": "2026-11-06",
+      "title": "Tohyee 0.29.0: e-signatures, time-limited access, farm animals and weather",
+      "body": "Sign quotes, year-end statements, staff paperwork and any PDF online. Your AI can build Analytics reports, and every report has a history. Give people access for a set time and write a hiring brief from your books. On the farm: mobs, breeding and rotation planning, a farm timeline, animals with weights and body condition scores, treatments with safe dates, satellite paddock greenness, MetService forecasts with your own key, rainfall, team tasks and map extras.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.29.0"
+    },
+    {
+      "date": "2026-11-04",
+      "title": "Tohyee 0.27.0: oldest month first and Shopify reconnect",
+      "body": "Compared months run oldest to newest, Shopify stores can be reconnected and payouts clear properly, bank suggestions skip voided journals, and the AI connection is cleaner. Plus a new website.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.27.0"
+    },
+    {
+      "date": "2026-11-04",
+      "title": "Tohyee 0.26.0: report headings, comparisons and layouts",
+      "body": "Reports now look like financial statements, compare with earlier periods, filter by tracking, and have an Edit layout button with drag, groups and formulas. Plus Shopify payouts and Afterpay/PayPal posting properly.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.26.0"
+    },
+    {
+      "date": "2026-11-03",
+      "title": "Tohyee 0.25.0: simpler screens and smarter banking",
+      "body": "Fewer words on every screen, a guided Akahu bank feed setup, Unreconcile selected, AI bank coding you approve, Shopify payouts matched in the bank, personal and mixed-use cards, and a GST registration you confirm. Plus everything from 0.24.0: guided Shopify setup and more Shopify data in Analytics.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.25.0"
+    },
+    {
+      "date": "2026-11-02",
+      "title": "Tohyee 0.23.0: farm security cameras",
+      "body": "Reolink cameras for the farm: photos and clips by camera, a warning when one goes quiet, and keeping incidents. 4G cameras send to a small post box server that Tohyee collects from. Plus shorter help with (i) buttons and pictures across the whole app.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.23.0"
+    },
+    {
+      "date": "2026-10-30",
+      "title": "Tohyee 0.20.0: Tohyee for Android",
+      "body": "New: an Android app (APK) that opens your own Tohyee server, with tractor recording while the screen is locked, reminders and the phone's camera. Also paddock photos with AI cover estimates you accept or change. The first APK is a test build until the app is signed.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.20.0"
+    },
+    {
+      "date": "2026-10-30",
+      "title": "Tohyee 0.19.0: Farm as its own app",
+      "body": "New: Farm is its own app with tabs on every farm page, Use my location on every map, opt-in farm team locations, and install steps for each browser, including Firefox on Android. The big Call 111 button is replaced by an Emergency details card.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.19.0"
+    },
+    {
+      "date": "2026-10-29",
+      "title": "Tohyee 0.18.0: effluent, easy aerial photos and the phone app",
+      "body": "New: effluent management (daily logs, pond levels, checks, incidents and a council pack you download), aerial photos set up in three steps with your own LINZ key, Tohyee on your phone with farm information offline and tractor mode, farm safety, a Farm staff role, passkeys and invites. Next.js is updated to fix critical security problems, so update soon.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.18.0"
+    },
+    {
+      "date": "2026-10-24",
+      "title": "Tohyee 0.14.0: try the demo farm",
+      "body": "New: add Kōwhai Dairies Ltd, a made-up dairy farm with farm records, books, payroll, GST and Analytics reports, from the organisation menu. Also security fixes: removing someone's Google sign-in now disconnects their AI apps, keys and PowerPoint add-in sign-ins, and restoring people from a backup keeps their Google sign-in. Update soon if you use those.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.14.0"
+    },
+    {
+      "date": "2026-10-23",
+      "title": "Tohyee 0.13.0",
+      "body": "New: Claude.ai, ChatGPT and other AI apps connect by signing in to Tohyee instead of copying a key, with a much shorter AI page; and a PowerPoint add-in that puts live, clickable Analytics reports on slides. Both need Remote access.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.13.0"
+    },
+    {
+      "date": "2026-10-22",
+      "title": "Tohyee 0.12.0",
+      "body": "New: Analytics much closer to BI tools, with themes, many more charts and maps, report pages, click-to-filter, drill-down, bookmarks, calculations, year to date and relationships between tables; staff kept to their own farms; checked backups with a recovery kit and restore wizard; IRD account file imports (not yet reviewed by an accountant); filing email attachments; and Sign in with Google for invited people. Before updating, read the release notes: farm staff need farms assigned.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.12.0"
+    },
+    {
+      "date": "2026-10-20",
+      "title": "Tohyee 0.11.0",
+      "body": "New: a farm dashboard as Home; My mail, a private copy of an owner's own email for them and their AI; a co-op share register; SQL Server, PostgreSQL, MySQL and Google Analytics in Analytics; chart formatting, key figure comparisons and flexible layouts; one look for every graph; CRM tidy-ups; and provisional tax payment allocation (not yet reviewed by an accountant).",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.11.0"
+    },
+    {
+      "date": "2026-10-19",
+      "title": "Tohyee 0.10.0",
+      "body": "New: income tax from the books (provisional tax, interest, tax depreciation, the imputation credit account and the IR10, IR4 and IR3 boxes, not yet reviewed by an accountant); pasture and feed records; a Farming API for your own apps; a farm calendar from your own email; livestock reporting choices; expected sick leave; and clearer screens.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.10.0"
+    },
+    {
+      "date": "2026-10-15",
+      "title": "Tohyee 0.9.0",
+      "body": "New: Tier 3 and Tier 4 not-for-profit performance reports; price changes across repeating invoices; bring in a year's general ledger from MYOB as history; free and negative lines on invoices and bills; copy last week's roster; and security hardening. Read the notes before updating if you have your own scripts.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.9.0"
+    },
+    {
+      "date": "2026-10-15",
+      "title": "Tohyee 0.8.0",
+      "body": "New: farming (paddocks, aerial imagery, fertiliser plans, soil tests, benchmarks); livestock for tax; jobs, rosters and clocking in; a bigger CRM; year-end financial statements and an accountant pack; your AI on the farm. Before you update, read the notes on two-step sign-in and remote access.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.8.0"
+    },
+    {
+      "date": "2026-10-13",
+      "title": "On main: jobs, rosters and clocking in",
+      "body": "Development update: jobs with visits, checklists, photos and materials on the invoice; rosters costed against a weekly budget; staff clocking in with a PIN on a shared device, straight onto their timesheets; and livestock now covers deer and goats. These are in 0.8.0.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/blob/main/docs/FEATURES.md"
+    },
+    {
+      "date": "2026-10-12",
+      "title": "On main: expanded CRM and new livestock tools",
+      "body": "Development update: leads, sales teams, follow-ups, campaigns, team forecasts and deal quotes; livestock movements, supported herd scheme and NSC valuations, agent account sales and monthly management values. These are in 0.8.0. Farm budgeting and industry benchmarking remain planned.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/blob/main/docs/FEATURES.md"
+    },
+    {
+      "date": "2026-10-06",
+      "title": "Tohyee 0.7.0",
+      "body": "New: bank feeds from SimpleFIN, Stripe, PayPal and Wise; statement files from a folder or mailbox; bank rules with conditions and splits; a bills inbox, approval rules and Pay now links; cash flow forecast and consolidation; WooCommerce orders; Excel sources and pivots in Analytics; Ctrl+K search. Plus fixes from the October project review.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.7.0"
+    },
+    {
+      "date": "2026-09-30",
+      "kind": "conference",
+      "title": "Save the date: TohyeeCon",
+      "body": "The first Tohyee conference is coming to Ōtepoti Dunedin… one day. Date to be confirmed (probably after payroll is built). 🐶",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP"
+    }
+  ]
+}

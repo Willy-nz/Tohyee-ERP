@@ -1,0 +1,23 @@
+# For development only (npm run db:start): a local PostgreSQL with a
+# password written in this file. It listens on this computer only
+# (127.0.0.1). Not for running Tohyee for real.
+services:
+  postgres:
+    image: postgres:17
+    container_name: tohyee-postgres
+    environment:
+      POSTGRES_DB: tohyee
+      POSTGRES_USER: app_user
+      POSTGRES_PASSWORD: app_password
+    ports:
+      - "127.0.0.1:5432:5432"
+    volumes:
+      - tohyee_postgres_data:/var/lib/postgresql/data
+    healthcheck:
+      test: ["CMD-SHELL", "pg_isready -U app_user -d tohyee"]
+      interval: 10s
+      timeout: 5s
+      retries: 5
+
+volumes:
+  tohyee_postgres_data:

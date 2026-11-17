@@ -1,0 +1,1293 @@
+import { getGstRegistration, gstRegistrationForPeriod } from "@/lib/tax/registration";
+import { writeAuditEvent } from "@/lib/audit";
+import type { OrgTx } from "@/lib/db/org-transaction";
+import { parseOptionalIsoDate, todayIsoDate } from "@/lib/dates";
+import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
+import { assertSameRequest, requestHash } from "@/lib/idempotency";
+import { abs, add, cmp, dec, isPositive, neg, toFixedString, ZERO_DECIMAL } from "@/lib/money/decimal";
+import { personName } from "@/lib/people/names";
+import {
+  basisChangeAdjustment,
+  calculateGstBoxes,
+  changedGstBoxes,
+  countsWhenSettled,
+  GST_STANDARD_RATE,
+  type GstAdjustment,
+  type GstBoxChange,
+  type GstBoxes,
+  type GstReturnFigures,
+  gstInOutstanding,
+  type GstPeriodSetting,
+  gstPeriodSetting,
+  parseGstAdjustments,
+  parseGstPeriod,
+  settlementShares,
+  suggestedGstPeriod,
+} from "@/lib/reports/gst-boxes";
+import type { GstBasis, TaxCategory } from "@/lib/tax/categories";
+import { optionalSource, requireId, requireIdempotencyKey } from "@/lib/validation";
+
+/**
+ * The GST return (NZ GST101A, boxes 5-15), worked out from approved documents
+ * on the organisation's GST basis. On the invoice basis a sales invoice,
+ * sales credit note, bill or supplier credit note counts on the date it was
+ * approved (its own date) and again, the other way, on the date it was
+ * voided (G1-G9). On the payments basis they count when they're settled -
+ * paid, credited or refunded - each settlement counting the document's lines
+ * in proportion; on the hybrid basis sales count as on the invoice basis and
+ * purchases as on the payments basis (G10-G19). Bank transactions (BK6, BK7,
+ * BK11) count on their date on every basis: spend money like a bill, receive
+ * money like an invoice. Drafts, manual journals, stock movements and FX
+ * revaluations never count. See "GST return" in docs/ACCOUNTING-EXAMPLES.md.
+ */
+
+export const GST_EVENT_TYPES = [
+  "invoice_approved",
+  "invoice_voided",
+  "credit_note_approved",
+  "credit_note_voided",
+  "bill_approved",
+  "bill_voided",
+  "supplier_credit_note_approved",
+  "supplier_credit_note_voided",
+  "bank_transaction_posted",
+  "bank_transaction_voided",
+  "customer_payment",
+  "customer_payment_voided",
+  "credit_note_applied",
+  "credit_note_application_removed",
+  "credit_note_refunded",
+  "credit_note_refund_voided",
+  "overpayment_applied",
+  "overpayment_application_removed",
+  "supplier_payment",
+  "supplier_payment_voided",
+  "supplier_credit_note_applied",
+  "supplier_credit_note_application_removed",
+  "supplier_credit_note_refunded",
+  "supplier_credit_note_refund_voided",
+  "expense_claim_approved",
+  "expense_claim_voided",
+  "expense_claim_payment",
+  "expense_claim_payment_voided",
+  "rations_adjustment",
+] as const;
+export type GstEventType = (typeof GST_EVENT_TYPES)[number];
+
+export type GstDocumentType = "sales_invoice" | "sales_credit_note" | "bill" | "supplier_credit_note" | "bank_transaction" | "expense_claim" | "livestock_rations";
+export type GstLineBox = "5" | "6" | "11";
+
+/** One document line in a GST event, with the boxes it counts in (none when it's left out). */
+export type GstReturnLine = {
+  side: "sales" | "purchases";
+  eventType: GstEventType;
+  eventDate: string;
+  documentType: GstDocumentType;
+  documentId: string;
+  documentNumber: string;
+  reference: string | null;
+  /** Null for expense claims: their receipts name a supplier rather than a contact. */
+  contactId: string | null;
+  contactName: string;
+  documentLineOrder: number;
+  description: string;
+  taxCode: string | null;
+  category: TaxCategory;
+  taxRate: string;
+  /** Including GST; negative for credit notes and voids. For a settlement, the line's share. */
+  amount: string;
+  gst: string;
+  boxes: GstLineBox[];
+  /** For a settlement (payments and hybrid bases): the amount settled and the document's total. */
+  settledAmount: string | null;
+  documentTotal: string | null;
+  /**
+   * For a settlement worked out now: the document line's whole GST, so the
+   * share can be checked: GST counted = settled / total x this, with
+   * any leftover cent on the largest line. Null otherwise, and on filed
+   * returns (they keep only the share).
+   */
+  lineGst: string | null;
+  /** Set on a late claim: the filed return whose period the line is dated in (LG1-LG7). */
+  lateFrom?: { gstReturnId: string; periodStart: string; periodEnd: string } | null;
+};
+
+const MONEY_SCALE = 2;
+const money = (value: string) => toFixedString(dec(value), MONEY_SCALE);
+
+/** A document line in an event, before a settlement's share is worked out. */
+type RawEventRow = {
+  side: "sales" | "purchases";
+  event_type: GstEventType;
+  event_date: string;
+  sign: number;
+  settlement_id: string | null;
+  settled: string | null;
+  document_total: string;
+  document_type: GstDocumentType;
+  document_id: string;
+  document_number: string;
+  reference: string | null;
+  contact_id: string | null;
+  contact_name: string;
+  document_line_order: number;
+  description: string;
+  tax_code: string | null;
+  category: TaxCategory;
+  tax_rate: string;
+  line_amount: string;
+  line_gst: string;
+  /** Set on lines of foreign-currency invoices, bills and credit notes (MC13). */
+  foreign_currency?: boolean;
+};
+
+/** A counted line as it was filed. */
+type StoredLineRow = Omit<RawEventRow, "sign" | "settlement_id" | "settled" | "document_total" | "line_amount" | "line_gst"> & {
+  amount: string;
+  gst: string;
+  settled_amount: string | null;
+  document_total: string | null;
+  late_from_return_id?: string | null;
+  late_reversal?: boolean | null;
+  late_from_period_start?: string | null;
+  late_from_period_end?: string | null;
+};
+
+/** Settlements: payments, credit applied, refunds and overpayments applied, and their voids and removals. */
+const SETTLEMENTS_SQL = `
+  select 'sales' as side, 'customer_payment' as event_type, p.payment_date as event_date, 1 as sign,
+         'sales_invoice' as document_type, p.invoice_id as document_id, p.id as settlement_id,
+         p.amount - p.overpayment_amount as settled
+    from customer_payments p
+   where $3 and p.payment_date between $1 and $2 and p.amount > p.overpayment_amount
+  union all
+  select 'sales', 'customer_payment_voided', p.void_date, -1, 'sales_invoice', p.invoice_id, p.id,
+         p.amount - p.overpayment_amount
+    from customer_payments p
+   where $3 and p.status = 'voided' and p.void_date between $1 and $2 and p.amount > p.overpayment_amount
+  union all
+  select 'sales', 'credit_note_applied', a.application_date, 1, 'sales_invoice', a.invoice_id, a.id, a.amount
+    from sales_credit_note_applications a
+   where $3 and a.application_date between $1 and $2
+  union all
+  select 'sales', 'credit_note_applied', a.application_date, -1, 'sales_credit_note', a.credit_note_id, a.id, a.amount
+    from sales_credit_note_applications a
+   where $3 and a.application_date between $1 and $2
+  union all
+  select 'sales', 'credit_note_application_removed', a.removal_date, -1, 'sales_invoice', a.invoice_id, a.id, a.amount
+    from sales_credit_note_applications a
+   where $3 and a.status = 'removed' and a.removal_date between $1 and $2
+  union all
+  select 'sales', 'credit_note_application_removed', a.removal_date, 1, 'sales_credit_note', a.credit_note_id, a.id,
+         a.amount
+    from sales_credit_note_applications a
+   where $3 and a.status = 'removed' and a.removal_date between $1 and $2
+  union all
+  select 'sales', 'credit_note_refunded', r.refund_date, -1, 'sales_credit_note', r.credit_note_id, r.id, r.amount
+    from sales_credit_note_refunds r
+   where $3 and r.refund_date between $1 and $2
+  union all
+  select 'sales', 'credit_note_refund_voided', r.void_date, 1, 'sales_credit_note', r.credit_note_id, r.id, r.amount
+    from sales_credit_note_refunds r
+   where $3 and r.status = 'voided' and r.void_date between $1 and $2
+  union all
+  select 'sales', 'overpayment_applied', a.application_date, 1, 'sales_invoice', a.invoice_id, a.id, a.amount
+    from customer_overpayment_applications a
+   where $3 and a.application_date between $1 and $2
+  union all
+  select 'sales', 'overpayment_application_removed', a.removal_date, -1, 'sales_invoice', a.invoice_id, a.id, a.amount
+    from customer_overpayment_applications a
+   where $3 and a.status = 'removed' and a.removal_date between $1 and $2
+  union all
+  select 'purchases', 'supplier_payment', p.payment_date, 1, 'bill', p.bill_id, p.id, p.amount
+    from supplier_payments p
+   where $4 and p.payment_date between $1 and $2
+  union all
+  select 'purchases', 'supplier_payment_voided', p.void_date, -1, 'bill', p.bill_id, p.id, p.amount
+    from supplier_payments p
+   where $4 and p.status = 'voided' and p.void_date between $1 and $2
+  union all
+  select 'purchases', 'supplier_credit_note_applied', a.application_date, 1, 'bill', a.bill_id, a.id, a.amount
+    from supplier_credit_note_applications a
+   where $4 and a.application_date between $1 and $2
+  union all
+  select 'purchases', 'supplier_credit_note_applied', a.application_date, -1, 'supplier_credit_note', a.credit_note_id,
+         a.id, a.amount
+    from supplier_credit_note_applications a
+   where $4 and a.application_date between $1 and $2
+  union all
+  select 'purchases', 'supplier_credit_note_application_removed', a.removal_date, -1, 'bill', a.bill_id, a.id, a.amount
+    from supplier_credit_note_applications a
+   where $4 and a.status = 'removed' and a.removal_date between $1 and $2
+  union all
+  select 'purchases', 'supplier_credit_note_application_removed', a.removal_date, 1, 'supplier_credit_note',
+         a.credit_note_id, a.id, a.amount
+    from supplier_credit_note_applications a
+   where $4 and a.status = 'removed' and a.removal_date between $1 and $2
+  union all
+  select 'purchases', 'supplier_credit_note_refunded', r.refund_date, -1, 'supplier_credit_note', r.credit_note_id,
+         r.id, r.amount
+    from supplier_credit_note_refunds r
+   where $4 and r.refund_date between $1 and $2
+  union all
+  select 'purchases', 'supplier_credit_note_refund_voided', r.void_date, 1, 'supplier_credit_note', r.credit_note_id,
+         r.id, r.amount
+    from supplier_credit_note_refunds r
+   where $4 and r.status = 'voided' and r.void_date between $1 and $2
+  union all
+  select 'purchases', 'expense_claim_payment', p.payment_date, 1, 'expense_claim', p.claim_id, p.id, p.amount
+    from expense_claim_payments p
+   where $4 and p.payment_date between $1 and $2
+  union all
+  select 'purchases', 'expense_claim_payment_voided', p.void_date, -1, 'expense_claim', p.claim_id, p.id, p.amount
+    from expense_claim_payments p
+   where $4 and p.status = 'voided' and p.void_date between $1 and $2`;
+
+/**
+ * Every line of every GST event dated in the period, in one statement so the
+ * figures come from one consistent snapshot. $3 is true when sales count when
+ * settled, $4 when purchases do. A line's amount including GST is its net
+ * amount plus its GST (whatever the document's amounts mode); a document's
+ * total is the sum of its lines.
+ */
+const EVENT_LINES_SQL = `
+-- Invoices and bills owed at the conversion date (is_opening_balance) were
+-- approved before it, so approving or voiding one never counts; on the bases
+-- where they count when settled, paying them after it does, like any other
+-- (IM11, IM13, IM18, IM19).
+with events as (
+  select 'sales' as side, 'invoice_approved' as event_type, i.invoice_date as event_date, 1 as sign,
+         'sales_invoice' as document_type, i.id as document_id, null::bigint as settlement_id,
+         null::numeric as settled
+    from sales_invoices i
+   where not $3 and i.status in ('approved', 'voided') and i.invoice_date between $1 and $2 and not i.is_opening_balance
+  union all
+  select 'sales', 'invoice_voided', i.void_date, -1, 'sales_invoice', i.id, null, null
+    from sales_invoices i
+   where not $3 and i.status = 'voided' and i.void_date between $1 and $2 and not i.is_opening_balance
+  union all
+  select 'sales', 'credit_note_approved', n.credit_note_date, -1, 'sales_credit_note', n.id, null, null
+    from sales_credit_notes n
+   where not $3 and n.status in ('approved', 'voided') and n.credit_note_date between $1 and $2
+  union all
+  select 'sales', 'credit_note_voided', n.void_date, 1, 'sales_credit_note', n.id, null, null
+    from sales_credit_notes n
+   where not $3 and n.status = 'voided' and n.void_date between $1 and $2
+  union all
+  select 'purchases', 'bill_approved', b.bill_date, 1, 'bill', b.id, null, null
+    from bills b
+   where not $4 and b.status in ('approved', 'voided') and b.bill_date between $1 and $2 and not b.is_opening_balance
+  union all
+  select 'purchases', 'bill_voided', b.void_date, -1, 'bill', b.id, null, null
+    from bills b
+   where not $4 and b.status = 'voided' and b.void_date between $1 and $2 and not b.is_opening_balance
+  union all
+  select 'purchases', 'supplier_credit_note_approved', s.credit_note_date, -1, 'supplier_credit_note', s.id, null, null
+    from supplier_credit_notes s
+   where not $4 and s.status in ('approved', 'voided') and s.credit_note_date between $1 and $2
+  union all
+  select 'purchases', 'supplier_credit_note_voided', s.void_date, 1, 'supplier_credit_note', s.id, null, null
+    from supplier_credit_notes s
+   where not $4 and s.status = 'voided' and s.void_date between $1 and $2
+  union all
+  select 'purchases', 'expense_claim_approved', x.claim_date, 1, 'expense_claim', x.id, null, null
+    from expense_claims x
+   where not $4 and x.status in ('approved', 'voided') and x.claim_date between $1 and $2
+  union all
+  select 'purchases', 'expense_claim_voided', x.void_date, -1, 'expense_claim', x.id, null, null
+    from expense_claims x
+   where not $4 and x.status = 'voided' and x.void_date between $1 and $2
+  union all
+  select case t.kind when 'spend' then 'purchases' else 'sales' end, 'bank_transaction_posted', t.transaction_date, 1,
+         'bank_transaction', t.id, null, null
+    from bank_transactions t
+   where t.transaction_date between $1 and $2
+  union all
+  select case t.kind when 'spend' then 'purchases' else 'sales' end, 'bank_transaction_voided', t.void_date, -1,
+         'bank_transaction', t.id, null, null
+    from bank_transactions t
+   where t.status = 'voided' and t.void_date between $1 and $2
+  union all
+  -- The owner's rations (homekill) yearly adjustment with GST counts on its date on every basis (RAT6, RAT7). A voided
+  -- one drops out, so one voided after its period is filed is taken back off as a late claim (RAT8).
+  select 'sales', 'rations_adjustment', r.adjustment_date, 1, 'livestock_rations', r.id, null, null
+    from livestock_rations_adjustments r
+   where r.gst_applies and r.voided_at is null and r.adjustment_date between $1 and $2
+  union all
+  ${SETTLEMENTS_SQL}
+),
+documents as (
+  select 'sales_invoice' as document_type, id as document_id, invoice_number as document_number, reference, contact_id,
+         null::text as claimant, total, base_total
+    from sales_invoices
+  union all
+  select 'sales_credit_note', id, credit_note_number, reference, contact_id, null, total, base_total from sales_credit_notes
+  union all
+  select 'bill', id, supplier_invoice_number, null, contact_id, null, total, base_total from bills
+  union all
+  select 'supplier_credit_note', id, supplier_credit_note_number, reference, contact_id, null, total, base_total from supplier_credit_notes
+  union all
+  select 'bank_transaction', id, coalesce(reference, 'BT-' || id), reference, contact_id, null, null, null from bank_transactions
+  union all
+  select 'expense_claim', id, 'CLAIM-' || id, null, null, claimant_email, null, null from expense_claims
+  union all
+  select 'livestock_rations', id, 'HOMEKILL-' || year_end, null, null, 'Owner (homekill)', null, null from livestock_rations_adjustments
+),
+-- Foreign-currency documents count at their base amounts: each line converted
+-- at the document's rate, as at the time of supply (GST Act s 77; MC13).
+document_lines as (
+  select 'sales_invoice' as document_type, invoice_id as document_id, line_order, description, tax_code_id,
+         tax_rate, coalesce(base_net_amount, net_amount) as net_amount, coalesce(base_tax_amount, tax_amount) as tax_amount
+    from sales_invoice_lines
+  union all
+  select 'sales_credit_note', credit_note_id, line_order, description, tax_code_id, tax_rate,
+         coalesce(base_net_amount, net_amount), coalesce(base_tax_amount, tax_amount)
+    from sales_credit_note_lines
+  union all
+  select 'bill', bill_id, line_order, description, tax_code_id, tax_rate,
+         coalesce(base_net_amount, net_amount), coalesce(base_tax_amount, tax_amount)
+    from bill_lines
+  union all
+  select 'supplier_credit_note', credit_note_id, line_order, description, tax_code_id, tax_rate,
+         coalesce(base_net_amount, net_amount), coalesce(base_tax_amount, tax_amount)
+    from supplier_credit_note_lines
+  union all
+  -- Foreign-currency spend and receive money count at their base amounts (FXB2).
+  select 'bank_transaction', bank_transaction_id, line_order, description, tax_code_id, tax_rate,
+         coalesce(base_net_amount, net_amount), coalesce(base_tax_amount, tax_amount)
+    from bank_transaction_lines
+  union all
+  select 'expense_claim', claim_id, line_order, supplier_name || ': ' || description, tax_code_id, tax_rate, net_amount,
+         tax_amount
+    from expense_claim_receipts
+  union all
+  select 'livestock_rations', id, 1, 'Owner''s rations (homekill) for the year: ' || reason, tax_code_id, 0.15::numeric, net_amount, gst_amount
+    from livestock_rations_adjustments
+   where gst_applies
+)
+select e.side, e.event_type, e.event_date, e.sign, e.settlement_id::text,
+       -- A foreign-currency document's settlement is its share of the document's base amount.
+       (case when d.base_total is not null and e.settled is not null then round(e.settled * d.base_total / d.total, 2)
+             else e.settled end)::text as settled,
+       d.base_total is not null as foreign_currency,
+       (sum(l.net_amount + l.tax_amount) over (partition by e.event_type, e.document_type, e.document_id,
+                                                           e.settlement_id))::text as document_total,
+       e.document_type, e.document_id::text, d.document_number, d.reference,
+       d.contact_id::text, coalesce(c.name, d.claimant) as contact_name, l.line_order as document_line_order, l.description,
+       t.code as tax_code, coalesce(t.category, 'out_of_scope') as category, l.tax_rate::text,
+       (l.net_amount + l.tax_amount)::text as line_amount, l.tax_amount::text as line_gst
+  from events e
+  join documents d on d.document_type = e.document_type and d.document_id = e.document_id
+  join document_lines l on l.document_type = e.document_type and l.document_id = e.document_id
+  left join contacts c on c.id = d.contact_id
+  left join tax_codes t on t.id = l.tax_code_id
+ order by e.side desc, e.event_date, e.document_type, e.document_id, e.event_type, e.settlement_id, l.line_order`;
+
+/** Sales: standard -> Box 5, zero rated -> Boxes 5 and 6. Purchases: standard -> Box 11. Anything else is left out. */
+function boxesFor(side: "sales" | "purchases", category: TaxCategory): GstLineBox[] {
+  if (side === "sales") {
+    if (category === "standard") return ["5"];
+    if (category === "zero_rated") return ["5", "6"];
+    return [];
+  }
+  return category === "standard" ? ["11"] : [];
+}
+
+const DOCUMENT_LABELS: Record<GstDocumentType, string> = {
+  sales_invoice: "invoice",
+  sales_credit_note: "credit note",
+  bill: "bill",
+  supplier_credit_note: "supplier credit note",
+  bank_transaction: "bank transaction",
+  expense_claim: "expense claim",
+  livestock_rations: "homekill adjustment",
+};
+
+function toLine(
+  row: Omit<StoredLineRow, "amount" | "gst" | "settled_amount" | "document_total">,
+  counted: { amount: string; gst: string; settledAmount: string | null; documentTotal: string | null; lineGst?: string | null },
+): GstReturnLine {
+  return {
+    side: row.side,
+    eventType: row.event_type,
+    eventDate: row.event_date,
+    documentType: row.document_type,
+    documentId: row.document_id,
+    documentNumber: row.document_number,
+    reference: row.reference,
+    contactId: row.contact_id,
+    contactName: row.contact_name,
+    documentLineOrder: row.document_line_order,
+    description: row.description,
+    taxCode: row.tax_code,
+    category: row.category,
+    taxRate: row.tax_rate,
+    amount: money(counted.amount),
+    gst: money(counted.gst),
+    boxes: boxesFor(row.side, row.category),
+    settledAmount: counted.settledAmount === null ? null : money(counted.settledAmount),
+    documentTotal: counted.documentTotal === null ? null : money(counted.documentTotal),
+    lineGst: counted.lineGst == null ? null : money(counted.lineGst),
+  };
+}
+
+function storedLine(row: StoredLineRow): GstReturnLine {
+  const line = toLine(row, {
+    amount: row.amount,
+    gst: row.gst,
+    settledAmount: row.settled_amount,
+    documentTotal: row.document_total,
+  });
+  if (row.late_from_return_id) {
+    line.lateFrom = { gstReturnId: row.late_from_return_id, periodStart: row.late_from_period_start!, periodEnd: row.late_from_period_end! };
+  }
+  return line;
+}
+
+const STORED_LINE_COLUMNS = `l.side, l.event_type, l.event_date::text as event_date, l.document_type, l.document_id::text,
+  l.document_number, l.reference, l.contact_id::text, l.contact_name, l.document_line_order, l.description, l.tax_code,
+  l.category, l.tax_rate::text, l.amount::text, l.gst_amount::text as gst, l.settled_amount::text, l.document_total::text,
+  l.late_from_return_id::text, l.late_reversal, f.period_start::text as late_from_period_start, f.period_end::text as late_from_period_end`;
+
+/** A late claim: one transaction's lines dated in a filed return's period that it didn't count (LG1-LG7). */
+export type GstLateClaim = {
+  /** Stable while nothing changes; pass it in excludedLateClaims to leave it out. */
+  key: string;
+  from: { gstReturnId: string; periodStart: string; periodEnd: string };
+  side: "sales" | "purchases";
+  eventType: GstEventType;
+  eventDate: string;
+  documentType: GstDocumentType;
+  documentId: string;
+  documentNumber: string;
+  contactName: string;
+  /** Including GST, and its GST; negative when it takes off what was counted. */
+  amount: string;
+  gst: string;
+  /** True when it counted in the return but has since changed or gone, so it's taken back off. */
+  reversal: boolean;
+  included: boolean;
+  /** What IRD says, when its rules differ; shown, never enforced. */
+  irdNote: string | null;
+  lines: GstReturnLine[];
+};
+
+export const IRD_NOTE_OLD_PURCHASE = "IRD says GST on purchases more than 2 years old can only be claimed in a few cases.";
+export const IRD_NOTE_OVER_LIMIT =
+  "IRD says changes over $1,000 (or over the lower of $10,000 and 2% of output tax) should be fixed by amending the earlier return.";
+const IRD_LIMIT = "1000";
+
+/** Identifies a counted line, so lines can be matched between what was filed and what's there now. */
+function lineIdentity(line: GstReturnLine): string {
+  return [line.eventType, line.eventDate, line.documentType, line.documentId, line.documentLineOrder, line.amount, line.gst].join("|");
+}
+
+/** Two years before a date, as YYYY-MM-DD (29 Feb goes to 28 Feb). */
+function twoYearsBefore(date: string): string {
+  const [year, month, day] = date.split("-").map(Number);
+  const target = new Date(Date.UTC(year - 2, month - 1, day));
+  if (target.getUTCMonth() !== month - 1) target.setUTCDate(0);
+  return target.toISOString().slice(0, 10);
+}
+
+/**
+ * The late claims a return for this period would offer: for every return
+ * filed for an earlier period, the lines worked out now for its period that
+ * it didn't count and that no later return has claimed, and the lines it
+ * counted that are no longer there (taken back off). Each transaction is one
+ * claim; it's included unless its key is in `excluded`.
+ */
+async function lateClaimsFor(tx: OrgTx, periodStart: string, periodEnd: string, excluded: ReadonlySet<string>): Promise<GstLateClaim[]> {
+  const filed = await tx.query<{ id: string; period_start: string; period_end: string; gst_basis: GstBasis }>(
+    `select id::text, period_start::text, period_end::text, gst_basis from gst_returns where period_end < $1 order by period_start`,
+    [periodStart],
+  );
+  const claims: GstLateClaim[] = [];
+  for (const earlier of filed.rows) {
+    const from = { gstReturnId: earlier.id, periodStart: earlier.period_start, periodEnd: earlier.period_end };
+    const accounted = await tx.query<StoredLineRow>(
+      `select ${STORED_LINE_COLUMNS} from gst_return_lines l left join gst_returns f on f.id = l.late_from_return_id
+        where (l.gst_return_id = $1 and l.late_from_return_id is null) or l.late_from_return_id = $1
+        order by l.gst_return_id, l.line_order`,
+      [earlier.id],
+    );
+    const now = (await workOut(tx, earlier.gst_basis, earlier.period_start, earlier.period_end, [])).lines.filter((line) => line.boxes.length > 0);
+    // What's accounted for, by identity: what the earlier return counted and
+    // what later returns claimed for it, less what they took back off.
+    const remaining = new Map<string, GstReturnLine[]>();
+    for (const row of accounted.rows) {
+      const line = storedLine(row);
+      if (row.late_reversal) {
+        const bucket = remaining.get(lineIdentity({ ...line, amount: negText(line.amount), gst: negText(line.gst) }));
+        bucket?.pop();
+      } else {
+        const identity = lineIdentity(line);
+        remaining.set(identity, [...(remaining.get(identity) ?? []), line]);
+      }
+    }
+    const late: Array<GstReturnLine & { reversal: boolean }> = [];
+    for (const line of now) {
+      const bucket = remaining.get(lineIdentity(line));
+      if (bucket && bucket.length > 0) bucket.pop();
+      else late.push({ ...line, lateFrom: from, reversal: false });
+    }
+    for (const bucket of remaining.values()) {
+      for (const line of bucket) {
+        late.push({ ...line, amount: negText(line.amount), gst: negText(line.gst), lateFrom: from, reversal: true });
+      }
+    }
+    const groups = new Map<string, Array<GstReturnLine & { reversal: boolean }>>();
+    for (const line of late) {
+      const key = [earlier.id, line.reversal ? "reversal" : "claim", line.eventType, line.documentType, line.documentId, line.eventDate].join(":");
+      groups.set(key, [...(groups.get(key) ?? []), line]);
+    }
+    for (const [key, lines] of groups) {
+      const first = lines[0];
+      const amount = lines.reduce((total, line) => add(total, dec(line.amount)), ZERO_DECIMAL);
+      const gst = lines.reduce((total, line) => add(total, dec(line.gst)), ZERO_DECIMAL);
+      claims.push({
+        key,
+        from,
+        side: first.side,
+        eventType: first.eventType,
+        eventDate: first.eventDate,
+        documentType: first.documentType,
+        documentId: first.documentId,
+        documentNumber: first.documentNumber,
+        contactName: first.contactName,
+        amount: toFixedString(amount, MONEY_SCALE),
+        gst: toFixedString(gst, MONEY_SCALE),
+        reversal: first.reversal,
+        included: !excluded.has(key),
+        irdNote: null,
+        lines: lines.map((line) => {
+          const copy: GstReturnLine & { reversal?: boolean } = { ...line };
+          delete copy.reversal;
+          return copy;
+        }),
+      });
+    }
+  }
+
+  // IRD's rules, as notes only (LG5, LG6): missed input tax (a purchase that
+  // adds GST to claim) has the 2-year rule; everything else adds up toward
+  // the $1,000 limit for fixing in a later return.
+  const cutoff = twoYearsBefore(periodEnd);
+  const missedInputTax = (claim: GstLateClaim) => claim.side === "purchases" && isPositive(dec(claim.gst));
+  let otherTotal = ZERO_DECIMAL;
+  for (const claim of claims) {
+    if (claim.included && !missedInputTax(claim)) otherTotal = add(otherTotal, abs(dec(claim.gst)));
+  }
+  const overLimit = cmp(otherTotal, dec(IRD_LIMIT)) > 0;
+  for (const claim of claims) {
+    if (missedInputTax(claim)) {
+      if (claim.eventDate < cutoff) claim.irdNote = IRD_NOTE_OLD_PURCHASE;
+    } else if (overLimit && claim.included) {
+      claim.irdNote = IRD_NOTE_OVER_LIMIT;
+    }
+  }
+  return claims;
+}
+
+function negText(value: string): string {
+  return toFixedString(neg(dec(value)), MONEY_SCALE);
+}
+
+/** Parses the keys of late claims to leave out. */
+function parseExcludedLateClaims(input: unknown): string[] {
+  if (input === undefined || input === null) return [];
+  if (!Array.isArray(input) || input.some((entry) => typeof entry !== "string" || entry.length > 200)) {
+    throw new ValidationError("excludedLateClaims must be a list of late claim keys.");
+  }
+  return [...new Set(input as string[])].sort();
+}
+
+/**
+ * The counted lines from the event rows: a document approved or voided
+ * counts its lines whole; a settlement counts each line's share of the
+ * amount settled (G11, G12).
+ */
+function eventLines(rows: readonly RawEventRow[]): GstReturnLine[] {
+  const lines: GstReturnLine[] = [];
+  let index = 0;
+  while (index < rows.length) {
+    const first = rows[index];
+    let end = index + 1;
+    while (
+      end < rows.length &&
+      rows[end].event_type === first.event_type &&
+      rows[end].document_type === first.document_type &&
+      rows[end].document_id === first.document_id &&
+      rows[end].settlement_id === first.settlement_id
+    ) {
+      end += 1;
+    }
+    const group = rows.slice(index, end);
+    const signed = (value: string) => toFixedString(first.sign < 0 ? neg(dec(value)) : dec(value), MONEY_SCALE);
+    if (first.settled === null) {
+      for (const row of group) {
+        lines.push(toLine(row, { amount: signed(row.line_amount), gst: signed(row.line_gst), settledAmount: null, documentTotal: null }));
+      }
+    } else {
+      const shares = settlementShares(
+        group.map((row) => ({ amount: row.line_amount, gst: row.line_gst })),
+        first.settled,
+        first.document_total,
+      );
+      group.forEach((row, position) => {
+        lines.push(
+          toLine(row, {
+            amount: signed(shares[position].amount),
+            gst: signed(shares[position].gst),
+            settledAmount: first.settled,
+            documentTotal: first.document_total,
+            lineGst: signed(row.line_gst),
+          }),
+        );
+      });
+    }
+    index = end;
+  }
+  return lines;
+}
+
+/** Adds up the counted lines into boxes 5-15. */
+function figuresFrom(lines: readonly GstReturnLine[], adjustments: readonly GstAdjustment[]): GstReturnFigures {
+  let box5 = ZERO_DECIMAL;
+  let box6 = ZERO_DECIMAL;
+  let box11 = ZERO_DECIMAL;
+  let salesGst = ZERO_DECIMAL;
+  let purchasesGst = ZERO_DECIMAL;
+  for (const line of lines) {
+    if (line.boxes.length === 0) continue;
+    const amount = dec(line.amount);
+    if (line.boxes.includes("5")) box5 = add(box5, amount);
+    if (line.boxes.includes("6")) box6 = add(box6, amount);
+    if (line.boxes.includes("11")) box11 = add(box11, amount);
+    if (line.side === "sales") salesGst = add(salesGst, dec(line.gst));
+    else purchasesGst = add(purchasesGst, dec(line.gst));
+  }
+  const text = (value: typeof box5) => toFixedString(value, MONEY_SCALE);
+  return calculateGstBoxes({
+    box5: text(box5),
+    box6: text(box6),
+    box11: text(box11),
+    salesGst: text(salesGst),
+    purchasesGst: text(purchasesGst),
+    adjustments,
+  });
+}
+
+/**
+ * Reads the period's GST event lines on a basis and works out the boxes.
+ * Refuses when a counted standard-rated line has a rate other than 15%,
+ * naming the documents.
+ */
+async function workOut(
+  tx: OrgTx,
+  basis: GstBasis,
+  periodStart: string,
+  periodEnd: string,
+  adjustments: readonly GstAdjustment[],
+): Promise<{ figures: GstReturnFigures; lines: GstReturnLine[] }> {
+  const result = await tx.query<RawEventRow>(EVENT_LINES_SQL, [
+    periodStart,
+    periodEnd,
+    countsWhenSettled(basis, "sales"),
+    countsWhenSettled(basis, "purchases"),
+  ]);
+  // MC11: how a part-paid foreign-currency sale counts when sales count as they're settled isn't settled yet.
+  const foreignSettled = result.rows.find((row) => row.side === "sales" && row.settlement_id !== null && row.foreign_currency);
+  if (foreignSettled) {
+    throw new ValidationError(
+      `${DOCUMENT_LABELS[foreignSettled.document_type]} ${foreignSettled.document_number} is in a foreign currency. Counting foreign-currency sales when they're paid (the payments basis) isn't supported yet (refused rather than guessed).`,
+    );
+  }
+  // Expense claims have no contact; their lines show the claimant, by name.
+  const lines = eventLines(
+    result.rows.map((row) => (row.document_type === "expense_claim" && row.contact_id === null ? { ...row, contact_name: personName(tx, row.contact_name) } : row)),
+  );
+  const otherRates = new Map<string, string>();
+  for (const line of lines) {
+    if (line.category === "standard" && cmp(dec(line.taxRate), dec(GST_STANDARD_RATE)) !== 0) {
+      otherRates.set(
+        `${line.documentType}:${line.documentId}`,
+        `${DOCUMENT_LABELS[line.documentType]} ${line.documentNumber} (${line.contactName})`,
+      );
+    }
+  }
+  if (otherRates.size > 0) {
+    throw new ValidationError(
+      `GST returns only handle standard-rated GST at 15%. These documents in the period have standard-rated lines at another rate: ${[
+        ...otherRates.values(),
+      ].join("; ")}. Other GST rates aren't supported yet.`,
+    );
+  }
+  return { figures: figuresFrom(lines, adjustments), lines };
+}
+
+/**
+ * The period's own lines plus the late claims from earlier filed returns
+ * that are included, and the boxes from all of them (LG1-LG7).
+ */
+async function workOutWithLateClaims(
+  tx: OrgTx,
+  basis: GstBasis,
+  periodStart: string,
+  periodEnd: string,
+  adjustments: readonly GstAdjustment[],
+  excluded: readonly string[],
+): Promise<{ figures: GstReturnFigures; lines: GstReturnLine[]; lateClaims: GstLateClaim[] }> {
+  const own = await workOut(tx, basis, periodStart, periodEnd, adjustments);
+  const lateClaims = await lateClaimsFor(tx, periodStart, periodEnd, new Set(excluded));
+  const lateLines = lateClaims.filter((claim) => claim.included).flatMap((claim) => claim.lines);
+  const lines = [...own.lines, ...lateLines];
+  return { figures: figuresFrom(lines, adjustments), lines, lateClaims };
+}
+
+async function gstBasis(tx: OrgTx, options: { lock: boolean }): Promise<GstBasis> {
+  const result = await tx.query<{ gst_basis: GstBasis }>(
+    `select gst_basis from organisation_settings where id = true${options.lock ? " for update" : ""}`,
+  );
+  return result.rows[0].gst_basis;
+}
+
+/**
+ * What was still owed at the end of a day, with its GST (G20, G22): approved
+ * documents dated on or before it and not voided by then, less what had
+ * settled them by then (payments, refunds and applications not voided or
+ * removed by then). Credit notes count negative. A foreign-currency
+ * document's owed and total are in its currency and its GST is the NZD GST
+ * (MC81), so owed x GST / total is its NZD GST's share, at its own rate.
+ */
+const OUTSTANDING_SQL = `
+with outstanding as (
+  select 'sales' as side, i.total, coalesce(i.base_tax_total, i.tax_total) as tax_total, 1 as sign,
+         i.total
+         - coalesce((select sum(p.amount - p.overpayment_amount) from customer_payments p
+                      where p.invoice_id = i.id and p.payment_date <= $1
+                        and (p.status = 'active' or p.void_date > $1)), 0)
+         - coalesce((select sum(a.amount) from sales_credit_note_applications a
+                      where a.invoice_id = i.id and a.application_date <= $1
+                        and (a.status = 'active' or a.removal_date > $1)), 0)
+         - coalesce((select sum(a.amount) from customer_overpayment_applications a
+                      where a.invoice_id = i.id and a.application_date <= $1
+                        and (a.status = 'active' or a.removal_date > $1)), 0) as owed
+    from sales_invoices i
+   where i.status in ('approved', 'voided') and i.invoice_date <= $1 and (i.status = 'approved' or i.void_date > $1)
+  union all
+  select 'sales', n.total, coalesce(n.base_tax_total, n.tax_total), -1,
+         n.total
+         - coalesce((select sum(a.amount) from sales_credit_note_applications a
+                      where a.credit_note_id = n.id and a.application_date <= $1
+                        and (a.status = 'active' or a.removal_date > $1)), 0)
+         - coalesce((select sum(r.amount) from sales_credit_note_refunds r
+                      where r.credit_note_id = n.id and r.refund_date <= $1
+                        and (r.status = 'active' or r.void_date > $1)), 0)
+    from sales_credit_notes n
+   where n.status in ('approved', 'voided') and n.credit_note_date <= $1 and (n.status = 'approved' or n.void_date > $1)
+  union all
+  select 'purchases', b.total, coalesce(b.base_tax_total, b.tax_total), 1,
+         b.total
+         - coalesce((select sum(p.amount) from supplier_payments p
+                      where p.bill_id = b.id and p.payment_date <= $1
+                        and (p.status = 'active' or p.void_date > $1)), 0)
+         - coalesce((select sum(a.amount) from supplier_credit_note_applications a
+                      where a.bill_id = b.id and a.application_date <= $1
+                        and (a.status = 'active' or a.removal_date > $1)), 0)
+    from bills b
+   where b.status in ('approved', 'voided') and b.bill_date <= $1 and (b.status = 'approved' or b.void_date > $1)
+  union all
+  select 'purchases', s.total, coalesce(s.base_tax_total, s.tax_total), -1,
+         s.total
+         - coalesce((select sum(a.amount) from supplier_credit_note_applications a
+                      where a.credit_note_id = s.id and a.application_date <= $1
+                        and (a.status = 'active' or a.removal_date > $1)), 0)
+         - coalesce((select sum(r.amount) from supplier_credit_note_refunds r
+                      where r.credit_note_id = s.id and r.refund_date <= $1
+                        and (r.status = 'active' or r.void_date > $1)), 0)
+    from supplier_credit_notes s
+   where s.status in ('approved', 'voided') and s.credit_note_date <= $1 and (s.status = 'approved' or s.void_date > $1)
+  union all
+  select 'purchases', x.total, x.tax_total, 1,
+         x.total
+         - coalesce((select sum(p.amount) from expense_claim_payments p
+                      where p.claim_id = x.id and p.payment_date <= $1
+                        and (p.status = 'active' or p.void_date > $1)), 0)
+    from expense_claims x
+   where x.status in ('approved', 'voided') and x.claim_date <= $1 and (x.status = 'approved' or x.void_date > $1)
+)
+select side, total::text, tax_total::text, (owed * sign)::text as owed
+  from outstanding
+ where owed <> 0`;
+
+export type GstBasisChange = {
+  /** The basis of the latest return filed before this period. */
+  from: GstBasis;
+  to: GstBasis;
+  /** The end of that return's period: what was outstanding then is adjusted for. */
+  asAt: string;
+  lastReturnId: string;
+  debtorsGst: string;
+  creditorsGst: string;
+  /** The Box 9 or Box 13 adjustment IR546 calls for; null when it's 0.00. */
+  suggestion: GstAdjustment | null;
+};
+
+/**
+ * When the latest return filed before the period was on another basis, the
+ * GST on debtors and creditors at the end of its period and the IR546
+ * adjustment for the change (G20-G22). Null when there's no change to adjust
+ * for.
+ */
+async function basisChangeFor(tx: OrgTx, basis: GstBasis, periodStart: string): Promise<GstBasisChange | null> {
+  const previous = await tx.query<{ id: string; period_end: string; gst_basis: GstBasis }>(
+    `select id::text, period_end, gst_basis from gst_returns where period_end < $1
+      order by period_end desc limit 1`,
+    [periodStart],
+  );
+  const last = previous.rows[0];
+  if (!last || last.gst_basis === basis) return null;
+  const outstanding = await tx.query<{ side: "sales" | "purchases"; total: string; tax_total: string; owed: string }>(
+    OUTSTANDING_SQL,
+    [last.period_end],
+  );
+  let debtors = ZERO_DECIMAL;
+  let creditors = ZERO_DECIMAL;
+  for (const row of outstanding.rows) {
+    const gst = dec(gstInOutstanding(row.owed, row.tax_total, row.total));
+    if (row.side === "sales") debtors = add(debtors, gst);
+    else creditors = add(creditors, gst);
+  }
+  const debtorsGst = toFixedString(debtors, MONEY_SCALE);
+  const creditorsGst = toFixedString(creditors, MONEY_SCALE);
+  return {
+    from: last.gst_basis,
+    to: basis,
+    asAt: last.period_end,
+    lastReturnId: last.id,
+    debtorsGst,
+    creditorsGst,
+    suggestion: basisChangeAdjustment({ from: last.gst_basis, to: basis, asAt: last.period_end, debtorsGst, creditorsGst }),
+  };
+}
+
+export type FiledGstReturnSummary = {
+  id: string;
+  periodStart: string;
+  periodEnd: string;
+  basis: GstBasis;
+  currencyCode: string;
+  boxes: GstBoxes;
+  filedAt: string;
+  filedByEmail: string;
+};
+
+type FiledRow = {
+  id: string;
+  request_hash: string;
+  period_start: string;
+  period_end: string;
+  gst_basis: GstBasis;
+  currency_code: string;
+  box5: string;
+  box6: string;
+  box7: string;
+  box8: string;
+  box9: string;
+  box10: string;
+  box11: string;
+  box12: string;
+  box13: string;
+  box14: string;
+  box15: string;
+  sales_gst: string;
+  purchases_gst: string;
+  filed_at: string;
+  filed_by_email: string;
+};
+
+const FILED_COLUMNS = `id::text, request_hash, period_start, period_end, gst_basis, currency_code,
+  box5::text, box6::text, box7::text, box8::text, box9::text, box10::text, box11::text, box12::text, box13::text,
+  box14::text, box15::text, sales_gst::text, purchases_gst::text, filed_at, filed_by_email`;
+
+function toSummary(row: FiledRow): FiledGstReturnSummary {
+  return {
+    id: row.id,
+    periodStart: row.period_start,
+    periodEnd: row.period_end,
+    basis: row.gst_basis,
+    currencyCode: row.currency_code,
+    boxes: {
+      box5: money(row.box5),
+      box6: money(row.box6),
+      box7: money(row.box7),
+      box8: money(row.box8),
+      box9: money(row.box9),
+      box10: money(row.box10),
+      box11: money(row.box11),
+      box12: money(row.box12),
+      box13: money(row.box13),
+      box14: money(row.box14),
+      box15: money(row.box15),
+    },
+    filedAt: row.filed_at,
+    filedByEmail: row.filed_by_email,
+  };
+}
+
+/** Filed returns that share at least one day with the period. */
+async function overlappingReturns(tx: OrgTx, periodStart: string, periodEnd: string): Promise<FiledGstReturnSummary[]> {
+  const result = await tx.query<FiledRow>(
+    `select ${FILED_COLUMNS} from gst_returns
+      where daterange(period_start, period_end, '[]') && daterange($1::date, $2::date, '[]')
+      order by period_start`,
+    [periodStart, periodEnd],
+  );
+  return result.rows.map(toSummary);
+}
+
+/**
+ * Works out a GST return for a period, with any Box 9 and Box 13
+ * adjustments. Nothing is stored.
+ */
+export async function calculateGstReturn(
+  tx: OrgTx,
+  input: { periodStart: unknown; periodEnd: unknown; adjustments?: unknown; excludedLateClaims?: unknown },
+) {
+  const { periodStart, periodEnd, months } = parseGstPeriod(input.periodStart, input.periodEnd);
+  const adjustments = parseGstAdjustments(input.adjustments);
+  const excluded = parseExcludedLateClaims(input.excludedLateClaims);
+  const basis = await gstBasis(tx, { lock: false });
+  const { figures, lines, lateClaims } = await workOutWithLateClaims(tx, basis, periodStart, periodEnd, adjustments, excluded);
+  return {
+    periodStart,
+    periodEnd,
+    months,
+    basis,
+    currencyCode: tx.baseCurrency,
+    ...figures,
+    adjustments,
+    lines,
+    /** Lines dated in earlier filed returns' periods that they didn't count (LG1-LG7). */
+    lateClaims,
+    /** Filed returns that cover any day of this period. */
+    filedReturns: await overlappingReturns(tx, periodStart, periodEnd),
+    /** The IR546 adjustment when the basis changed since the last filed return. */
+    basisChange: await basisChangeFor(tx, basis, periodStart),
+    /** NR6: GST registration ended in this period; the fixed assets still held then, as a reminder (not worked out). */
+    registrationEnded: await registrationEndedIn(tx, periodStart, periodEnd),
+    /**  (GSR11-GSR14): whether the registration covers all, part or none of the period, and whether it's confirmed. */
+    registration: gstRegistrationForPeriod(await getGstRegistration(tx), periodStart, periodEnd),
+  };
+}
+
+/**
+ * NR6: when GST registration ends in this period, the final return may need
+ * GST on assets still held. Tohyee lists the fixed assets held on that date
+ * as a reminder; it doesn't work the GST out (it needs each one's market
+ * value).
+ */
+async function registrationEndedIn(
+  tx: OrgTx,
+  periodStart: string,
+  periodEnd: string,
+): Promise<{ until: string; assetsHeld: Array<{ assetNumber: string; name: string; cost: string }> } | null> {
+  const registration = await getGstRegistration(tx);
+  const until = registration.registered ? registration.until : null;
+  if (until === null || until < periodStart || until > periodEnd) return null;
+  const held = await tx.query<{ asset_number: string; name: string; cost: string }>(
+    `select a.asset_number, a.name, a.cost::text as cost
+       from fixed_assets a
+      where a.purchase_date <= $1::date and a.status <> 'archived'
+        and not exists (select 1 from fixed_asset_disposals d where d.asset_id = a.id and d.status = 'active' and d.disposal_date <= $1::date)
+      order by a.asset_number`,
+    [until],
+  );
+  return { until, assetsHeld: held.rows.map((row) => ({ assetNumber: row.asset_number, name: row.name, cost: row.cost })) };
+}
+
+/** The organisation's GST period setting (GP1), or null when it isn't set. */
+export async function loadGstPeriodSetting(tx: OrgTx): Promise<GstPeriodSetting | null> {
+  const found = await tx.query<{ months: number | null; end_month: number | null }>(
+    "select gst_period_months as months, gst_period_end_month as end_month from organisation_settings where id = true",
+  );
+  const row = found.rows[0];
+  return row && row.months !== null && row.end_month !== null ? gstPeriodSetting(row.months, row.end_month) : null;
+}
+
+/** The filed return with the latest period, or null. */
+export async function latestFiledGstPeriod(tx: OrgTx): Promise<{ periodStart: string; periodEnd: string } | null> {
+  const found = await tx.query<{ period_start: string; period_end: string }>(
+    "select period_start::text, period_end::text from gst_returns order by period_end desc limit 1",
+  );
+  const row = found.rows[0];
+  return row ? { periodStart: row.period_start, periodEnd: row.period_end } : null;
+}
+
+/**
+ * Filed GST returns, latest first, with the GST period setting and the
+ * period the GST return opens on (GP4).
+ */
+export async function listGstReturns(
+  tx: OrgTx,
+  input: { today?: unknown } = {},
+): Promise<{
+  gstReturns: FiledGstReturnSummary[];
+  periodSetting: GstPeriodSetting | null;
+  suggestedPeriod: { periodStart: string; periodEnd: string } | null;
+}> {
+  const today = parseOptionalIsoDate(input.today, "today") ?? todayIsoDate();
+  const result = await tx.query<FiledRow>(`select ${FILED_COLUMNS} from gst_returns order by period_start desc`);
+  const periodSetting = await loadGstPeriodSetting(tx);
+  return {
+    gstReturns: result.rows.map(toSummary),
+    periodSetting,
+    suggestedPeriod: suggestedGstPeriod(periodSetting, await latestFiledGstPeriod(tx), today),
+  };
+}
+
+export type FiledGstReturn = FiledGstReturnSummary & {
+  months: number;
+  gstOnTransactions: GstReturnFigures["gstOnTransactions"];
+  adjustments: GstAdjustment[];
+  lines: GstReturnLine[];
+  /** The figures worked out now for the same period, basis and adjustments. */
+  current: GstReturnFigures | null;
+  /** Why the current figures couldn't be worked out, if they couldn't. */
+  currentError: string | null;
+  changedSinceFiled: boolean;
+  changes: GstBoxChange[];
+  /** This period's lines that later returns claimed late, or took back off (LG2). */
+  claimedLater: Array<{
+    gstReturn: { id: string; periodStart: string; periodEnd: string };
+    documentType: GstDocumentType;
+    documentNumber: string;
+    contactName: string;
+    eventDate: string;
+    reversal: boolean;
+    gst: string;
+  }>;
+};
+
+async function loadGstReturn(tx: OrgTx, id: string): Promise<FiledRow | null> {
+  const result = await tx.query<FiledRow>(`select ${FILED_COLUMNS} from gst_returns where id = $1`, [id]);
+  return result.rows[0] ?? null;
+}
+
+/**
+ * A filed return exactly as it was filed, and whether the figures worked out
+ * now for the same period differ ("Changed since filed"), box by box.
+ */
+export async function getGstReturn(tx: OrgTx, gstReturnIdInput: unknown): Promise<FiledGstReturn> {
+  const id = requireId(gstReturnIdInput, "gstReturnId");
+  const row = await loadGstReturn(tx, id);
+  if (!row) {
+    throw new NotFoundError("GST return not found.");
+  }
+  const summary = toSummary(row);
+  const adjustments = await tx.query<{ box: "9" | "13"; description: string; amount: string }>(
+    `select box, description, amount::text from gst_return_adjustments where gst_return_id = $1 order by line_order`,
+    [id],
+  );
+  const lines = await tx.query<StoredLineRow>(
+    `select ${STORED_LINE_COLUMNS} from gst_return_lines l left join gst_returns f on f.id = l.late_from_return_id
+      where l.gst_return_id = $1 order by l.line_order`,
+    [id],
+  );
+  // Lines of this return's period that later returns claimed late (LG2).
+  const claimedLater = await tx.query<{
+    gst_return_id: string;
+    period_start: string;
+    period_end: string;
+    document_type: GstDocumentType;
+    document_number: string;
+    contact_name: string;
+    event_date: string;
+    late_reversal: boolean;
+    gst: string;
+  }>(
+    `select r.id::text as gst_return_id, r.period_start::text, r.period_end::text, l.document_type, l.document_number,
+            l.contact_name, l.event_date::text, l.late_reversal, sum(l.gst_amount)::text as gst
+       from gst_return_lines l join gst_returns r on r.id = l.gst_return_id
+      where l.late_from_return_id = $1
+      group by r.id, r.period_start, r.period_end, l.document_type, l.document_number, l.contact_name, l.event_date, l.late_reversal
+      order by r.period_start, l.event_date, l.document_number`,
+    [id],
+  );
+  const storedAdjustments = adjustments.rows.map((adjustment) => ({ ...adjustment, amount: money(adjustment.amount) }));
+  const storedFigures = calculateGstBoxes({
+    box5: summary.boxes.box5,
+    box6: summary.boxes.box6,
+    box11: summary.boxes.box11,
+    salesGst: row.sales_gst,
+    purchasesGst: row.purchases_gst,
+    adjustments: storedAdjustments,
+  });
+
+  let current: GstReturnFigures | null = null;
+  let currentError: string | null = null;
+  // Always on the basis it was filed on, even if the organisation's has changed (G19).
+  try {
+    current = (await workOut(tx, row.gst_basis, row.period_start, row.period_end, storedAdjustments)).figures;
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    currentError = error.message;
+  }
+  const changes = current ? changedGstBoxes(summary.boxes, current.boxes) : [];
+  return {
+    ...summary,
+    months: parseGstPeriod(row.period_start, row.period_end).months,
+    gstOnTransactions: storedFigures.gstOnTransactions,
+    adjustments: storedAdjustments,
+    lines: lines.rows.map(storedLine),
+    current,
+    currentError,
+    changedSinceFiled: changes.length > 0,
+    changes,
+    claimedLater: claimedLater.rows.map((entry) => ({
+      gstReturn: { id: entry.gst_return_id, periodStart: entry.period_start, periodEnd: entry.period_end },
+      documentType: entry.document_type,
+      documentNumber: entry.document_number,
+      contactName: entry.contact_name,
+      eventDate: entry.event_date,
+      reversal: entry.late_reversal,
+      gst: money(entry.gst),
+    })),
+  };
+}
+
+/**
+ * Marks a return as filed: stores the period, basis, adjustments, every box
+ * and the counted lines as they are now, with who filed it. Idempotent. Two
+ * filed returns can't cover the same day. Filing posts no journal and sends
+ * nothing to IRD.
+ */
+export async function fileGstReturn(
+  tx: OrgTx,
+  input: {
+    source?: unknown;
+    idempotencyKey: unknown;
+    periodStart: unknown;
+    periodEnd: unknown;
+    adjustments?: unknown;
+    excludedLateClaims?: unknown;
+  },
+): Promise<{ created: boolean; gstReturn: FiledGstReturn }> {
+  const source = optionalSource(input.source);
+  const idempotencyKey = requireIdempotencyKey(input.idempotencyKey);
+  const { periodStart, periodEnd } = parseGstPeriod(input.periodStart, input.periodEnd);
+  const adjustments = parseGstAdjustments(input.adjustments);
+  const excluded = parseExcludedLateClaims(input.excludedLateClaims);
+  // Returns filed before late claims existed hashed without the list; keep that so retries still match.
+  const hash = requestHash("gst_return", excluded.length ? { periodStart, periodEnd, adjustments, excludedLateClaims: excluded } : { periodStart, periodEnd, adjustments });
+
+  // One filing at a time, so overlapping periods and retries are checked
+  // against every return filed before this one. Also keeps the basis steady.
+  const basis = await gstBasis(tx, { lock: true });
+  const existing = await tx.query<{ id: string; request_hash: string }>(
+    "select id::text, request_hash from gst_returns where command_source = $1 and idempotency_key = $2",
+    [source, idempotencyKey],
+  );
+  if (existing.rows[0]) {
+    assertSameRequest(existing.rows[0].request_hash, hash, "GST return");
+    return { created: false, gstReturn: await getGstReturn(tx, existing.rows[0].id) };
+  }
+  //  (GSR12): a period with no GST registration has no return to file; it isn't a nil return.
+  const registration = gstRegistrationForPeriod(await getGstRegistration(tx), periodStart, periodEnd);
+  if (registration.status === "not_registered") throw new ValidationError(registration.note);
+  const overlapping = await overlappingReturns(tx, periodStart, periodEnd);
+  if (overlapping.length > 0) {
+    const filed = overlapping[0];
+    throw new ConflictError(
+      `A GST return for ${filed.periodStart} to ${filed.periodEnd} has already been filed, and returns can't cover the same day twice. Amending a filed return isn't supported yet.`,
+    );
+  }
+
+  const { figures, lines, lateClaims } = await workOutWithLateClaims(tx, basis, periodStart, periodEnd, adjustments, excluded);
+  const reversals = new Set(lateClaims.filter((claim) => claim.reversal).flatMap((claim) => claim.lines));
+  const counted = lines
+    .filter((line) => line.boxes.length > 0)
+    .map((line) => ({ ...line, lateFromReturnId: line.lateFrom?.gstReturnId ?? null, lateReversal: reversals.has(line) }));
+  const { boxes, gstOnTransactions } = figures;
+  const inserted = await tx.query<{ id: string }>(
+    `insert into gst_returns (command_source, idempotency_key, request_hash, period_start, period_end, gst_basis,
+                              currency_code, box5, box6, box7, box8, box9, box10, box11, box12, box13, box14, box15,
+                              sales_gst, purchases_gst, adjustment_count, line_count, filed_by_user_id, filed_by_email)
+     values ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9::numeric, $10::numeric, $11::numeric, $12::numeric,
+             $13::numeric, $14::numeric, $15::numeric, $16::numeric, $17::numeric, $18::numeric, $19::numeric,
+             $20::numeric, $21, $22, $23, $24)
+     returning id::text`,
+    [
+      source,
+      idempotencyKey,
+      hash,
+      periodStart,
+      periodEnd,
+      basis,
+      tx.baseCurrency,
+      boxes.box5,
+      boxes.box6,
+      boxes.box7,
+      boxes.box8,
+      boxes.box9,
+      boxes.box10,
+      boxes.box11,
+      boxes.box12,
+      boxes.box13,
+      boxes.box14,
+      boxes.box15,
+      gstOnTransactions.sales,
+      gstOnTransactions.purchases,
+      adjustments.length,
+      counted.length,
+      tx.actor.userId,
+      tx.actor.email,
+    ],
+  );
+  const id = inserted.rows[0].id;
+  if (adjustments.length > 0) {
+    await tx.query(
+      `insert into gst_return_adjustments (gst_return_id, line_order, box, description, amount)
+       select $1, entry.ordinality, entry.value->>'box', entry.value->>'description', (entry.value->>'amount')::numeric
+         from jsonb_array_elements($2::jsonb) with ordinality as entry(value, ordinality)`,
+      [id, JSON.stringify(adjustments)],
+    );
+  }
+  if (counted.length > 0) {
+    await tx.query(
+      `insert into gst_return_lines (gst_return_id, line_order, side, event_type, event_date, document_type,
+                                     document_id, document_number, reference, contact_id, contact_name,
+                                     document_line_order, description, tax_code, category, tax_rate, amount,
+                                     gst_amount, boxes, settled_amount, document_total, late_from_return_id, late_reversal)
+       select $1, entry.ordinality, entry.value->>'side', entry.value->>'eventType', (entry.value->>'eventDate')::date,
+              entry.value->>'documentType', (entry.value->>'documentId')::bigint, entry.value->>'documentNumber',
+              entry.value->>'reference', (entry.value->>'contactId')::bigint, entry.value->>'contactName',
+              (entry.value->>'documentLineOrder')::integer, entry.value->>'description', entry.value->>'taxCode',
+              entry.value->>'category', (entry.value->>'taxRate')::numeric, (entry.value->>'amount')::numeric,
+              (entry.value->>'gst')::numeric,
+              array(select jsonb_array_elements_text(entry.value->'boxes')),
+              (entry.value->>'settledAmount')::numeric, (entry.value->>'documentTotal')::numeric,
+              (entry.value->>'lateFromReturnId')::bigint, coalesce((entry.value->>'lateReversal')::boolean, false)
+         from jsonb_array_elements($2::jsonb) with ordinality as entry(value, ordinality)`,
+      [id, JSON.stringify(counted)],
+    );
+  }
+  await writeAuditEvent(tx, {
+    eventType: "gst_return.filed",
+    entityType: "gst_return",
+    entityId: id,
+    details: {
+      periodStart,
+      periodEnd,
+      basis,
+      box15: boxes.box15,
+      adjustments: adjustments.length,
+      lines: counted.length,
+      ...(lateClaims.length
+        ? { lateClaimsIncluded: lateClaims.filter((claim) => claim.included).length, lateClaimsLeftOut: lateClaims.filter((claim) => !claim.included).length }
+        : {}),
+    },
+  });
+  return { created: true, gstReturn: await getGstReturn(tx, id) };
+}

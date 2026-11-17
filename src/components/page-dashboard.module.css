@@ -1,0 +1,89 @@
+.frame {
+  display: grid;
+  gap: 10px;
+  margin-bottom: 18px;
+}
+
+.top {
+  display: flex;
+  align-items: center;
+  justify-content: flex-end;
+}
+
+.linkButton {
+  border: 0;
+  background: none;
+  padding: 0;
+  color: var(--link);
+  font-weight: 600;
+}
+
+.hiddenRow {
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 9px 12px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.customise {
+  display: grid;
+  gap: 8px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+  padding: 10px 12px;
+}
+
+.slots {
+  display: grid;
+  gap: 8px;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.slot label {
+  display: grid;
+  gap: 4px;
+  color: var(--text-muted);
+  font-size: var(--text-xs);
+}
+
+/* Turning cards on and off and ordering them (the farm and CRM Homes, FH7, SD5). */
+.chooser {
+  display: grid;
+  gap: 12px;
+}
+
+.choices {
+  display: grid;
+  gap: 4px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.choice {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 4px 16px;
+  min-height: 40px;
+  border-bottom: 1px solid var(--border);
+}
+
+.moves {
+  display: inline-flex;
+  gap: 12px;
+}
+
+.hiddenCards {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  padding: 8px 12px;
+}
+

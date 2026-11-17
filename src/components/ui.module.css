@@ -1,0 +1,1846 @@
+.page {
+  display: grid;
+  gap: 24px;
+  width: min(1440px, 100%);
+  margin-inline: auto;
+}
+
+/* Wide screens (2560 px and the like) get wider pages, so lists and reports use more of them (2 Oct 2026). */
+@media (min-width: 1800px) {
+  .page {
+    width: min(1560px, 100%);
+  }
+}
+
+.pageHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  justify-content: space-between;
+  gap: 12px 24px;
+  padding-bottom: 4px;
+}
+
+.pageHeader > div:first-child {
+  min-width: 0;
+}
+
+.pageTitle {
+  font-size: var(--text-2xl);
+  font-family: inherit;
+  font-weight: 650;
+  line-height: 1.25;
+  letter-spacing: -0.025em;
+}
+
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.card {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 24px;
+}
+
+.cardHeader {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 10px;
+}
+
+.cardTitle {
+  font-size: var(--text-lg);
+  font-weight: 650;
+  letter-spacing: -0.015em;
+}
+
+.cardTitle a {
+  color: inherit;
+}
+
+.cardTitle a:hover {
+  text-decoration: underline;
+}
+
+.cardDescription {
+  max-width: 78ch;
+  overflow-wrap: anywhere;
+  margin-top: 2px;
+  color: var(--text-muted);
+  font-size: var(--text-base);
+}
+
+.grid2,
+.grid3,
+.grid4 {
+  display: grid;
+  gap: 12px 14px;
+}
+
+.grid2 {
+  grid-template-columns: repeat(auto-fit, minmax(220px, 1fr));
+}
+
+.grid3 {
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+}
+
+.grid4 {
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+}
+
+/* A form's fields side by side, wrapping on narrow screens. */
+.grid {
+  display: grid;
+  gap: 12px 14px;
+  grid-template-columns: repeat(auto-fit, minmax(min(100%, 200px), 1fr));
+  align-items: start;
+}
+
+.field {
+  min-width: 0;
+  display: grid;
+  gap: 6px;
+  align-content: start;
+}
+
+.fieldLabel {
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 600;
+}
+
+.fieldHint {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.checkbox {
+  display: inline-flex;
+  align-items: center;
+  gap: 8px;
+  font-size: var(--text-base);
+}
+
+/* Buttons */
+.button {
+  display: inline-flex;
+  align-items: center;
+  justify-content: center;
+  gap: 6px;
+  min-height: 40px;
+  border: 1px solid transparent;
+  border-radius: var(--radius-sm);
+  padding: 6px 14px;
+  font-size: var(--text-base);
+  font-weight: 600;
+  line-height: 1.3;
+  white-space: nowrap;
+  transition:
+    background-color 120ms ease,
+    border-color 120ms ease,
+    box-shadow 120ms ease,
+    transform 80ms ease;
+}
+
+.button:focus-visible {
+  outline: none;
+  box-shadow: var(--focus-ring);
+}
+
+.button:active:not(:disabled) {
+  transform: translateY(0.5px);
+}
+
+.primary {
+  background: var(--accent);
+  box-shadow: var(--shadow-sm), inset 0 1px 0 rgba(255, 255, 255, 0.12);
+  color: var(--accent-text);
+}
+
+.primary:hover:not(:disabled) {
+  background: var(--accent-hover);
+}
+
+.secondary {
+  border-color: var(--border-strong);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--text);
+}
+
+.secondary:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.danger {
+  border-color: var(--danger-border);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+  color: var(--danger-text);
+}
+
+.danger:hover:not(:disabled) {
+  background: var(--danger-bg);
+}
+
+.danger:focus-visible {
+  box-shadow: 0 0 0 3px color-mix(in srgb, var(--danger-text) 28%, transparent);
+}
+
+.small {
+  min-height: 32px;
+  padding: 3px 10px;
+  font-size: var(--text-sm);
+}
+
+/* Notices: a soft tint with a stronger left edge. */
+.notice {
+  position: relative;
+  border: 1px solid;
+  border-left-width: 3px;
+  border-radius: var(--radius-sm);
+  padding: 10px 14px;
+  font-size: var(--text-base);
+  line-height: 1.5;
+}
+
+.error {
+  border-color: var(--danger-border);
+  border-left-color: var(--danger-text);
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.success {
+  border-color: var(--success-border);
+  border-left-color: var(--success-text);
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.info {
+  border-color: var(--info-border);
+  border-left-color: var(--info-text);
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+
+.warning {
+  border-color: var(--warning-border);
+  border-left-color: var(--warning-text);
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.notice a {
+  color: inherit;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Tables */
+.tableWrap {
+  overflow-x: auto;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface);
+}
+
+.table {
+  width: 100%;
+  border-collapse: separate;
+  border-spacing: 0;
+  font-size: var(--text-base);
+  font-variant-numeric: tabular-nums;
+}
+
+.table th {
+  position: sticky;
+  top: 0;
+  z-index: 1;
+  border-bottom: 1px solid var(--border);
+  background: var(--surface-sunken);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 600;
+  text-align: left;
+  white-space: nowrap;
+}
+
+.table th,
+.table td {
+  height: 44px;
+  border-bottom: 1px solid var(--border);
+  padding: 10px 14px;
+  vertical-align: middle;
+}
+
+.table tbody tr {
+  transition: background-color 80ms ease;
+}
+
+.table tbody tr:hover td {
+  background: color-mix(in srgb, var(--surface-hover) 60%, transparent);
+}
+
+.table tbody tr:last-child td {
+  border-bottom: 0;
+}
+
+.table tfoot td {
+  border-top: 1px solid var(--border-strong);
+  border-bottom: 0;
+  background: var(--surface-sunken);
+  font-weight: 700;
+}
+
+.clickableRow {
+  cursor: pointer;
+}
+
+.table tbody .clickableRow:hover td,
+.clickableRow:hover td {
+  background: var(--accent-soft);
+}
+
+.selectedRow td,
+.table tbody .selectedRow:hover td {
+  background: var(--accent-soft);
+}
+
+.num {
+  text-align: right !important;
+  font-variant-numeric: tabular-nums;
+  white-space: nowrap;
+}
+
+.muted {
+  color: var(--text-muted);
+}
+
+.small-text {
+  font-size: var(--text-sm);
+}
+
+/* Badges: small pills */
+.badge {
+  display: inline-flex;
+  align-items: center;
+  gap: 5px;
+  border-radius: 4px;
+  padding: 1px 8px;
+  font-size: var(--text-xs);
+  font-weight: 600;
+  line-height: 1.6;
+  white-space: nowrap;
+}
+
+.badge::before {
+  content: "";
+  width: 6px;
+  height: 6px;
+  border-radius: 50%;
+  background: currentColor;
+  opacity: 0.85;
+}
+
+.badgeNeutral {
+  background: var(--neutral-bg);
+  color: var(--neutral-text);
+}
+
+.badgeBlue {
+  background: var(--info-bg);
+  color: var(--info-text);
+}
+
+.badgeGreen {
+  background: var(--success-bg);
+  color: var(--success-text);
+}
+
+.badgeAmber {
+  background: var(--warning-bg);
+  color: var(--warning-text);
+}
+
+.badgeRed {
+  background: var(--danger-bg);
+  color: var(--danger-text);
+}
+
+.empty {
+  display: grid;
+  gap: 6px;
+  justify-items: center;
+  border: 1px dashed var(--border-strong);
+  border-radius: var(--radius);
+  background: var(--surface-sunken);
+  padding: 32px 20px;
+  color: var(--text-muted);
+  text-align: center;
+}
+
+/* "⋯" menu of a screen's less-used actions (MoreMenu). */
+.moreMenu {
+  position: relative;
+  display: inline-flex;
+}
+
+.moreMenuButton {
+  min-width: 40px;
+  padding-inline: 10px;
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+
+.moreMenuList {
+  position: absolute;
+  z-index: 20;
+  top: calc(100% + 4px);
+  right: 0;
+  display: grid;
+  min-width: 200px;
+  max-width: calc(100vw - 32px);
+  margin: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+  padding: 4px;
+  list-style: none;
+}
+
+.moreMenuItem {
+  display: block;
+  width: 100%;
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  padding: 9px 12px;
+  color: var(--text);
+  font: inherit;
+  text-align: left;
+  text-decoration: none;
+  white-space: nowrap;
+  cursor: pointer;
+}
+
+.moreMenuItem:hover,
+.moreMenuItem:focus-visible {
+  background: var(--surface-hover);
+  text-decoration: none;
+}
+
+.moreMenuItem[aria-disabled="true"] {
+  color: var(--text-muted);
+  cursor: default;
+}
+
+.moreMenuDanger {
+  color: var(--danger-text);
+}
+
+/* An invoice's or bill's totals: a right-hand column under the lines. */
+.totals {
+  display: grid;
+  grid-template-columns: 1fr auto;
+  gap: 6px 0;
+  width: min(100%, 360px);
+  margin: 0 0 0 auto;
+  font-variant-numeric: tabular-nums;
+}
+
+.totals dt {
+  color: var(--text-muted);
+}
+
+.totals dd {
+  margin: 0;
+  padding-left: 24px;
+  text-align: right;
+}
+
+.totals .totalsStrong {
+  border-top: 1px solid var(--border);
+  padding-top: 6px;
+  color: var(--text);
+  font-weight: 650;
+}
+
+/* A list page's tabs and table, straight under the page header (no card around them). */
+.listSection {
+  display: grid;
+  gap: 12px;
+  min-width: 0;
+}
+
+/* Tabs: an underline row */
+.tabs {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px;
+  border-bottom: 1px solid var(--border);
+}
+
+.tab {
+  position: relative;
+  margin-bottom: -1px;
+  border: 0;
+  border-bottom: 2px solid transparent;
+  border-radius: 6px 6px 0 0;
+  background: transparent;
+  padding: 8px 12px;
+  color: var(--text-muted);
+  font-size: var(--text-base);
+  font-weight: 600;
+  transition: color 120ms ease;
+}
+
+.tab:hover {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.tabFigure {
+  margin-left: 4px;
+  color: var(--text-muted);
+  font-weight: 500;
+  font-variant-numeric: tabular-nums;
+}
+
+.tabActive {
+  border-bottom-color: var(--accent);
+  color: var(--text);
+}
+
+/* Stats / tiles */
+.statRow {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(180px, 1fr));
+  gap: 12px;
+}
+
+.stat {
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 14px 16px;
+}
+
+/* Inside a card, stats sit flat on a tint rather than stacking another card. */
+.card .stat {
+  background: var(--surface-sunken);
+  box-shadow: none;
+}
+
+.statLabel {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  font-weight: 550;
+}
+
+.statValue {
+  margin-top: 4px;
+  font-size: 1.375rem;
+  font-weight: 650;
+  letter-spacing: -0.02em;
+  font-variant-numeric: tabular-nums;
+}
+
+.reportSection td:first-child {
+  padding-left: 28px;
+}
+
+.reportHeading td {
+  background: var(--surface-sunken);
+  font-weight: 650;
+}
+
+.reportTotal td {
+  font-weight: 700;
+}
+
+.reportMeta {
+  display: flex;
+  align-items: flex-start;
+  justify-content: space-between;
+  gap: 14px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-sunken);
+  padding: 14px 16px;
+}
+
+.reportMetaText {
+  display: grid;
+  min-width: 0;
+  gap: 2px;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.reportMetaText > strong,
+.reportMetaTitle {
+  color: var(--text);
+}
+
+.reportMetaTitle {
+  font-size: var(--text-lg);
+  font-weight: 650;
+}
+
+/*
+ * Standard reports: one picker, then the report's card with
+ * its dates and Export on one row. The card's title is for screen readers
+ * only (the picker already shows it), and the organisation/title/period
+ * block is the printed heading, so it only shows on paper.
+ */
+.standardReport {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+.reportPicker {
+  max-width: 320px;
+}
+
+.standardReport > .card > .cardHeader {
+  justify-content: flex-start;
+}
+
+.standardReport > .card > .cardHeader > .actions {
+  flex: 1 1 auto;
+}
+
+.standardReport > .card > .cardHeader > .actions > * {
+  flex: 1 1 auto;
+}
+
+.standardReport > .card > .cardHeader .cardTitle {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+@media screen and (min-width: 601px) {
+  .standardReport > .card:has(> .reportMeta) {
+    grid-template-columns: minmax(0, 1fr) auto;
+  }
+
+  .standardReport > .card:has(> .reportMeta) > * {
+    grid-column: 1 / -1;
+  }
+
+  .standardReport > .card:has(> .reportMeta) > .cardHeader {
+    grid-column: 1;
+    grid-row: 1;
+  }
+
+  .standardReport > .card:has(> .reportMeta) > .reportMeta {
+    grid-column: 2;
+    grid-row: 1;
+    align-self: end;
+  }
+}
+
+@media screen {
+  .standardReport .reportMeta {
+    border: 0;
+    background: none;
+    padding: 0;
+  }
+
+  .standardReport .reportMetaText {
+    display: none;
+  }
+}
+
+.reportExport {
+  position: relative;
+  flex: 0 0 auto;
+}
+
+.reportExport > summary {
+  list-style: none;
+  cursor: pointer;
+}
+
+.reportExport > summary::-webkit-details-marker {
+  display: none;
+}
+
+.reportExportMenu {
+  position: absolute;
+  z-index: 5;
+  top: calc(100% + 4px);
+  right: 0;
+  display: grid;
+  min-width: 150px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius-sm);
+  background: var(--surface-raised);
+  box-shadow: var(--shadow);
+  padding: 4px;
+}
+
+.reportExportMenu button {
+  border: 0;
+  border-radius: 5px;
+  background: transparent;
+  padding: 8px 10px;
+  text-align: left;
+}
+
+.reportExportMenu button:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.reportExportMenu button:disabled {
+  color: var(--text-muted);
+}
+
+/*
+ * A row of fields and buttons. Items line up at the
+ * top, and anything beside a field drops by one line of label, so the
+ * controls share a line whatever help or error text sits under a field.
+ */
+.inlineForm {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-start;
+  gap: 10px;
+}
+
+.inlineForm > .field {
+  flex: 0 1 220px;
+  min-width: 160px;
+  max-width: 100%;
+}
+
+/* A button that reads like a link, e.g. an amount that fills in a box when clicked. */
+.linkButton {
+  background: none;
+  border: 0;
+  padding: 0;
+  color: var(--link);
+  font: inherit;
+  cursor: pointer;
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+/* Line editors on phones: each line becomes a card with its fields stacked. */
+@media (max-width: 700px) {
+  .stackOnPhone thead {
+    display: none;
+  }
+
+  .stackOnPhone,
+  .stackOnPhone tbody,
+  .stackOnPhone tfoot,
+  .stackOnPhone tr,
+  .stackOnPhone td {
+    display: block;
+    width: 100%;
+  }
+
+  .stackOnPhone tbody tr {
+    border-bottom: 1px solid var(--border-strong);
+    padding: 6px 0;
+  }
+
+  .stackOnPhone td {
+    /* A stacked cell grows with what's in it (the table's 44px is a row height). */
+    height: auto;
+    border: 0;
+    padding: 4px 12px;
+    text-align: left;
+  }
+
+  .stackOnPhone td:empty {
+    display: none;
+  }
+
+  .stackOnPhone td[data-label]:not([data-label=""])::before {
+    content: attr(data-label);
+    display: block;
+    margin-bottom: 2px;
+    color: var(--text-muted);
+    font-size: var(--text-xs);
+    font-weight: 600;
+  }
+
+  .pageTitle {
+    font-size: var(--text-2xl);
+  }
+
+  /* Lists keep each cell on one line and scroll sideways, rather than wrapping dates. */
+  .table:not(.stackOnPhone) td {
+    white-space: nowrap;
+  }
+
+  .card {
+    padding: 16px;
+  }
+}
+
+/* Custom reports: the report as a page, with its editing tools around it. */
+.toolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  padding: 10px 12px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow-sm);
+}
+
+/*
+ * The report or document as paper: always light, in both themes, so what's
+ * on screen matches what prints. The tokens are re-set to the light ones here.
+ */
+.reportPaper {
+  color-scheme: light;
+  --surface: #ffffff;
+  --surface-raised: #ffffff;
+  --surface-sunken: #f6f8fb;
+  --surface-hover: #eef1f5;
+  --border: #dde2e9;
+  --border-strong: #c3cbd6;
+  --text: #1b2533;
+  --text-muted: #546072;
+  /* --muted is an alias set at the root, so it's set again for the light page. */
+  --muted: var(--text-muted);
+  --link: #1a56a0;
+  --accent: #1f5fae;
+  --accent-text: #ffffff;
+  --accent-soft: #e6eef9;
+  --accent-soft-text: #173f73;
+  --neutral-bg: #eef1f5;
+  --neutral-text: #3c4757;
+  --success-bg: #e7f4eb;
+  --success-text: #146c2e;
+  --warning-bg: #fdf4de;
+  --warning-text: #84500a;
+  --danger-bg: #fcecea;
+  --danger-text: #b42318;
+  --info-bg: #e9f0fb;
+  --info-text: #1d4e89;
+
+  display: grid;
+  gap: 20px;
+  padding: 32px 36px;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: #ffffff;
+  box-shadow: var(--shadow);
+  color: var(--text);
+}
+
+.reportPaperHeader {
+  display: grid;
+  gap: 6px;
+}
+
+.reportPaperTitle {
+  margin: 0;
+  font-size: 1.5rem;
+}
+
+.reportTitleInput {
+  font-size: 1.5rem;
+  font-weight: 700;
+  padding: 4px 8px;
+}
+
+.reportPaperMeta {
+  margin: 0;
+  color: var(--muted);
+}
+
+.reportPaperBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.reportBlock {
+  display: grid;
+  gap: 8px;
+}
+
+.reportBlockTitle {
+  margin: 0;
+  font-size: 1.1rem;
+}
+
+.blockHeader input {
+  width: 100%;
+  font-weight: 600;
+}
+
+.blockTools {
+  display: flex;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  border-top: 1px dashed var(--line-strong);
+  padding-top: 8px;
+}
+
+.rowButtons {
+  display: inline-flex;
+  gap: 2px;
+  white-space: nowrap;
+}
+
+.iconButton {
+  min-width: 28px;
+  height: 28px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+  color: var(--text);
+  cursor: pointer;
+  font-size: 0.85rem;
+}
+
+.iconButton:hover:not(:disabled) {
+  background: var(--surface-hover);
+}
+
+.iconButton:disabled {
+  opacity: 0.5;
+  cursor: default;
+}
+
+.reportTable td,
+.reportTable th {
+  white-space: nowrap;
+}
+
+.reportTable td:first-child {
+  white-space: normal;
+}
+
+.choiceList {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(240px, 1fr));
+  gap: 6px 16px;
+  max-height: 320px;
+  overflow-y: auto;
+  padding: 8px;
+  border: 1px solid var(--line);
+  border-radius: 8px;
+}
+
+.reportNote {
+  margin: 0;
+  white-space: pre-wrap;
+}
+
+.noteInput {
+  width: 100%;
+  font: inherit;
+}
+
+.reportPaperFooter {
+  margin: 0;
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.printOnly {
+  display: none;
+}
+
+@media (max-width: 700px) {
+  .reportPaper {
+    padding: 16px;
+  }
+}
+
+@media print {
+  .printOnly {
+    display: block;
+  }
+
+  .reportPaper {
+    border: 0;
+    padding: 0;
+  }
+
+  .reportTable td:last-child:empty {
+    display: none;
+  }
+}
+
+.trackingSelects {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 6px;
+  margin-top: 6px;
+}
+
+.trackingSelects select {
+  min-width: 0;
+  max-width: 200px;
+  font-size: 0.85rem;
+}
+
+@media (max-width: 560px) {
+  .reportMeta {
+    display: grid;
+  }
+
+  .reportExport {
+    justify-self: start;
+  }
+}
+
+/* CRM: the pipeline board, opportunity cards and the company timeline. */
+.crmBoard {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(190px, 1fr);
+  gap: 12px;
+  overflow-x: auto;
+  padding-bottom: 8px;
+}
+
+.crmColumn {
+  display: grid;
+  align-content: start;
+  gap: 8px;
+  min-height: 160px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface-muted, var(--surface));
+}
+
+.crmColumnOver {
+  outline: 2px dashed var(--accent);
+}
+
+.crmColumnHeader {
+  display: flex;
+  justify-content: space-between;
+  align-items: center;
+  gap: 6px;
+}
+
+.crmCards {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(260px, 1fr));
+  gap: 10px;
+}
+
+.crmCard {
+  display: grid;
+  gap: 6px;
+  padding: 10px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+}
+
+.crmCard[draggable="true"] {
+  cursor: grab;
+}
+
+.crmTimeline {
+  display: grid;
+  gap: 12px;
+  margin: 0;
+  padding: 0 0 0 16px;
+  border-left: 2px solid var(--line);
+  list-style: none;
+}
+
+.crmTimeline li {
+  display: grid;
+  gap: 2px;
+}
+
+/* A confident bank reconciliation suggestion with its "OK" button (BK17, BK18). */
+.suggestion {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 6px;
+  padding: 6px 10px;
+  border: 1px solid var(--success);
+  border-radius: var(--radius-small);
+  background: var(--success-soft);
+}
+
+/* A named group of custom fields on a record's page or form (CRMF6). */
+.fieldSection {
+  display: grid;
+  gap: 10px;
+  padding: 8px 12px;
+  border: 1px solid var(--line);
+  border-radius: var(--radius-small);
+}
+
+.fieldSection > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.fieldValues {
+  display: grid;
+  grid-template-columns: max-content 1fr;
+  gap: 4px 12px;
+  margin: 0;
+}
+
+.fieldValues dt {
+  color: var(--muted);
+}
+
+.fieldValues dd {
+  margin: 0;
+}
+
+/*
+ * A CRM record page (CRT11): the header and
+ * highlights, then Details and Related tabs beside the Activity panel. On a
+ * phone the Activity panel goes below the tabs.
+ */
+.recordPage {
+  display: grid;
+  grid-template-columns: minmax(0, 2fr) minmax(280px, 1fr);
+  gap: 16px;
+  align-items: start;
+}
+
+.recordMain,
+.recordAside {
+  display: grid;
+  gap: 16px;
+  min-width: 0;
+}
+
+@media (max-width: 900px) {
+  .recordPage {
+    grid-template-columns: minmax(0, 1fr);
+  }
+}
+
+.recordHighlights {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.recordHighlights dt {
+  color: var(--muted);
+  font-size: 0.8rem;
+  font-weight: 600;
+}
+
+.recordHighlights dd {
+  margin: 0;
+}
+
+.recordSections {
+  display: grid;
+  gap: 10px;
+}
+
+.recordFields {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(240px, 1fr));
+  gap: 8px 16px;
+  margin: 0;
+}
+
+.recordField {
+  display: grid;
+  gap: 2px;
+  padding-bottom: 6px;
+  border-bottom: 1px solid var(--line);
+}
+
+.recordField dt {
+  color: var(--muted);
+  font-size: 0.85rem;
+}
+
+.recordField dd {
+  margin: 0;
+  white-space: pre-line;
+  overflow-wrap: anywhere;
+}
+
+.recordValue {
+  display: flex;
+  justify-content: space-between;
+  align-items: flex-start;
+  gap: 8px;
+}
+
+.requiredMark {
+  color: var(--danger);
+}
+
+.pencil {
+  border: 0;
+  background: transparent;
+  color: var(--muted);
+  cursor: pointer;
+  padding: 0 4px;
+}
+
+.pencil:hover,
+.pencil:focus-visible {
+  color: var(--foreground);
+}
+
+.relatedList {
+  display: grid;
+  gap: 6px;
+  margin: 0;
+  padding: 0;
+  list-style: none;
+}
+
+.relatedList li {
+  display: flex;
+  flex-wrap: wrap;
+  justify-content: space-between;
+  gap: 4px 12px;
+  padding: 6px 0;
+  border-bottom: 1px solid var(--line);
+}
+
+.activityMonth {
+  display: grid;
+  gap: 8px;
+}
+
+.activityMonth > summary {
+  cursor: pointer;
+  font-weight: 600;
+}
+
+.confirmDialog {
+  width: min(460px, calc(100vw - 32px));
+  border: 1px solid var(--line);
+  border-radius: var(--radius-lg);
+  padding: 0;
+  background: var(--surface-raised);
+  color: var(--text);
+  box-shadow: var(--shadow-lg);
+}
+
+.confirmDialog::backdrop {
+  background: var(--overlay);
+}
+
+.confirmBody {
+  display: grid;
+  gap: 16px;
+  padding: 22px;
+}
+
+.confirmTitle {
+  margin: 0;
+  font-size: 1.05rem;
+}
+
+.confirmMessage {
+  margin: 0;
+  white-space: pre-line;
+  line-height: 1.5;
+}
+
+.confirmActions {
+  display: flex;
+  justify-content: flex-end;
+  gap: 10px;
+}
+
+/* A folded section of a page: the summary is a header bar, the content a card inside it. */
+.collapsible > summary {
+  cursor: pointer;
+  padding: 12px 16px;
+  border: 1px solid var(--border);
+  border-radius: 10px;
+  background: var(--surface);
+  font-weight: 600;
+  color: var(--text);
+}
+
+.collapsible[open] > summary {
+  margin-bottom: 12px;
+}
+
+/* : fields in a row or toolbar keep their controls on one line; see .inlineForm. */
+.inlineForm .fieldLabel,
+.toolbar .fieldLabel {
+  line-height: 1.5;
+}
+
+.inlineForm:has(> .field) > :not(.field),
+.toolbar:has(> .field) > :not(.field) {
+  margin-top: calc(1.5 * var(--text-sm) + 6px);
+}
+
+.inlineForm > .field > :is(input, select),
+.toolbar > .field > :is(input, select),
+.inlineForm:has(> .field) > :is(button, a),
+.toolbar:has(> .field) > :is(button, a) {
+  min-height: 40px;
+}
+
+.toolbar:has(> .field) {
+  align-items: flex-start;
+}
+
+.pageHeading { display: flex; align-items: flex-start; gap: 12px; }
+.pageHeadingCopy { min-width: 0; }
+@media print { .pageHeading > [aria-hidden="true"] { display: none; } }
+
+.moduleIdentity { display: inline-flex; align-items: center; gap: 10px; margin-bottom: 6px; }
+
+/* Phones: the art sits beside the title. */
+@media (max-width: 600px) {
+  .pageHeading { display: grid; grid-template-columns: auto minmax(0, 1fr); align-items: center; column-gap: 10px; }
+  .pageHeadingCopy { display: contents; }
+  .pageHeading > [aria-hidden="true"] { width: 32px !important; height: 32px !important; }
+  .pageHeading > [aria-hidden="true"] svg { width: 32px; height: 32px; }
+}
+
+/*
+ * Financial statements: a toolbar (dates, filters,
+ * Update, ⋯ and Export), then the statement's heading (title, organisation,
+ * period) and the table in statement style: no row
+ * lines, a line above each total, a double line under net profit and net
+ * assets, amounts in the text colour that underline on hover (they're still
+ * links to the account's transactions).
+ */
+.reportFrame {
+  display: grid;
+  gap: 18px;
+  min-width: 0;
+  border: 1px solid var(--border);
+  border-radius: var(--radius);
+  background: var(--surface);
+  box-shadow: var(--shadow);
+  padding: 20px 24px 28px;
+}
+
+.reportToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 10px;
+  border-bottom: 1px solid var(--border);
+  padding-bottom: 16px;
+}
+
+.reportToolbar > .field {
+  flex: 0 1 190px;
+  min-width: 150px;
+}
+
+.reportToolbarChecks {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 4px 14px;
+  min-height: 40px;
+  margin: 0;
+  border: 0;
+  padding: 0;
+}
+
+.reportToolbarEnd {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-left: auto;
+}
+
+.reportExportError {
+  display: block;
+  max-width: 280px;
+  margin-top: 4px;
+  color: var(--danger-text);
+  font-size: var(--text-sm);
+}
+
+.statementHeading {
+  display: grid;
+  gap: 2px;
+}
+
+.statementTitle {
+  margin: 0;
+  font-size: var(--text-xl);
+  font-weight: 700;
+  letter-spacing: -0.01em;
+}
+
+.statementHeading p {
+  margin: 0;
+  color: var(--text-muted);
+}
+
+.statementHeading .statementOrg {
+  color: var(--text);
+  font-weight: 600;
+}
+
+.statementWrap {
+  min-width: 0;
+  overflow-x: auto;
+}
+
+/* Annual financial statements: one statement after another, each starting a new page on paper. */
+.annualStatement {
+  margin-top: 32px;
+}
+
+@media print {
+  .annualStatement {
+    break-before: page;
+  }
+}
+
+.table.statement {
+  border-collapse: collapse;
+}
+
+.table.statement th,
+.table.statement td {
+  height: auto;
+  border-bottom: 0;
+  padding: 6px 12px;
+}
+
+.table.statement .reportSection td:first-child {
+  padding-left: 28px;
+}
+
+.table.statement thead th {
+  position: static;
+  border-bottom: 1px solid var(--border-strong);
+  background: none;
+  color: var(--text);
+  font-size: var(--text-sm);
+  font-weight: 700;
+}
+
+.table.statement tbody tr:hover td {
+  background: var(--surface-hover);
+}
+
+.table.statement .reportHeading td {
+  background: none;
+  padding-top: 18px;
+  font-weight: 700;
+}
+
+.table.statement .reportSubheading td {
+  color: var(--text-muted);
+  font-weight: 600;
+}
+
+.table.statement .reportTotal td {
+  border-top: 1px solid var(--border-strong);
+  font-weight: 700;
+}
+
+.table.statement tfoot td {
+  border-top: 1px solid var(--border-strong);
+  background: none;
+}
+
+.table.statement .reportGrand td,
+.table.statement tfoot .reportGrand td {
+  border-top: 1px solid var(--text);
+  border-bottom: 3px double var(--text);
+  background: none;
+  font-weight: 700;
+}
+
+.table.statement .reportGrand + tr td {
+  padding-top: 14px;
+}
+
+.table.statement a {
+  color: var(--text);
+  text-decoration: none;
+}
+
+.table.statement a:hover,
+.table.statement a:focus-visible {
+  color: var(--link);
+  text-decoration: underline;
+  text-underline-offset: 2px;
+}
+
+.statementNote {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+/* Phones (390 px): account names wrap and the amounts stay on screen. */
+@media (max-width: 700px) {
+  .reportFrame {
+    padding: 14px 12px 20px;
+  }
+
+  .reportToolbarEnd {
+    margin-left: 0;
+  }
+
+  .table.statement td:first-child,
+  .table.statement th:first-child {
+    white-space: normal;
+    overflow-wrap: anywhere;
+  }
+
+  .table.statement th,
+  .table.statement td {
+    padding: 6px 6px;
+  }
+
+  .table.statement .reportSection td:first-child {
+    padding-left: 14px;
+  }
+
+  /* With several amount columns the names stay in view while the amounts scroll. */
+  .table.statement.statementWide td:first-child,
+  .table.statement.statementWide th:first-child {
+    position: sticky;
+    left: 0;
+    z-index: 1;
+    min-width: 46vw;
+    max-width: 46vw;
+    background: var(--surface);
+  }
+}
+
+@media print {
+  .reportFrame {
+    border: 0;
+    box-shadow: none;
+    padding: 0;
+  }
+
+  .reportToolbar {
+    display: none;
+  }
+}
+
+/* Read by screen readers, not shown. */
+.srOnly {
+  position: absolute;
+  width: 1px;
+  height: 1px;
+  overflow: hidden;
+  clip: rect(0 0 0 0);
+  white-space: nowrap;
+}
+
+/* Editing a report's layout: rows drag (or move with the arrow keys), names are typed in place. */
+.layoutRowName {
+  display: inline-flex;
+  align-items: center;
+  gap: 6px;
+  width: 100%;
+}
+
+.dragHandle {
+  flex: 0 0 auto;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: none;
+  padding: 2px 6px;
+  color: var(--text-muted);
+  cursor: grab;
+}
+
+.dragHandle:hover,
+.dragHandle:focus-visible {
+  border-color: var(--border-strong);
+  color: var(--text);
+}
+
+.layoutRowInput {
+  flex: 1 1 auto;
+  min-width: 0;
+  border: 1px solid transparent;
+  border-radius: 5px;
+  background: transparent;
+  padding: 3px 6px;
+  color: inherit;
+  font: inherit;
+}
+
+.layoutRowInput:hover,
+.layoutRowInput:focus {
+  border-color: var(--border-strong);
+  background: var(--surface);
+}
+
+.layoutHiddenRow td {
+  color: var(--text-muted);
+  font-style: italic;
+}
+
+.dropTarget td {
+  box-shadow: inset 0 2px 0 var(--link);
+}
+
+/* An account being dragged over a group (CR21): the whole group shows as the place it will land. */
+.table.statement tr.layoutDropGroup td {
+  background: color-mix(in srgb, var(--link) 9%, transparent);
+}
+
+.layoutDragLine {
+  cursor: grab;
+}
+
+/* The grip on an account row: shown faintly, stronger when the row is under the pointer. */
+.layoutLineGrip {
+  margin-right: 6px;
+  color: var(--text-muted);
+  opacity: 0.35;
+  font-size: var(--text-sm);
+  line-height: 1;
+}
+
+.layoutDragLine:hover .layoutLineGrip {
+  opacity: 1;
+}
+
+/* An account with nothing in these dates (CR23): listed in the editor only. */
+.layoutEmptyLine td {
+  color: var(--text-muted);
+}
+
+.layoutDragLine:active {
+  cursor: grabbing;
+}
+
+.layoutNoteRow td {
+  padding-top: 0 !important;
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+}
+
+.layoutPick {
+  display: inline-flex;
+  margin-right: 8px;
+  vertical-align: middle;
+}
+
+.layoutGroupBar {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+}
+
+/* One line on a wide screen: Move to, its button, "or", a new group's name, its button. */
+.layoutGroupBar input,
+.layoutGroupBar select {
+  width: 15rem;
+  max-width: 100%;
+}
+
+@media print {
+  .pageBreakAfter {
+    break-after: page;
+  }
+}
+
+.favouriteButton {
+  min-width: 40px;
+  padding-inline: 10px;
+  font-size: var(--text-lg);
+  line-height: 1;
+}
+
+.favouriteButton[aria-pressed="true"] {
+  color: var(--warning-text, #9a6700);
+}
+
+.reportPickerRow {
+  display: flex;
+  align-items: flex-end;
+  gap: 8px;
+  max-width: 380px;
+}
+
+.reportPickerRow > .field {
+  flex: 1 1 auto;
+}
+
+/* Annual financial statements one page at a time (FS14): a sheet of paper on screen. */
+.annualPage {
+  margin-top: 16px;
+  padding: 32px;
+  min-height: 560px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.annualCover {
+  display: flex;
+  flex-direction: column;
+  justify-content: space-between;
+  min-height: 496px;
+  padding-top: 96px;
+}
+
+.annualPager {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+  margin-top: 16px;
+}
+
+@media (max-width: 640px) {
+  .annualPage {
+    padding: 16px;
+    min-height: 0;
+  }
+  .annualCover {
+    min-height: 320px;
+    padding-top: 32px;
+  }
+}
+
+@media print {
+  .annualPage {
+    border: 0;
+    padding: 0;
+  }
+}
+
+/* The layout editor (LE1-LE3): the report on the left, Details on the right. */
+.layoutEditor {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 340px;
+  gap: 16px;
+  align-items: start;
+}
+
+.layoutSide {
+  position: sticky;
+  top: 72px;
+  max-height: calc(100vh - 96px);
+  overflow-y: auto;
+  padding: 16px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.layoutToolbar {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 6px;
+  padding: 8px;
+  margin-bottom: 12px;
+  border: 1px solid var(--border);
+  border-radius: 6px;
+  background: var(--surface);
+}
+
+.layoutToolbarEnd {
+  margin-left: auto;
+  display: flex;
+  gap: 6px;
+}
+
+.layoutToolbarRule {
+  width: 1px;
+  align-self: stretch;
+  background: var(--border);
+}
+
+.layoutSelected > td,
+.layoutSelected > th {
+  background: var(--accent-soft);
+}
+
+.layoutPickable {
+  cursor: pointer;
+}
+
+.layoutBlockSelected {
+  outline: 2px solid var(--accent);
+  outline-offset: 4px;
+  border-radius: 4px;
+}
+
+.layoutPageBreakMark {
+  margin: 12px 0;
+  border-top: 2px dashed var(--border-strong);
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  text-align: center;
+}
+
+@media (max-width: 900px) {
+  .layoutEditor {
+    grid-template-columns: minmax(0, 1fr);
+  }
+  .layoutSide {
+    position: static;
+    max-height: none;
+  }
+}
+
+@media print {
+  .layoutSelected > td {
+    background: none;
+  }
+  .layoutBlockSelected {
+    outline: 0;
+  }
+  .layoutPageBreakMark {
+    display: none;
+  }
+}
+
+.layoutNotesCell {
+  color: var(--text-muted);
+  font-size: var(--text-sm);
+  white-space: normal;
+}

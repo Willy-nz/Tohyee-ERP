@@ -1,0 +1,218 @@
+import { localParts } from "@/lib/backups/service";
+import { emailStuckSources } from "@/lib/analytics/failure-email";
+import type { Actor } from "@/lib/db/org-transaction";
+import { withOrganisationTransaction } from "@/lib/db/org-transaction";
+import { coreQuery } from "@/lib/db/transactions";
+import { organisationSourceFolder } from "@/lib/analytics/folders";
+import { BOOKS_TABLE_NAME, refreshBooks } from "@/lib/analytics/books";
+import { type LoadRun, runLoad } from "@/lib/analytics/sources";
+import { gaLoadsNightly, refreshGa } from "@/lib/analytics/google-analytics";
+import { GA_LOAD_TABLE_NAME } from "@/lib/analytics/google-analytics-reports";
+import { gscLoadsNightly, refreshGsc } from "@/lib/analytics/search-console";
+import { gmcLoadsNightly, refreshGmc } from "@/lib/analytics/merchant-center";
+import { GMC_LOAD_TABLE_NAME } from "@/lib/analytics/merchant-center-reports";
+import { businessProfile } from "@/lib/analytics/business-profile";
+import { GBP_LOAD_TABLE_NAME } from "@/lib/analytics/business-profile-reports";
+import { googleAds } from "@/lib/analytics/google-ads";
+import { GADS_LOAD_TABLE_NAME } from "@/lib/analytics/google-ads-reports";
+import { GSC_LOAD_TABLE_NAME } from "@/lib/analytics/search-console-reports";
+import { metaLoadsNightly, refreshMeta } from "@/lib/analytics/meta";
+import { META_LOAD_TABLE_NAME } from "@/lib/analytics/meta-reports";
+import { refreshShopify, shopifyLoadsNightly } from "@/lib/analytics/shopify";
+import { SHOPIFY_LOAD_TABLE_NAME } from "@/lib/analytics/shopify-tables";
+import { getOrganisation } from "@/lib/organisations/registry";
+
+/**
+ * The nightly reload: each source set to reload daily is
+ * loaded once a day after LOAD_TIME (business time), after the nightly
+ * backups; a scheduled load that failed is tried again an hour later.
+ */
+export const LOAD_TIME = "04:00";
+const RETRY_AFTER_MS = 60 * 60 * 1000;
+
+export const SCHEDULE_ACTOR: Actor = { userId: null, email: "analytics-loader@tohyee" };
+
+type Recent = { status: string; trigger: string; startedAt: Date };
+
+/** Whether a source's daily load is due now, given its loads in the last two days. */
+export function loadDue(now: Date, runs: Recent[], loadTime = LOAD_TIME): boolean {
+  const today = localParts(now);
+  if (today.time < loadTime) return false;
+  const sinceLoadTime = runs.filter((run) => {
+    const at = localParts(run.startedAt);
+    return at.date === today.date && at.time >= loadTime;
+  });
+  if (sinceLoadTime.some((run) => run.status === "ok" || run.status === "running")) return false;
+  const lastTry = sinceLoadTime
+    .filter((run) => run.trigger === "schedule")
+    .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())[0];
+  return !lastTry || now.getTime() - lastTry.startedAt.getTime() >= RETRY_AFTER_MS;
+}
+
+const GA_DUE = "google-analytics";
+const GSC_DUE = "google-search-console";
+const GMC_DUE = "google-merchant-center";
+const GBP_DUE = "google-business-profile";
+const GADS_DUE = "google-ads";
+const META_DUE = "meta";
+const SHOPIFY_DUE = "shopify";
+let running = false;
+
+/** Loads whatever is due across every organisation with analytics on. Returns what it did. */
+export async function runDueLoads(now = new Date()): Promise<LoadRun[]> {
+  if (running) return [];
+  running = true;
+  const made: LoadRun[] = [];
+  try {
+    const organisations = await coreQuery<{ id: string }>(
+      "select id from organisations where is_active and provisioning_status = 'ready' and migration_status = 'current' and jobs_paused_at is null order by id",
+    );
+    for (const { id } of organisations.rows) {
+      const hasFolder = Boolean(await organisationSourceFolder(id));
+      const organisation = await getOrganisation(id);
+      if (!organisation) continue;
+      try {
+        const due = await withOrganisationTransaction(
+          organisation,
+          SCHEDULE_ACTOR,
+          async (tx) => {
+            const enabled = await tx.query<{ on: boolean }>("select analytics_enabled as on from organisation_settings where id = true");
+            if (!enabled.rows[0]?.on) return [];
+            // The books are copied for every organisation with Analytics on; file sources need a
+            // folder, database sources don't.
+            const sources = await tx.query<{ id: string }>(
+              "select id::text from analytics_sources where reload_daily and (connection_id is not null or $1) order by analytics_sources.id",
+              [hasFolder],
+            );
+            const books = await tx.query<{ status: string; trigger: string; started_at: Date }>(
+              `select status, trigger, started_at from analytics_load_runs
+                where source_id is null and table_name = $1 and started_at > now() - interval '2 days'`,
+              [BOOKS_TABLE_NAME],
+            );
+            const booksDue = loadDue(
+              now,
+              books.rows.map((run) => ({ status: run.status, trigger: run.trigger, startedAt: new Date(run.started_at) })),
+            );
+            const runs = await tx.query<{ source_id: string; status: string; trigger: string; started_at: Date }>(
+              `select source_id::text, status, trigger, started_at from analytics_load_runs
+                where source_id is not null and started_at > now() - interval '2 days'`,
+            );
+            const due: string[] = booksDue ? ["books"] : [];
+            // Google Analytics: nightly like the books, once a property is chosen.
+            if (await gaLoadsNightly(tx)) {
+              const ga = await tx.query<{ status: string; trigger: string; started_at: Date }>(
+                `select status, trigger, started_at from analytics_load_runs
+                  where source_id is null and table_name = $1 and started_at > now() - interval '2 days'`,
+                [GA_LOAD_TABLE_NAME],
+              );
+              if (loadDue(now, ga.rows.map((run) => ({ status: run.status, trigger: run.trigger, startedAt: new Date(run.started_at) })))) due.push(GA_DUE);
+            }
+            // Google Search Console: nightly too, only the new and changing days.
+            if (await gscLoadsNightly(tx)) {
+              const gsc = await tx.query<{ status: string; trigger: string; started_at: Date }>(
+                `select status, trigger, started_at from analytics_load_runs
+                  where source_id is null and table_name = $1 and started_at > now() - interval '2 days'`,
+                [GSC_LOAD_TABLE_NAME],
+              );
+              if (loadDue(now, gsc.rows.map((run) => ({ status: run.status, trigger: run.trigger, startedAt: new Date(run.started_at) })))) due.push(GSC_DUE);
+            }
+            // Google Merchant Center: nightly, the whole set again.
+            if (await gmcLoadsNightly(tx)) {
+              const gmc = await tx.query<{ status: string; trigger: string; started_at: Date }>(
+                `select status, trigger, started_at from analytics_load_runs
+                  where source_id is null and table_name = $1 and started_at > now() - interval '2 days'`,
+                [GMC_LOAD_TABLE_NAME],
+              );
+              if (loadDue(now, gmc.rows.map((run) => ({ status: run.status, trigger: run.trigger, startedAt: new Date(run.started_at) })))) due.push(GMC_DUE);
+            }
+            // Google Business Profile and Google Ads: nightly, the whole set again.
+            for (const [source, table, key] of [[businessProfile, GBP_LOAD_TABLE_NAME, GBP_DUE], [googleAds, GADS_LOAD_TABLE_NAME, GADS_DUE]] as const) {
+              if (!(await source.loadsNightly(tx))) continue;
+              const runs = await tx.query<{ status: string; trigger: string; started_at: Date }>(
+                `select status, trigger, started_at from analytics_load_runs
+                  where source_id is null and table_name = $1 and started_at > now() - interval '2 days'`,
+                [table],
+              );
+              if (loadDue(now, runs.rows.map((run) => ({ status: run.status, trigger: run.trigger, startedAt: new Date(run.started_at) })))) due.push(key);
+            }
+            // Meta: nightly too, only the new and changing days.
+            if (await metaLoadsNightly(tx)) {
+              const meta = await tx.query<{ status: string; trigger: string; started_at: Date }>(
+                `select status, trigger, started_at from analytics_load_runs
+                  where source_id is null and table_name = $1 and started_at > now() - interval '2 days'`,
+                [META_LOAD_TABLE_NAME],
+              );
+              if (loadDue(now, meta.rows.map((run) => ({ status: run.status, trigger: run.trigger, startedAt: new Date(run.started_at) })))) due.push(META_DUE);
+            }
+            // Shopify: Tohyee's own copy, nightly once a store is connected.
+            if (await shopifyLoadsNightly(tx)) {
+              const shopify = await tx.query<{ status: string; trigger: string; started_at: Date }>(
+                `select status, trigger, started_at from analytics_load_runs
+                  where source_id is null and table_name = $1 and started_at > now() - interval '2 days'`,
+                [SHOPIFY_LOAD_TABLE_NAME],
+              );
+              if (loadDue(now, shopify.rows.map((run) => ({ status: run.status, trigger: run.trigger, startedAt: new Date(run.started_at) })))) due.push(SHOPIFY_DUE);
+            }
+            return due.concat(sources.rows
+              .map((source) => source.id)
+              .filter((sourceId) =>
+                loadDue(
+                  now,
+                  runs.rows
+                    .filter((run) => run.source_id === sourceId)
+                    .map((run) => ({ status: run.status, trigger: run.trigger, startedAt: new Date(run.started_at) })),
+                ),
+              ));
+          },
+          { readOnly: true },
+        );
+        for (const sourceId of due) {
+          try {
+            const run =
+              sourceId === "books"
+                ? await refreshBooks(organisation, SCHEDULE_ACTOR, "schedule")
+                : sourceId === GA_DUE
+                  ? await refreshGa(organisation, SCHEDULE_ACTOR, "schedule")
+                  : sourceId === GSC_DUE
+                    ? await refreshGsc(organisation, SCHEDULE_ACTOR, "schedule")
+                    : sourceId === GMC_DUE
+                    ? await refreshGmc(organisation, SCHEDULE_ACTOR, "schedule")
+                    : sourceId === GBP_DUE
+                    ? await businessProfile.refresh(organisation, SCHEDULE_ACTOR, "schedule")
+                    : sourceId === GADS_DUE
+                    ? await googleAds.refresh(organisation, SCHEDULE_ACTOR, "schedule")
+                    : sourceId === META_DUE
+                      ? await refreshMeta(organisation, SCHEDULE_ACTOR, "schedule")
+                      : sourceId === SHOPIFY_DUE
+                        ? await refreshShopify(organisation, SCHEDULE_ACTOR, "schedule")
+                        : await runLoad(organisation, SCHEDULE_ACTOR, sourceId, "schedule");
+            made.push(run);
+            if (run.status === "failed") console.warn(`[tohyee] Analytics load of ${run.sourceName} (${id}) failed: ${run.error}`);
+          } catch (error) {
+            console.warn(`[tohyee] Analytics load (${id}):`, error instanceof Error ? error.message : error);
+          }
+        }
+        // Owners and admins are emailed when a source has now failed twice running.
+        if (due.length > 0) await emailStuckSources(organisation, SCHEDULE_ACTOR);
+      } catch (error) {
+        console.warn(`[tohyee] Analytics scheduler (${id}):`, error instanceof Error ? error.message : error);
+      }
+    }
+    return made;
+  } finally {
+    running = false;
+  }
+}
+
+let timer: NodeJS.Timeout | null = null;
+
+/** Checks every 5 minutes whether any daily load is due, while the server runs. */
+export function startAnalyticsScheduler(): void {
+  if (timer) return;
+  const tick = () => {
+    runDueLoads().catch((error) => console.warn("[tohyee] Analytics scheduler:", error instanceof Error ? error.message : error));
+  };
+  timer = setInterval(tick, 5 * 60 * 1000);
+  timer.unref?.();
+  setTimeout(tick, 3 * 60 * 1000).unref?.();
+}

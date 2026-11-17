@@ -1,0 +1,30 @@
+"use client";
+
+import { Suspense } from "react";
+import { RequireOrganisation } from "@/components/books";
+import { FarmCalendarHome } from "@/components/farm-calendar";
+import { FarmEffluentDue } from "@/components/farm-effluent-care";
+import { FarmSafetyDue } from "@/components/farm-safety-tab";
+import { FarmTasksDue } from "@/components/farm-tasks";
+import { Page, PageHeader, Notice } from "@/components/ui";
+
+export default function FarmCalendarPage() {
+  return (
+    <Page>
+      <PageHeader title="Farm calendar" />
+      <Notice>Read from your own email, items you add, and what others share with the farm team.</Notice>
+      <Suspense fallback={null}>
+        <RequireOrganisation>
+          {(organisationId) => (
+            <>
+              <FarmTasksDue key={`tasks-${organisationId}`} organisationId={organisationId} />
+              <FarmSafetyDue key={`safety-${organisationId}`} organisationId={organisationId} />
+              <FarmEffluentDue key={`effluent-${organisationId}`} organisationId={organisationId} />
+              <FarmCalendarHome key={organisationId} organisationId={organisationId} />
+            </>
+          )}
+        </RequireOrganisation>
+      </Suspense>
+    </Page>
+  );
+}

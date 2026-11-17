@@ -1,0 +1,741 @@
+import { STALE_TOOL_LIST_NOTE } from "@/lib/ai/mcp-tool-list";
+import { directoryPage, getOrganisationDirectory } from "@/lib/organisations/directory";
+import type { ToolGroupStatus } from "@/lib/ai/tool-modules";
+import { listGroups } from "@/lib/consolidation/groups";
+import { consolidatedBalanceSheet, consolidatedBudgetVsActual, consolidatedProfitAndLoss } from "@/lib/consolidation/report";
+import { cashFlowForecast } from "@/lib/cash-flow/forecast";
+import { listApprovalRequests } from "@/lib/approvals/requests";
+import { listAccounts } from "@/lib/accounts/service";
+import { withLineIds } from "@/lib/ai/document-lines";
+import { ACCOUNT_CODE, ACCOUNT_ID, accountFromArgs } from "@/lib/ai/account-ref";
+import { boundedLimit, CURSOR, firstRows, limitInput, pageAfter, pageByPosition } from "@/lib/ai/limits";
+import { BALANCE_SHEET_SCHEMA, PROFIT_AND_LOSS_SCHEMA, runBalanceSheet, runProfitAndLoss, runTrialBalance, TRIAL_BALANCE_SCHEMA } from "@/lib/ai/report-tools";
+import { AI_ACCESS_LEVEL_AI_WORDS, AI_ACCESS_LEVEL_LABELS, type AiAccessLevel } from "@/lib/ai/access-levels";
+import type { Role } from "@/lib/auth/roles";
+import { getInboxItem, getInboxItemContent, type InboxItem, listInboxPage } from "@/lib/bills/inbox";
+import { getBill, listBills, type BillSummary } from "@/lib/bills/service";
+import { listContacts } from "@/lib/contacts/service";
+import { todayIsoDate } from "@/lib/dates";
+import type { Actor, OrgRunner, OrgTx } from "@/lib/db/org-transaction";
+import type { OrganisationRecord } from "@/lib/organisations/registry";
+import { NotFoundError, ValidationError } from "@/lib/errors";
+import { MONTH_NAMES } from "@/lib/financial-year";
+import { formatGstNumber } from "@/lib/format";
+import { getInvoice, listInvoices, type InvoiceSummary } from "@/lib/invoices/service";
+import { getJournalDraft, listJournalDraftsPage } from "@/lib/ledger/journal-drafts";
+import { getOrganisationSettings } from "@/lib/organisations/settings";
+import { gstRegistrationSummary } from "@/lib/tax/registration";
+import { accountTransactions } from "@/lib/reports/account-transactions";
+import { agedPayables } from "@/lib/reports/aged-payables";
+import { agedReceivables } from "@/lib/reports/aged-receivables";
+import { calculateGstReturn } from "@/lib/reports/gst-return";
+import { optionalString } from "@/lib/validation";
+
+/**
+ * The tools an AI connected over MCP can use to look things up (decision
+ * 342). Every one only reads, through the same service functions the screens
+ * use, inside a read-only transaction on the organisation's own database. No
+ * payroll. Lists are capped so one answer stays small. The tools that make
+ * drafts and post are in `@/lib/ai/write-tools`; the
+ * whole list is `@/lib/ai/catalogue`.
+ */
+
+export type ToolContext = {
+  role: Role;
+  organisationId: string;
+  /** The command source for idempotency keys, one per AI key (e.g. "ai-12"). */
+  source: string;
+  /** What this key or connection may do now: its level capped by the person's role now. */
+  accessLevel: AiAccessLevel;
+  /** The level it was given when made, before the role cap. */
+  grantedAccessLevel: AiAccessLevel;
+  /** Over MCP: the tool-set version now, and whether the client's list is out of date. */
+  toolList?: { version: string; stale: boolean; toolNames: readonly string[]; toolGroups?: readonly ToolGroupStatus[] };
+  /**
+   * Over MCP: the organisation and who's acting, for a tool that runs work
+   * the way a screen does outside one transaction (refreshing an Analytics source, which opens its own transactions and calls out).
+   */
+  organisation?: OrganisationRecord;
+  actor?: Actor;
+};
+
+/**
+ * The connection's access for get_organisation: what
+ * it may do now, the same level the MCP server's instructions name and its
+ * tool list follows. It describes the connection, not the tool answering:
+ * get_organisation itself only reads, whatever the level.
+ */
+export function connectionAccess(context: Pick<ToolContext, "accessLevel" | "grantedAccessLevel" | "role">) {
+  const level = context.accessLevel;
+  const capped = context.grantedAccessLevel !== level;
+  return {
+    access: level,
+    accessLabel: AI_ACCESS_LEVEL_LABELS[level],
+    accessMeans: AI_ACCESS_LEVEL_AI_WORDS[level],
+    accessGranted: context.grantedAccessLevel,
+    ...(capped
+      ? {
+          accessNote: `This connection was given "${AI_ACCESS_LEVEL_LABELS[context.grantedAccessLevel]}", but your role is now ${context.role}, so it works as "${AI_ACCESS_LEVEL_LABELS[level]}".`,
+        }
+      : {}),
+  };
+}
+
+/**
+ * Whether the AI's tool list matches what this connection may use now
+ *. When it doesn't, the note says to refresh or reconnect,
+ * and toolsNow lists the tools this connection has now (only those).
+ */
+export function toolListStatus(context: Pick<ToolContext, "toolList">) {
+  const list = context.toolList;
+  if (!list) return {};
+  // : which tool groups the organisation's modules offer, and why any are hidden.
+  const groups = list.toolGroups ? { toolGroups: [...list.toolGroups] } : {};
+  return list.stale
+    ? { toolListVersion: list.version, toolListUpToDate: false, toolListNote: STALE_TOOL_LIST_NOTE, toolsNow: [...list.toolNames], ...groups }
+    : { toolListVersion: list.version, ...groups };
+}
+
+export type JsonSchema = Record<string, unknown>;
+
+/**
+ * An answer with a file attached (BI4): the MCP server sends `answer` as
+ * JSON text and the file's bytes after it, so the person's AI can read it.
+ */
+export class ToolFileAnswer {
+  constructor(
+    readonly answer: unknown,
+    readonly file: { uri: string; fileName: string; contentType: string; content: Buffer },
+    /** More files after the first, in the order the answer names them (BCS photos and the farm's reference photos). */
+    readonly more: ReadonlyArray<{ uri: string; fileName: string; contentType: string; content: Buffer }> = [],
+  ) {}
+}
+
+export type AiTool = {
+  name: string;
+  title: string;
+  description: string;
+  inputSchema: JsonSchema;
+  /** The access level a key needs for this tool. Only "read" tools run read-only, unless `readOnly` says otherwise. */
+  level: AiAccessLevel;
+  /** Run in a read-only transaction even though the level isn't "read" (a Full access tool that only looks). */
+  readOnly?: boolean;
+  /** The role the key's owner needs now, beyond the level's own, e.g. income tax is for owners and admins. Hidden otherwise. */
+  minRole?: Role;
+  run(tx: OrgTx, args: Record<string, unknown>, context: ToolContext): Promise<unknown>;
+  /**
+   * For a tool that works in steps, each committed on its own (a durable batch): used instead of `run` by the MCP server, with a runner that
+   * opens one transaction per step. `run` stays as the all-in-one version.
+   */
+  runSteps?(run: OrgRunner, args: Record<string, unknown>, context: ToolContext): Promise<unknown>;
+};
+
+export const DATE = { type: "string", format: "date", description: "A date as YYYY-MM-DD." } as const;
+
+export function schema(properties: Record<string, JsonSchema> = {}, required: string[] = []): JsonSchema {
+  return { type: "object", properties, required, additionalProperties: false };
+}
+
+const MAX_LIST = 200;
+const MAX_LINES = 1000;
+const MAX_CONTACTS = 500;
+const MAX_AGED_ROWS = 300;
+const MAX_DOCUMENTS_PER_ROW = 50;
+const MAX_DOCUMENT_LINES = 300;
+
+export function invoiceSummary(invoice: InvoiceSummary) {
+  return {
+    id: invoice.id,
+    number: invoice.invoiceNumber,
+    status: invoice.status,
+    contactId: invoice.contactId,
+    contactName: invoice.contactName,
+    invoiceDate: invoice.invoiceDate,
+    dueDate: invoice.dueDate,
+    reference: invoice.reference,
+    currencyCode: invoice.currencyCode,
+    subtotal: invoice.subtotal,
+    gst: invoice.taxTotal,
+    total: invoice.total,
+    amountPaid: invoice.amountPaid,
+    amountCredited: invoice.amountCredited,
+    amountDue: invoice.amountDue,
+    paidStatus: invoice.paidStatus,
+  };
+}
+
+export function billSummary(bill: BillSummary) {
+  return {
+    id: bill.id,
+    supplierInvoiceNumber: bill.supplierInvoiceNumber,
+    status: bill.status,
+    contactId: bill.contactId,
+    contactName: bill.contactName,
+    billDate: bill.billDate,
+    dueDate: bill.dueDate,
+    currencyCode: bill.currencyCode,
+    subtotal: bill.subtotal,
+    gst: bill.taxTotal,
+    total: bill.total,
+    amountPaid: bill.amountPaid,
+    amountCredited: bill.amountCredited,
+    amountDue: bill.amountDue,
+    paidStatus: bill.paidStatus,
+  };
+}
+
+type DocumentLine = {
+  lineId: string;
+  lineOrder: number;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  discountPercent?: string;
+  accountCode: string;
+  accountName: string;
+  taxCode: string | null;
+  lineAmount: string;
+  netAmount: string;
+  taxAmount: string;
+  itemId: string | null;
+  itemCode: string | null;
+  unitId: string | null;
+  unitName: string | null;
+  tracking: Record<string, string>;
+  customFields: Record<string, unknown>;
+  salesOrderLineId?: string | null;
+  purchaseOrderLineId?: string | null;
+};
+
+/** A bills inbox item for the AI: no file, just what it is and where it came from. */
+export function inboxItemSummary(item: InboxItem) {
+  return {
+    id: item.id,
+    status: item.status,
+    fileName: item.fileName,
+    fileType: item.contentType,
+    arrived: item.createdAt,
+    source: item.source,
+    emailFrom: item.emailFrom,
+    emailSubject: item.emailSubject,
+    note: item.note,
+    billId: item.billId,
+    billNumber: item.billNumber,
+    removedReason: item.removedReason,
+    sameFile: item.sameFile.map((entry) => entry.text),
+  };
+}
+
+/**
+ * A document's lines for the AI, with everything an edit must keep:
+ * the lineId to send back, the item and unit, tracking, custom fields and
+ * any order link.
+ */
+export function documentLines(lines: readonly DocumentLine[]) {
+  const kept = firstRows(lines, MAX_DOCUMENT_LINES);
+  return {
+    lines: kept.rows.map((line) => ({
+      lineId: line.lineId,
+      line: line.lineOrder,
+      description: line.description,
+      quantity: line.quantity,
+      unitPrice: line.unitPrice,
+      ...(line.discountPercent && Number(line.discountPercent) !== 0 ? { discountPercent: line.discountPercent } : {}),
+      account: `${line.accountCode} ${line.accountName}`,
+      taxCode: line.taxCode,
+      amount: line.lineAmount,
+      net: line.netAmount,
+      gst: line.taxAmount,
+      itemId: line.itemId,
+      ...(line.itemCode ? { itemCode: line.itemCode } : {}),
+      unitId: line.unitId,
+      ...(line.unitName ? { unitName: line.unitName } : {}),
+      tracking: line.tracking,
+      customFields: line.customFields,
+      ...(line.salesOrderLineId ? { salesOrderLineId: line.salesOrderLineId } : {}),
+      ...(line.purchaseOrderLineId ? { purchaseOrderLineId: line.purchaseOrderLineId } : {}),
+    })),
+    ...(kept.truncated ? { linesNote: `Showing the first ${MAX_DOCUMENT_LINES} of ${kept.total} lines.` } : {}),
+  };
+}
+
+/** A document's id from `id`, or null when a number is given instead. */
+function idOrNull(input: unknown): string | null {
+  if (input === undefined || input === null || input === "") return null;
+  const text = String(input).trim();
+  if (!/^[1-9]\d{0,17}$/.test(text)) throw new ValidationError("id must be a positive whole number.");
+  return text;
+}
+
+function capRows<T, R>(rows: readonly T[], max: number, map: (row: T) => R, what: string) {
+  const kept = firstRows(rows, max);
+  return {
+    rows: kept.rows.map(map),
+    ...(kept.truncated ? { note: `Showing the first ${max} of ${kept.total} ${what}. Ask a narrower question to see the rest.` } : {}),
+  };
+}
+
+/** A page of rows for the AI: `rows`, and `nextCursor` (null on the last page) to pass back as `cursor`. */
+function pagedRows<T, R>(page: { rows: T[]; more: boolean; nextCursor: string | null }, map: (row: T) => R) {
+  return { rows: page.rows.map(map), more: page.more, nextCursor: page.nextCursor };
+}
+
+const LAST_DAY = [31, 28, 31, 30, 31, 30, 31, 31, 30, 31, 30, 31];
+
+/** "31 March", "30 June", "28 February (29 in a leap year)". */
+export function financialYearEndLabel(month: number): string {
+  const label = `${LAST_DAY[month - 1]} ${MONTH_NAMES[month - 1]}`;
+  return month === 2 ? `${label} (29 in a leap year)` : label;
+}
+
+export const READ_TOOLS: readonly AiTool[] = (
+  [
+  {
+    name: "get_organisation",
+    title: "Organisation",
+    description:
+      "The organisation these books are for: name, base currency, financial year end, GST registration (gstRegistration: status today, whether a person has confirmed it, and its dates; the GST number alone doesn't decide it), GST basis, GST filing period and GST number, your role, what this connection may do now (access: read, draft, post or full, capped by your role now), and today's date. Call this first.",
+    inputSchema: schema(),
+    async run(tx, _args, context) {
+      const settings = await getOrganisationSettings(tx);
+      return {
+        organisationId: settings.organisationId,
+        name: settings.displayName,
+        baseCurrency: settings.baseCurrency,
+        financialYearEnd: financialYearEndLabel(settings.financialYearEndMonth),
+        financialYearEndMonth: settings.financialYearEndMonth,
+        gstBasis: settings.gstBasis,
+        gstPeriod: settings.gstPeriod,
+        gstRegistered: settings.gstRegistered,
+        gstRegisteredFrom: settings.gstRegisteredFrom,
+        gstRegisteredUntil: settings.gstRegisteredUntil,
+        gstRegistration: gstRegistrationSummary(settings, todayIsoDate()),
+        gstNumber: settings.gstNumber ? formatGstNumber(settings.gstNumber) : null,
+        modules: {
+          advancedReporting: settings.advancedFeatures,
+          crm: settings.crmEnabled,
+          notForProfit: settings.notForProfitEnabled,
+        },
+        yourRole: context.role,
+        ...connectionAccess(context),
+        ...toolListStatus(context),
+        today: todayIsoDate(),
+        amounts: "Amounts are decimal strings in the base currency unless a currencyCode says otherwise.",
+      };
+    },
+  },
+  {
+    name: "get_organisation_directory",
+    title: "Organisation directory",
+    description:
+      "The organisation's directory as a printed report's directory page shows it (Settings › Directory): its name, registered office, postal address, registration numbers (NZBN, company or charity number), GST number and balance date, its directors, trustees or officers with their roles, and its advisers (accountant, bank, solicitor, auditor). People change it in Settings.",
+    inputSchema: schema(),
+    run: async (tx) => directoryPage(await getOrganisationSettings(tx), await getOrganisationDirectory(tx)),
+  },
+  {
+    name: "list_accounts",
+    title: "Chart of accounts",
+    description: `The chart of accounts: id, code, name, type, class (asset, liability, equity, revenue, expense), currency and whether it's archived. Tools that ask for an account take its accountId or accountCode. Up to ${MAX_LINES} a page.`,
+    inputSchema: schema({ includeArchived: { type: "boolean", description: "Also list archived accounts. Default false." }, limit: limitInput(MAX_LINES, MAX_LINES), cursor: CURSOR }),
+    async run(tx, args) {
+      const accounts = await listAccounts(tx, { includeArchived: args.includeArchived === true });
+      return pagedRows(
+        pageAfter(accounts, (account) => account.code, args.cursor, boundedLimit(args.limit, MAX_LINES, MAX_LINES)),
+        (account) => ({
+          id: account.id,
+          code: account.code,
+          name: account.name,
+          type: account.accountType,
+          class: account.accountClass,
+          currencyCode: account.currencyCode,
+          defaultTaxCode: account.defaultTaxCode,
+          archived: !account.isActive,
+        }),
+      );
+    },
+  },
+  {
+    name: "profit_and_loss",
+    title: "Profit and loss",
+    description:
+      "Profit and loss (income statement) between two dates, inclusive, by section and account. Without `from` it starts at the beginning of the financial year containing `to`; without `to` it ends today. Optional, as on the screen: compare with up to 11 earlier months, quarters or years (compare, compareBy; order oldest_first, the default, or newest_first), a total and a year to date column, % of trading income, one column per value of a tracking category (splitBy), and a tracking filter (trackingCategoryId with trackingValueId, or \"unassigned\"). The answer is columns and rows, as on the screen; each period column is the report for its own dates.",
+    inputSchema: PROFIT_AND_LOSS_SCHEMA,
+    run: (tx, args) => runProfitAndLoss(tx, args),
+  },
+  {
+    name: "balance_sheet",
+    title: "Balance sheet",
+    description:
+      "Balance sheet as at a date (default today): assets, liabilities and equity by account, with retained earnings. Optional: compare with up to 11 earlier month, quarter or year ends (compare, compareBy, order oldest_first or newest_first; the answer is then columns and rows), and a tracking filter (trackingCategoryId with trackingValueId, or \"unassigned\"; it only balances when both sides of each journal are tagged).",
+    inputSchema: BALANCE_SHEET_SCHEMA,
+    run: (tx, args) => runBalanceSheet(tx, args),
+  },
+  {
+    name: "trial_balance",
+    title: "Trial balance",
+    description:
+      "Trial balance as at a date (default today): each account's debit or credit balance (income and expense accounts this financial year only; earlier years' profit is in retained earnings). Optional tracking filter (trackingCategoryId with trackingValueId, or \"unassigned\").",
+    inputSchema: TRIAL_BALANCE_SCHEMA,
+    run: (tx, args) => runTrialBalance(tx, args),
+  },
+  {
+    name: "aged_receivables",
+    title: "Aged receivables",
+    description: "What customers owe as at a date (default today), by customer and days past due, with each open invoice.",
+    inputSchema: schema({ asAt: DATE }),
+    async run(tx, args) {
+      const report = await agedReceivables(tx, { asAt: args.asAt });
+      const rows = capRows(
+        report.rows,
+        MAX_AGED_ROWS,
+        (row) => ({ ...row, invoices: row.invoices.slice(0, MAX_DOCUMENTS_PER_ROW), invoiceCount: row.invoices.length }),
+        "customers",
+      );
+      return { ...report, rows: rows.rows, ...(rows.note ? { note: rows.note } : {}) };
+    },
+  },
+  {
+    name: "aged_payables",
+    title: "Aged payables",
+    description: "What's owed to suppliers as at a date (default today), by supplier and days past due, with each open bill and unused supplier credit.",
+    inputSchema: schema({ asAt: DATE }),
+    async run(tx, args) {
+      const report = await agedPayables(tx, { asAt: args.asAt });
+      const rows = capRows(
+        report.rows,
+        MAX_AGED_ROWS,
+        (row) => ({
+          ...row,
+          bills: row.bills.slice(0, MAX_DOCUMENTS_PER_ROW),
+          billCount: row.bills.length,
+          credits: row.credits.slice(0, MAX_DOCUMENTS_PER_ROW),
+        }),
+        "suppliers",
+      );
+      return { ...report, rows: rows.rows, ...(rows.note ? { note: rows.note } : {}) };
+    },
+  },
+  {
+    name: "list_invoices",
+    title: "Sales invoices",
+    description:
+      "Sales invoices, newest first. Filter by status (draft, approved, voided), by customer (contactId from list_contacts), or awaitingPayment to see only approved invoices with something still due. Pages: pass nextCursor back as cursor, with the same filters.",
+    inputSchema: schema({
+      status: { type: "string", enum: ["draft", "approved", "voided"] },
+      contactId: { type: "string", description: "A contact id from list_contacts." },
+      awaitingPayment: { type: "boolean" },
+      limit: { type: "integer", minimum: 1, maximum: MAX_LIST, description: `Default 50, at most ${MAX_LIST}.` },
+      cursor: CURSOR,
+    }),
+    async run(tx, args) {
+      const result = await listInvoices(tx, {
+        status: args.status,
+        contactId: args.contactId,
+        awaitingPayment: args.awaitingPayment,
+        beforeId: args.cursor,
+        limit: boundedLimit(args.limit, 50, MAX_LIST),
+      });
+      return { invoices: result.invoices.map(invoiceSummary), more: result.nextBeforeId !== null, nextCursor: result.nextBeforeId };
+    },
+  },
+  {
+    name: "get_invoice",
+    title: "One sales invoice",
+    description: "One sales invoice with its lines, by id or by its number (e.g. INV-0012).",
+    inputSchema: schema({
+      id: { type: "string", description: "The invoice id from list_invoices." },
+      number: { type: "string", description: "The invoice number, e.g. INV-0012." },
+    }),
+    async run(tx, args) {
+      let id = idOrNull(args.id);
+      if (!id) {
+        const number = optionalString(args.number, "number", { maxLength: 40 });
+        if (!number) throw new ValidationError("Give the invoice's id or number.");
+        // The one lookup the screens don't need: an invoice by its number.
+        const found = await tx.query<{ id: string }>("select id::text from sales_invoices where upper(invoice_number) = upper($1)", [number]);
+        if (!found.rows[0]) throw new NotFoundError(`There's no invoice numbered ${number}.`);
+        id = found.rows[0].id;
+      }
+      const invoice = await getInvoice(tx, id);
+      return { ...invoiceSummary(invoice), amountsMode: invoice.amountsMode, exchangeRate: invoice.exchangeRate, ...documentLines(await withLineIds(tx, "invoice", invoice.id, invoice.lines)) };
+    },
+  },
+  {
+    name: "list_bills",
+    title: "Bills",
+    description:
+      "Bills from suppliers, newest first. Filter by status (draft, approved, voided), by supplier (contactId from list_contacts), or awaitingPayment to see only approved bills with something still due. Pages: pass nextCursor back as cursor, with the same filters.",
+    inputSchema: schema({
+      status: { type: "string", enum: ["draft", "approved", "voided"] },
+      contactId: { type: "string", description: "A contact id from list_contacts." },
+      awaitingPayment: { type: "boolean" },
+      limit: { type: "integer", minimum: 1, maximum: MAX_LIST, description: `Default 50, at most ${MAX_LIST}.` },
+      cursor: CURSOR,
+    }),
+    async run(tx, args) {
+      const result = await listBills(tx, {
+        status: args.status,
+        contactId: args.contactId,
+        awaitingPayment: args.awaitingPayment,
+        beforeId: args.cursor,
+        limit: boundedLimit(args.limit, 50, MAX_LIST),
+      });
+      return { bills: result.bills.map(billSummary), more: result.nextBeforeId !== null, nextCursor: result.nextBeforeId };
+    },
+  },
+  {
+    name: "get_bill",
+    title: "One bill",
+    description:
+      "One bill with its lines, by id, or by the supplier's invoice number (several suppliers can use the same number; then the matches are listed and you can ask again by id).",
+    inputSchema: schema({
+      id: { type: "string", description: "The bill id from list_bills." },
+      supplierInvoiceNumber: { type: "string" },
+    }),
+    async run(tx, args) {
+      let id = idOrNull(args.id);
+      if (!id) {
+        const number = optionalString(args.supplierInvoiceNumber, "supplierInvoiceNumber", { maxLength: 60 });
+        if (!number) throw new ValidationError("Give the bill's id or the supplier's invoice number.");
+        const found = await tx.query<{ id: string }>(
+          "select id::text from bills where upper(supplier_invoice_number) = upper($1) order by bills.id desc limit 20",
+          [number],
+        );
+        if (found.rows.length === 0) throw new NotFoundError(`There's no bill with the supplier invoice number ${number}.`);
+        if (found.rows.length > 1) {
+          const matches = [];
+          for (const row of found.rows) matches.push(billSummary(await getBill(tx, row.id)));
+          return { note: `${found.rows.length} bills have that number. Ask again with one of these ids.`, matches };
+        }
+        id = found.rows[0].id;
+      }
+      const bill = await getBill(tx, id);
+      return { ...billSummary(bill), amountsMode: bill.amountsMode, exchangeRate: bill.exchangeRate, ...documentLines(await withLineIds(tx, "bill", bill.id, bill.lines)) };
+    },
+  },
+  {
+    name: "list_contacts",
+    title: "Contacts",
+    description: "Customers and suppliers, in name order. Search by name or email; type narrows to customers or suppliers. Pages: pass nextCursor back as cursor, with the same filters.",
+    inputSchema: schema({
+      search: { type: "string", description: "Part of a name or email." },
+      type: { type: "string", enum: ["customer", "supplier", "all"], description: "Default all." },
+      includeArchived: { type: "boolean" },
+      limit: { type: "integer", minimum: 1, maximum: MAX_CONTACTS, description: `Default 100, at most ${MAX_CONTACTS}.` },
+      cursor: CURSOR,
+    }),
+    async run(tx, args) {
+      const type = args.type ?? "all";
+      if (type !== "customer" && type !== "supplier" && type !== "all") {
+        throw new ValidationError("type must be customer, supplier or all.");
+      }
+      const contacts = (await listContacts(tx, { search: args.search, includeArchived: args.includeArchived === true })).filter(
+        (contact) => type === "all" || (type === "customer" ? contact.isCustomer : contact.isSupplier),
+      );
+      return pagedRows(
+        pageAfter(contacts, (contact) => contact.id, args.cursor, boundedLimit(args.limit, 100, MAX_CONTACTS)),
+        (contact) => ({
+          id: contact.id,
+          name: contact.name,
+          customer: contact.isCustomer,
+          supplier: contact.isSupplier,
+          email: contact.email,
+          phone: contact.phone,
+          gstNumber: contact.gstNumber ? formatGstNumber(contact.gstNumber) : null,
+          currencyCode: contact.currencyCode,
+          archived: contact.isArchived,
+        }),
+      );
+    },
+  },
+  {
+    name: "account_transactions",
+    title: "Account transactions",
+    description:
+      "Every ledger line on one account between two dates (general ledger detail), with the opening, running and closing balance. Give accountId or accountCode. Without `from` it starts at the beginning of the financial year containing `to`. The totals cover every line, whatever the page.",
+    inputSchema: schema({
+      accountId: ACCOUNT_ID,
+      accountCode: ACCOUNT_CODE,
+      from: DATE,
+      to: DATE,
+      limit: limitInput(200, MAX_LINES),
+      cursor: CURSOR,
+    }),
+    async run(tx, args) {
+      const account = await accountFromArgs(tx, args);
+      const report = await accountTransactions(tx, { accountId: account.id, from: args.from, to: args.to });
+      const detail = report.accounts[0];
+      const page = pageByPosition(detail?.lines ?? [], args.cursor, boundedLimit(args.limit, 200, MAX_LINES));
+      return {
+        from: report.from,
+        to: report.to,
+        currencyCode: report.currencyCode,
+        account: { id: account.id, code: account.code, name: account.name, class: account.accountClass },
+        ...(detail ? { opening: detail.opening, totalDebit: detail.totalDebit, totalCredit: detail.totalCredit, closing: detail.closing } : {}),
+        lines: page.rows.map((line) => ({
+          date: line.date,
+          reference: line.reference,
+          description: line.description,
+          source: line.source,
+          debit: line.debit,
+          credit: line.credit,
+          balance: line.balance,
+        })),
+        more: page.more,
+        nextCursor: page.nextCursor,
+      };
+    },
+  },
+  {
+    name: "gst_return",
+    title: "GST return",
+    description:
+      "Works out the GST return (GST101A boxes 5 to 15) for a period, on the organisation's GST basis, as Tohyee would. Nothing is filed or saved. Also lists filed returns that overlap the period. registration says whether GST registration covers all, part or none of the period, and whether a person has confirmed it; for a period with no registration there's no return (notRegistered: true), which isn't a nil return.",
+    inputSchema: schema({ periodStart: DATE, periodEnd: DATE }, ["periodStart", "periodEnd"]),
+    async run(tx, args) {
+      const report = await calculateGstReturn(tx, { periodStart: args.periodStart, periodEnd: args.periodEnd });
+      // : no registration for any of the period, no return (not a return of zeros).
+      if (report.registration.status === "not_registered") {
+        const { periodStart, periodEnd, months, basis, currencyCode, registration, filedReturns } = report;
+        return { periodStart, periodEnd, months, basis, currencyCode, notRegistered: true, registration, filedReturns, note: registration.note };
+      }
+      const { lines, ...rest } = report;
+      const registrationNote = report.registration.status === "registered" && report.registration.confirmed ? "" : ` ${report.registration.note}`;
+      return { ...rest, notRegistered: false, transactionLineCount: lines.length, note: `Worked out now; nothing was filed or saved.${registrationNote}` };
+    },
+  },
+  {
+    name: "list_draft_journals",
+    title: "Draft journals",
+    description:
+      "Draft manual journals, newest first: ones still to post (status draft) or already posted (status posted, with the journal's id). Pages: pass nextCursor back as cursor, with the same filters.",
+    inputSchema: schema({
+      status: { type: "string", enum: ["draft", "posted"] },
+      limit: { type: "integer", minimum: 1, maximum: MAX_LIST, description: `Default 50, at most ${MAX_LIST}.` },
+      cursor: CURSOR,
+    }),
+    async run(tx, args) {
+      const page = await listJournalDraftsPage(tx, { status: args.status, beforeId: args.cursor, limit: boundedLimit(args.limit, 50, MAX_LIST) });
+      return { drafts: page.drafts, more: page.nextBeforeId !== null, nextCursor: page.nextBeforeId };
+    },
+  },
+  {
+    name: "get_draft_journal",
+    title: "One draft journal",
+    description: "One draft manual journal with its lines.",
+    inputSchema: schema({ draftId: { type: "string", description: "The draft's id from list_draft_journals." } }, ["draftId"]),
+    run: (tx, args) => getJournalDraft(tx, args.draftId),
+  },
+  {
+    name: "list_bill_inbox",
+    title: "Bills inbox",
+    description:
+      "Supplier bills and receipts that arrived but aren't bills yet (the bills inbox): file name, where it came from (uploaded, or an email's sender and subject), and whether the same file arrived before. Waiting items by default. Pages: pass nextCursor back as cursor, with the same status.",
+    inputSchema: schema({
+      status: { type: "string", enum: ["waiting", "made", "removed", "all"], description: "Default waiting." },
+      limit: { type: "integer", minimum: 1, maximum: MAX_LIST, description: `Default 50, at most ${MAX_LIST}.` },
+      cursor: CURSOR,
+    }),
+    async run(tx, args) {
+      const page = await listInboxPage(tx, { status: args.status, cursor: args.cursor, limit: boundedLimit(args.limit, 50, MAX_LIST) });
+      return { items: page.items.map(inboxItemSummary), more: page.nextCursor !== null, nextCursor: page.nextCursor };
+    },
+  },
+  {
+    name: "read_bill_inbox_item",
+    title: "Read a bills inbox file",
+    description:
+      "One bills inbox item with its file (a PDF, or a picture), so you can read the supplier, invoice number, dates, lines and GST from it. Then make a draft bill from it with create_draft_bill_from_inbox_item.",
+    inputSchema: schema({ itemId: { type: "string", description: "The item's id from list_bill_inbox." } }, ["itemId"]),
+    async run(tx, args) {
+      const item = await getInboxItem(tx, args.itemId);
+      const file = await getInboxItemContent(tx, item.id);
+      return new ToolFileAnswer({ item: inboxItemSummary(item) }, { uri: `tohyee://bills-inbox/${item.id}/${encodeURIComponent(file.fileName)}`, ...file });
+    },
+  },
+  {
+    name: "cash_flow_forecast",
+    title: "Cash flow forecast",
+    description:
+      "The cash flow forecast: the bank balance today, then money expected in and out each day, week or month from open invoices and bills (on their due dates), repeating invoices and bills, unpaid expense claims, forecast items and account averages, with the closing balance, the lowest point and the first period below zero. Optionally drafts and sales and purchase orders.",
+    inputSchema: schema({
+      period: { type: "string", enum: ["day", "week", "month"], description: "Default week." },
+      count: { type: "integer", minimum: 1, maximum: 92, description: "How many periods (default about 3 months)." },
+      includeDrafts: { type: "boolean" },
+      includeOrders: { type: "boolean", description: "Include approved sales and purchase orders not yet invoiced or billed." },
+    }),
+    async run(tx, args) {
+      const forecast = await cashFlowForecast(tx, args);
+      return {
+        ...forecast,
+        // The documents behind each period, without links.
+        periods: forecast.periods.map((entry) => ({ ...entry, lines: entry.lines.map(({ source, label, date, direction, baseAmount, overdue, draft, fromOrder }) => ({ source, label, date, direction, amount: baseAmount, overdue, draft, fromOrder })) })),
+      };
+    },
+  },
+  {
+    name: "list_consolidations",
+    title: "Consolidation groups",
+    description: "The consolidation groups the key's owner can see (a member of every organisation in the group): name, parent, group currency and members with their currencies.",
+    inputSchema: schema({ limit: limitInput(50, MAX_LIST), cursor: CURSOR }),
+    async run(tx, args) {
+      const groups = tx.actor.userId ? await listGroups({ id: tx.actor.userId, email: tx.actor.email }) : [];
+      const page = pageAfter(groups, (group) => group.id, args.cursor, boundedLimit(args.limit, 50, MAX_LIST));
+      return { groups: page.rows, more: page.more, nextCursor: page.nextCursor };
+    },
+  },
+  {
+    name: "consolidated_report",
+    title: "Consolidated report",
+    description:
+      "A consolidation group's profit and loss (dates), balance sheet (as at a date) or budget vs actual, in the group's currency: each organisation translated (profit and loss at the month's average rate, assets and liabilities at the current rate, equity at historical rates), with intercompany amounts eliminated and any differences listed.",
+    inputSchema: schema(
+      {
+        groupId: { type: "string", description: "From list_consolidations." },
+        report: { type: "string", enum: ["profit_and_loss", "balance_sheet", "budget_vs_actual"] },
+        from: DATE,
+        to: DATE,
+        asAt: DATE,
+      },
+      ["groupId", "report"],
+    ),
+    async run(tx, args) {
+      if (!tx.actor.userId) throw new ValidationError("This key has no person behind it, so it can't read consolidations.");
+      const user = { id: tx.actor.userId, email: tx.actor.email };
+      if (args.report === "balance_sheet") return consolidatedBalanceSheet(user, args.groupId, { asAt: args.asAt });
+      if (args.report === "budget_vs_actual") return consolidatedBudgetVsActual(user, args.groupId, { from: args.from, to: args.to });
+      return consolidatedProfitAndLoss(user, args.groupId, { from: args.from, to: args.to });
+    },
+  },
+  {
+    name: "list_approvals",
+    title: "Waiting for approval",
+    description:
+      "Bills, purchase orders and expense claims waiting for approval under an approval rule: the document, its total, the rule, the step it's at and who it's waiting for. Only people approve or decline them, in Tohyee.",
+    inputSchema: schema({ limit: limitInput(50, MAX_LIST), cursor: CURSOR }),
+    async run(tx, args, context) {
+      const requests = await listApprovalRequests(tx, { userId: tx.actor.userId, email: tx.actor.email, role: context.role });
+      const page = pageAfter(requests, (request) => request.id, args.cursor, boundedLimit(args.limit, 50, MAX_LIST));
+      return {
+        more: page.more,
+        nextCursor: page.nextCursor,
+        requests: page.rows.map((request) => ({
+          requestId: request.id,
+          documentType: request.documentType,
+          documentId: request.documentId,
+          document: request.documentLabel,
+          total: request.total,
+          currencyCode: request.currencyCode,
+          rule: request.ruleName,
+          step: request.currentStep,
+          steps: request.stepCount,
+          waitingFor: request.waitingFor,
+          submittedBy: request.submittedByEmail,
+          submittedAt: request.submittedAt,
+          lastError: request.lastError,
+        })),
+      };
+    },
+  },
+  ] satisfies Omit<AiTool, "level">[]
+).map((tool) => ({ ...tool, level: "read" as const }));

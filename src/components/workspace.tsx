@@ -1,0 +1,120 @@
+"use client";
+
+import { createContext, type ReactNode, useCallback, useContext, useMemo, useSyncExternalStore } from "react";
+import { type Role, roleAtLeast, crmAllows } from "@/lib/auth/roles";
+
+export type WorkspaceUser = {
+  id: string;
+  email: string;
+  displayName: string;
+  isServerAdmin: boolean;
+};
+
+export type WorkspaceOrganisation = {
+  id: string;
+  displayName: string;
+  baseCurrency: string;
+  role: Role;
+  status: string;
+  /** The demo farm: made-up data, marked DEMO on every page. */
+  isDemo?: boolean;
+};
+
+type Workspace = {
+  user: WorkspaceUser;
+  organisations: WorkspaceOrganisation[];
+  current: WorkspaceOrganisation | null;
+  selectOrganisation(id: string): void;
+  /** True if the signed-in user has at least this role in the current organisation. */
+  can(role: Role): boolean;
+  /** True if they may use the CRM at this level: sales roles read and change CRM records. */
+  canCrm(need: "read" | "write" | "admin"): boolean;
+  /** Where server settings open on the server computer (for server admins); null if they're off. */
+  serverSettingsUrl: string | null;
+  /** Why organisations with access dates are hidden now: "Your access to … ended on …". */
+  accessNotes: string[];
+};
+
+const WorkspaceContext = createContext<Workspace | null>(null);
+const STORAGE_KEY = "tohyee.currentOrganisation";
+const listeners = new Set<() => void>();
+const NO_NOTES: string[] = [];
+
+/**
+ * Each tab keeps its own organisation: this tab's
+ * choice is in sessionStorage; localStorage only holds the last one chosen,
+ * which a new tab starts on. Switching in another tab doesn't change this
+ * one, so a half-filled form can't end up in another organisation.
+ */
+function readStoredOrganisation(): string | null {
+  try {
+    const own = window.sessionStorage.getItem(STORAGE_KEY);
+    if (own) return own;
+    // A new tab starts on the last one chosen, then keeps it whatever other tabs do.
+    const last = window.localStorage.getItem(STORAGE_KEY);
+    if (last) window.sessionStorage.setItem(STORAGE_KEY, last);
+    return last;
+  } catch {
+    return null;
+  }
+}
+
+/** Only this tab's own switches: no "storage" events from other tabs. */
+function subscribe(listener: () => void) {
+  listeners.add(listener);
+  return () => {
+    listeners.delete(listener);
+  };
+}
+
+export function WorkspaceProvider({
+  user,
+  organisations,
+  serverSettingsUrl = null,
+  accessNotes = NO_NOTES,
+  children,
+}: {
+  user: WorkspaceUser;
+  organisations: WorkspaceOrganisation[];
+  serverSettingsUrl?: string | null;
+  accessNotes?: string[];
+  children: ReactNode;
+}) {
+  const storedId = useSyncExternalStore(subscribe, readStoredOrganisation, () => null);
+  const current =
+    organisations.find((organisation) => organisation.id === storedId) ?? organisations[0] ?? null;
+
+  const selectOrganisation = useCallback((id: string) => {
+    try {
+      window.sessionStorage.setItem(STORAGE_KEY, id);
+      window.localStorage.setItem(STORAGE_KEY, id);
+    } catch {
+      // Private mode etc.: selection just won't persist.
+    }
+    listeners.forEach((listener) => listener());
+  }, []);
+
+  const value = useMemo<Workspace>(
+    () => ({
+      user,
+      organisations,
+      current,
+      selectOrganisation,
+      can: (role: Role) => (current ? roleAtLeast(current.role, role) : false),
+      canCrm: (need: "read" | "write" | "admin") => (current ? crmAllows(current.role, need) : false),
+      serverSettingsUrl,
+      accessNotes,
+    }),
+    [user, organisations, current, selectOrganisation, serverSettingsUrl, accessNotes],
+  );
+
+  return <WorkspaceContext.Provider value={value}>{children}</WorkspaceContext.Provider>;
+}
+
+export function useWorkspace(): Workspace {
+  const workspace = useContext(WorkspaceContext);
+  if (!workspace) {
+    throw new Error("useWorkspace must be used inside WorkspaceProvider.");
+  }
+  return workspace;
+}
