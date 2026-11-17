@@ -1631,6 +1631,11 @@
   cursor: grab;
 }
 
+/* An account dragged within its group (CR26): a line shows where it will go, above this account. */
+.table.statement tr.layoutDropAbove td {
+  box-shadow: inset 0 2px 0 var(--link);
+}
+
 /* The grip on an account row: shown faintly, stronger when the row is under the pointer. */
 .layoutLineGrip {
   margin-right: 6px;

@@ -4712,6 +4712,15 @@ expenses **80.00** / Cr 1000, so June's net profit is **590.00**.
   they cover, and publish_custom_report publishes at Make and post.
   Nothing posts.
 
+- **CR26** Putting accounts in order within a group (following common practice, not yet reviewed). In the
+  CR16 setup's June layout, Operating expenses lists its accounts in code
+  order. Dragging the last one to the top (or ticking it and choosing
+  **Up** until it's first) lists it first; the rest keep their order.
+  Every amount and total stays the same: Operating expenses **330.00**,
+  Net profit **590.00**. The group remembers the order; an account added
+  to it later goes after the ones put in order, in code order. Moving an
+  account to another group takes it out of this group's order. Only the
+  report's layout changes, not the chart of accounts.
 - **CR23** Every account in the editor (following common practice, not yet reviewed). The editor lists each group's accounts that are in use
   even when they have nothing in the dates shown, greyed with no amount, so
   they can be moved or grouped too: in the CR16 setup for June, Operating

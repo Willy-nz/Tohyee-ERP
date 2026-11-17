@@ -15,7 +15,8 @@ import {
   setCustomReportArchived,
   updateCustomReport,
 } from "@/lib/reports/custom";
-import { type ComputedBlock, type CustomReportFigures, type CustomReportLayout, groupAccounts, moveAccounts, type ReportRow, standardLayout } from "@/lib/reports/custom-layout";
+import { type ComputedBlock, type CustomReportFigures, type CustomReportLayout, groupAccounts, moveAccounts,
+  orderAccount, type ReportRow, standardLayout } from "@/lib/reports/custom-layout";
 import { profitAndLoss } from "@/lib/reports/financial";
 import { listFavourites, listLayoutDefaults, runDefaultLayout, setFavourite, setLayoutDefault } from "@/lib/reports/report-layouts";
 import * as customReportsRoute from "@/app/api/custom-reports/route";
@@ -99,6 +100,27 @@ describeWithDatabase("report layouts", () => {
     expect(figures.notInReport).toEqual([]);
     const standard = await w.as((tx) => profitAndLoss(tx, { from: "2026-06-01", to: "2026-06-30" }));
     expect(standard.netProfit).toBe("590.00");
+  });
+
+  it("CR26: accounts can be put in any order within a group; no amount changes", async () => {
+    const w = await setup(true);
+    const report = await w.start();
+    const start = (await w.save(report, () => undefined)).figures as CustomReportFigures;
+    const expenses = () => (figures: CustomReportFigures) => table(figures).rows.find((row) => row.label === "Operating expenses")!.lines.map((line) => line.code);
+    const before = expenses()(start);
+    expect(before.length).toBeGreaterThan(1);
+    expect(before).toEqual([...before].sort());
+    const last = before[before.length - 1];
+    const ordered = await w.save(report, (layout) => orderAccount(layout, "main", "expenses", before, last, 0));
+    const after = ordered.figures as CustomReportFigures;
+    expect(expenses()(after)).toEqual([last, ...before.slice(0, -1)]);
+    expect(rowsOf(after)["Operating expenses"]).toEqual(rowsOf(start)["Operating expenses"]);
+    expect(rowsOf(after)["Net profit"]).toEqual(["590.00"]);
+    expect(rowsOfTable(ordered.report.layout as CustomReportLayout).find((row) => row.id === "expenses")).toMatchObject({ order: [last, ...before.slice(0, -1)] });
+    // Moving that account to another group takes it out of the order; the rest keep theirs.
+    const moved = await w.save(report, (layout) => moveAccounts(layout, "main", "expenses", [last], "cost_of_sales"));
+    expect(expenses()(moved.figures as CustomReportFigures)).toEqual(before.slice(0, -1));
+    expect(rowsOfTable(moved.report.layout as CustomReportLayout).find((row) => row.id === "expenses")).toMatchObject({ order: before.slice(0, -1) });
   });
 
   it("CR21: moving an account to another group moves its amount and keeps net profit", async () => {
