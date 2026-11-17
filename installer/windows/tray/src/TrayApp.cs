@@ -82,6 +82,7 @@ namespace Tohyee.Tray
             menu.Items.Add(new ToolStripMenuItem("Restart Tohyee", null, (s, e) => RestartServices()));
             menu.Items.Add(new ToolStripMenuItem("Back up now", null, (s, e) => BackUpNow()));
             menu.Items.Add(new ToolStripMenuItem("Open the logs folder", null, (s, e) => OpenFolder(_settings.LogsDir)));
+            menu.Items.Add(new ToolStripMenuItem("Add Tohyee to PowerPoint on this PC…", null, (s, e) => AddToPowerPoint()));
             menu.Items.Add(new ToolStripSeparator());
             _startWithWindowsItem = new ToolStripMenuItem("Start when I sign in to Windows", null, (s, e) => ToggleStartWithWindows()) { Checked = StartsWithWindows() };
             menu.Items.Add(_startWithWindowsItem);
@@ -480,6 +481,36 @@ namespace Tohyee.Tray
             catch (Exception error)
             {
                 MessageBox.Show("Couldn't open " + path + ": " + error.Message, "Tohyee", MessageBoxButtons.OK, MessageBoxIcon.Warning);
+            }
+        }
+
+        /// <summary>
+        /// Adds the Analytics add-in to desktop PowerPoint on this PC, for
+        /// PowerPoint without Upload My Add-in: fetches Tohyee's Windows
+        /// setup (/office/powerpoint/setup.cmd) and runs it. It needs remote
+        /// access on with an https address, as the add-in does.
+        /// </summary>
+        private async void AddToPowerPoint()
+        {
+            try
+            {
+                using (var response = await _health.GetAsync(_settings.BooksUrl + "/office/powerpoint/setup.cmd"))
+                {
+                    if (!response.IsSuccessStatusCode)
+                    {
+                        MessageBox.Show(
+                            "The PowerPoint add-in needs Remote access on with an https address. Turn it on in Server settings › Remote access, then try again.",
+                            "Tohyee", MessageBoxButtons.OK, MessageBoxIcon.Information);
+                        return;
+                    }
+                    var path = Path.Combine(Path.GetTempPath(), "tohyee-powerpoint-setup.cmd");
+                    File.WriteAllBytes(path, await response.Content.ReadAsByteArrayAsync());
+                    Process.Start(new ProcessStartInfo { FileName = "cmd.exe", Arguments = "/c \"" + path + "\"", UseShellExecute = true });
+                }
+            }
+            catch (Exception error)
+            {
+                MessageBox.Show("Couldn't add Tohyee to PowerPoint: " + error.Message, "Tohyee", MessageBoxButtons.OK, MessageBoxIcon.Warning);
             }
         }
 
