@@ -11,6 +11,8 @@ import { clearColourSelection, colourSelection, listLines, MAX_HEADING, setBodyS
 import styles from "./text-inspector.module.css";
 
 const SIZES = [12, 14, 16, 18, 20, 24, 28, 32, 40, 48];
+/** A heading can be up to 32 px, as the format allows. */
+const HEADING_SIZES = [12, 14, 16, 18, 20, 24, 28, 32];
 const ALIGNMENTS = [
   { value: "left", label: "Left" },
   { value: "center", label: "Centre" },
@@ -89,6 +91,13 @@ function HeadingFields({ draft, swatches, onChange, autoFocus }: { draft: Tile; 
       <input id={id} value={draft.title} maxLength={MAX_HEADING} autoFocus={autoFocus} onChange={(event) => onChange(setHeading(draft, { title: event.target.value }))} />
       <label className={styles.check}>
         <input type="checkbox" checked={shown} onChange={(event) => onChange(setHeading(draft, { show: event.target.checked }))} /> Show the heading
+      </label>
+      <label className={styles.inline}>
+        <span className={styles.label}>Heading size</span>
+        <select value={draft.format?.card?.title?.size ?? ""} onChange={(event) => onChange(setHeading(draft, { size: event.target.value ? Number(event.target.value) : null }))}>
+          <option value="">Theme size</option>
+          {HEADING_SIZES.map((size) => <option key={size} value={size}>{size} px</option>)}
+        </select>
       </label>
       <TextColourControl
         label="Heading colour"

@@ -99,12 +99,17 @@ export function setBodyStyle(tile: Tile, patch: Partial<TextStyle>): Tile {
   return withFormat(tile, { ...tile.format, card });
 }
 
-/** Changes the heading: its words, whether it shows, and its colour (undefined for the theme's). Nothing about the data changes. */
-export function setHeading(tile: Tile, patch: { title?: string; show?: boolean; color?: string | null }): Tile {
+/** Changes the heading: its words, whether it shows, its size and its colour (null for the theme's). Nothing about the data changes. */
+export function setHeading(tile: Tile, patch: { title?: string; show?: boolean; color?: string | null; size?: number | null }): Tile {
   const card = { ...tile.format?.card };
   if (patch.show !== undefined) {
     if (patch.show) delete card.showTitle;
     else card.showTitle = false;
+  }
+  if (patch.size !== undefined) {
+    const title = cleanStyle({ ...card.title, size: patch.size ?? undefined });
+    if (title) card.title = title;
+    else delete card.title;
   }
   if (patch.color !== undefined) {
     const title = cleanStyle({ ...card.title, color: patch.color ?? undefined });
