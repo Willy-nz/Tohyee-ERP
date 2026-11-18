@@ -12,6 +12,9 @@ import * as sourcesRoute from "@/app/api/analytics/sources/route";
 import * as mcpRoute from "@/app/api/mcp/route";
 import * as settingsRoute from "@/app/api/organisations/[organisationId]/settings/route";
 import { closeAnalytics } from "@/lib/analytics/engine";
+import { getDashboard, updateDashboard } from "@/lib/analytics/dashboards";
+import { addDashboardImage, imagesInUse } from "@/lib/analytics/images";
+import type { OrgTx } from "@/lib/db/org-transaction";
 import type { SessionUser } from "@/lib/auth/sessions";
 import { coreQuery } from "@/lib/db/transactions";
 import { setMemberFarmAccess } from "@/lib/farming/access";
@@ -501,6 +504,21 @@ describeWithDatabase("the AI's Analytics reports", () => {
     expect(opened.dashboard.settings.pages?.[0]).toMatchObject({ picture: { dim: 60 } });
     const count = await inOrganisation(ORG, { userId: owner.id, email: owner.email }, (tx) => tx.query<{ count: string }>("select count(*)::text as count from analytics_dashboard_images where dashboard_id = $1", [id]));
     expect(count.rows[0].count).toBe("2");
+  });
+  it("a report's library cover is one of its own pictures, kept while chosen, and can be cleared", async () => {
+    const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
+    const made = await call(tokens["owner-drafts"], "create_analytics_dashboard", { name: "Cover test", tiles: [ORDERS] });
+    const id = (made.dashboard as Json).id as string;
+    const as = <T>(work: (tx: OrgTx) => Promise<T>) => inOrganisation(ORG, { userId: owner.id, email: owner.email }, work);
+    const image = await as((tx) => addDashboardImage(tx, id, { fileName: "cover.png", content: Buffer.from(png, "base64") }));
+    const current = await as((tx) => getDashboard(tx, id));
+    const covered = await as((tx) => updateDashboard(tx, id, { expectedVersion: current.version, settings: { ...current.settings, coverImageId: image.id } }));
+    expect(covered.settings.coverImageId).toBe(image.id);
+    expect(await as((tx) => imagesInUse(tx, id))).toContain(image.id);
+    await expect(as((tx) => updateDashboard(tx, id, { expectedVersion: covered.version, settings: { ...covered.settings, coverImageId: "999999" } }))).rejects.toThrow(/isn't one of this report's/);
+    await expect(as((tx) => updateDashboard(tx, id, { expectedVersion: covered.version, settings: { ...covered.settings, coverImageId: "not a number" } }))).rejects.toThrow(/Choose a picture uploaded to this report/);
+    const cleared = await as((tx) => updateDashboard(tx, id, { expectedVersion: covered.version, settings: { ...covered.settings, coverImageId: null } }));
+    expect(cleared.settings.coverImageId).toBeUndefined();
   });
   it("PIC1-PIC6 (#9): the AI sees, fades, moves and removes pictures, uses a photo left for it or one already on a report, and History brings a removed picture back", async () => {
     const png = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
