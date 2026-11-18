@@ -299,7 +299,7 @@ export function stepGaps(
   return gaps;
 }
 
-/** SPC50: "Glimmers Ltd, GLIMMERS" -> ["Glimmers Ltd", "GLIMMERS"]; blanks dropped. */
+/** SPC50: "Glenmore Ltd, GLENMORE" -> ["Glenmore Ltd", "GLENMORE"]; blanks dropped. */
 export function bankWordsList(text: string): string[] {
   return text
     .split(",")
