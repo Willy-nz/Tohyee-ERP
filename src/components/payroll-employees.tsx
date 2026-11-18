@@ -1,5 +1,6 @@
 "use client";
 
+import { PayrollEmployeeImport } from "@/components/payroll-employee-import";
 import { EmploymentSigning } from "@/components/signing/staff-signing";
 import { DateInput } from "@/components/date-input";
 import { type FormEvent, useState } from "react";
@@ -219,12 +220,13 @@ export function PayrollEmployees({ organisationId }: { organisationId: string })
 
   return (
     <div className={styles.stack}>
-      <Notice tone="warning">
-        No payroll tax is calculated or filed here. Enter KiwiSaver rates from the employee&apos;s current instructions; Tohyee does not
-        supply defaults.
+      <Notice tone="info">
+        Pay runs work out PAYE (with the ACC earners&apos; levy), student loan, KiwiSaver and ESCT, and make the payday filing file you upload
+        in myIR. Enter KiwiSaver rates from the employee&apos;s current instructions; Tohyee doesn&apos;t supply defaults.
       </Notice>
       {message ? <Notice tone={message.tone}>{message.text}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      <PayrollEmployeeImport organisationId={organisationId} onImported={reload} />
 
       <Card title={selectedId ? "Edit employee" : "Add an employee"}>
         <form className={styles.stack} onSubmit={save}>

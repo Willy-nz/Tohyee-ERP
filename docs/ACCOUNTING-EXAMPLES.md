@@ -19574,6 +19574,41 @@ report" has two pages, Cover (no tiles) and Money (one Orders tile).
   body still wins. A light fill, a mostly see-through dark fill, or no fill
   keeps the theme's colours.
 
+## Employees from a file (EMI1-EMI8; 18 Nov 2026; following common practice, not yet reviewed)
+
+Tested in `tests/integration/payroll-employee-import.test.ts`. A made-up HR
+system export has the headings Employee #, First Name, Last Name, Work Email,
+Hire Date, Termination Date, Job Title, Department, Pay rate, Pay type, Paid
+per, Pay Schedule, IRD Number and Standard Hours.
+
+- **EMI1 Preview first.** Payroll › Employees › Bring in employees from a
+  file reads a CSV or Excel (.xlsx) file, up to 5 MB and 2,000 rows. A
+  preview saves nothing; Bring in saves.
+- **EMI2 Columns by heading.** Columns are matched by their headings (Hire
+  Date to Start date, Pay Schedule to Pay frequency, Standard Hours to Hours
+  per week and so on), and each match can be changed. A column Tohyee
+  doesn't use (Employee #, Department) is left out.
+- **EMI3 Dates.** Read day first (1/04/2025 is 1 April 2025) unless month
+  first or year first is chosen.
+- **EMI4 What the file hasn't got.** Tax code, KiwiSaver status and rates,
+  student loan and pay frequency can each be chosen once for every row
+  without one. Nothing is assumed: with none chosen, the row is refused
+  ("KiwiSaver status is missing. Add a column for it, or choose one for
+  everyone without it."). The IRD number has to be in the file.
+- **EMI5 Pay frequency** from the words HR systems use: Weekly; Fortnightly,
+  Every other week or Bi-weekly is fortnightly; Four-weekly; Monthly. Twice
+  a month is refused (not a pay frequency Tohyee has).
+- **EMI6 Pay.** "$62,000.00 NZD", Salary, per Year is a salary of
+  **$62,000.00**. "28.50 NZD", Hourly, per Hour, 32 standard hours is
+  **$28.50** an hour for **32** hours a week. An hourly row without hours is
+  refused.
+- **EMI7 Already here.** A row with the email of an employee already in
+  Tohyee, or the same name and start date, is skipped. Bringing in the same
+  file twice adds nobody.
+- **EMI8 All or nothing.** Every row goes through the same rules as typing
+  an employee in. If any row is refused (an IRD number that isn't valid,
+  "Twice a month"), every problem is listed and nothing is saved.
+
 ## Income tax stage 1: taxable income, tax, provisional tax and terminal tax (ITX1-ITX10; from IRD's published rules, read by Claude 16 Oct 2026, not yet reviewed by an accountant)
 
 Tax is law, so these examples are **not** "as is common practice": they were written
