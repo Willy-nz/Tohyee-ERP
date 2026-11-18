@@ -722,6 +722,7 @@ export const SCREEN_COVERAGE: Record<string, ScreenCoverage> = {
   "POST /api/payroll/employees/[employeeId]/pay-rates": {"next": "payroll"},
   "PATCH /api/payroll/employees/[employeeId]": {"next": "payroll"},
   "POST /api/payroll/employees": {"next": "payroll"},
+  "POST /api/payroll/employees/import": {"next": "payroll"},
   "PATCH /api/payroll/groups/[groupId]": {"next": "payroll"},
   "POST /api/payroll/groups": {"next": "payroll"},
   "POST /api/payroll/ird-payments/[paymentId]/void": {"next": "payroll"},
