@@ -13,7 +13,9 @@ import type { Dashboard } from "@/lib/analytics/dashboards";
 import { api,errorMessage } from "@/lib/client/api";
 import { formatDateTime } from "@/lib/format";
 import styles from "@/components/analytics-dashboards.module.css";
-import { ITEM_NAMES,TableInfo,VISUALS } from "@/components/analytics/report-shared";
+import { TableInfo } from "@/components/analytics/report-shared";
+import { ReportPreview } from "@/components/analytics/report-preview";
+import { reportPages } from "@/lib/analytics/pages";
 
 /**
  * Organisations seen with Analytics on in this tab. Coming back to a page,
@@ -21,6 +23,13 @@ import { ITEM_NAMES,TableInfo,VISUALS } from "@/components/analytics/report-shar
  * "Loading…" in place of the page and its buttons.
  */
 const analyticsSeenOn = new Set<string>();
+
+/** "4 pages · 20 items · updated 18 Nov 2026". */
+function reportMeta(report: Dashboard): string {
+  const pages = reportPages(report.settings.pages).length;
+  const tiles = report.tiles.length;
+  return [pages > 1 ? `${pages} pages` : null, `${tiles} ${tiles === 1 ? "item" : "items"}`, `updated ${new Date(report.updatedAt).toLocaleDateString("en-NZ", { day: "numeric", month: "short", year: "numeric" })}`].filter(Boolean).join(" · ");
+}
 
 export function RequireAnalytics({ organisationId, children }: { organisationId: string; children: React.ReactNode }) {
   const modules = useModules(organisationId);
@@ -129,8 +138,12 @@ function DashboardsListInner({ organisationId }: { organisationId: string }) {
       {list.error ? <Notice tone="error">{list.error}</Notice> : !list.data ? <p className={ui.muted}>Loading reports…</p> : !reports.length ? <Empty picture="analytics">{search ? "No reports match your search." : can("bookkeeper") ? "Your first report starts here. Choose Create report to build it." : "No reports are available to you yet."}</Empty> : view === "list" ? (
         <div className={ui.tableWrap}><table className={ui.table}><thead><tr><th>Report</th><th>Charts and tables</th><th>Last updated</th></tr></thead><tbody>{reports.map((report) => <tr key={report.id}><td><Link href={`/analytics/dashboards/${report.id}`}>{report.name}</Link><div className={ui.muted}>{report.description}</div></td><td>{report.tiles.length}</td><td>{formatDateTime(report.updatedAt)}</td></tr>)}</tbody></table></div>
       ) : <div className={styles.dashboardCards}>{reports.map((report) => <Link key={report.id} href={`/analytics/dashboards/${report.id}`} className={styles.dashboardCard}>
-        <div className={styles.reportThumbnail} aria-hidden="true">{report.tiles.length ? report.tiles.slice(0, 4).map((tile) => <span key={tile.id}>{ITEM_NAMES[tile.visual] ?? VISUALS.find((visual) => visual.value === tile.visual)?.label ?? tile.visual}</span>) : <span>Blank report</span>}</div>
-        <strong>{report.name}</strong>{report.description ? <span className={ui.muted}>{report.description}</span> : null}<span className={styles.reportMeta}>{report.tiles.length} charts and tables · {formatDateTime(report.updatedAt)}</span>
+        <ReportPreview report={report} organisationId={organisationId} />
+        <span className={styles.reportCardText}>
+          <strong className={styles.reportCardName}>{report.name}</strong>
+          {report.description ? <span className={styles.reportCardDescription}>{report.description}</span> : null}
+          <span className={styles.reportMeta}>{reportMeta(report)}</span>
+        </span>
       </Link>)}</div>}
     </>
   );
