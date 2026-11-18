@@ -15,6 +15,7 @@ import { formatDateTime } from "@/lib/format";
 import styles from "@/components/analytics-dashboards.module.css";
 import { TableInfo } from "@/components/analytics/report-shared";
 import { ReportPreview } from "@/components/analytics/report-preview";
+import { ReportCoverPicker } from "@/components/analytics/report-cover-picker";
 import { reportPages } from "@/lib/analytics/pages";
 
 /**
@@ -137,14 +138,17 @@ function DashboardsListInner({ organisationId }: { organisationId: string }) {
       </div>
       {list.error ? <Notice tone="error">{list.error}</Notice> : !list.data ? <p className={ui.muted}>Loading reports…</p> : !reports.length ? <Empty picture="analytics">{search ? "No reports match your search." : can("bookkeeper") ? "Your first report starts here. Choose Create report to build it." : "No reports are available to you yet."}</Empty> : view === "list" ? (
         <div className={ui.tableWrap}><table className={ui.table}><thead><tr><th>Report</th><th>Charts and tables</th><th>Last updated</th></tr></thead><tbody>{reports.map((report) => <tr key={report.id}><td><Link href={`/analytics/dashboards/${report.id}`}>{report.name}</Link><div className={ui.muted}>{report.description}</div></td><td>{report.tiles.length}</td><td>{formatDateTime(report.updatedAt)}</td></tr>)}</tbody></table></div>
-      ) : <div className={styles.dashboardCards}>{reports.map((report) => <Link key={report.id} href={`/analytics/dashboards/${report.id}`} className={styles.dashboardCard}>
-        <ReportPreview report={report} organisationId={organisationId} />
-        <span className={styles.reportCardText}>
-          <strong className={styles.reportCardName}>{report.name}</strong>
-          {report.description ? <span className={styles.reportCardDescription}>{report.description}</span> : null}
-          <span className={styles.reportMeta}>{reportMeta(report)}</span>
-        </span>
-      </Link>)}</div>}
+      ) : <div className={styles.dashboardCards}>{reports.map((report) => <div key={report.id} className={styles.dashboardCard}>
+        <Link href={`/analytics/dashboards/${report.id}`} className={styles.reportCardLink}>
+          <ReportPreview report={report} organisationId={organisationId} />
+          <span className={styles.reportCardText}>
+            <strong className={styles.reportCardName}>{report.name}</strong>
+            {report.description ? <span className={styles.reportCardDescription}>{report.description}</span> : null}
+            <span className={styles.reportMeta}>{reportMeta(report)}</span>
+          </span>
+        </Link>
+        {can("bookkeeper") ? <ReportCoverPicker key={`${report.id}:${report.version}`} report={report} organisationId={organisationId} onSaved={list.reload} /> : null}
+      </div>)}</div>}
     </>
   );
 }
