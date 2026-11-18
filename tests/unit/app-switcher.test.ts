@@ -74,3 +74,12 @@ describe("app switcher", () => {
     expect(availableApps({ crm: true, reporting: false, notForProfit: false, analytics: true, gst: false, accounting: false })).toEqual(["crm", "analytics"]);
   });
 });
+
+describe("the Payroll app (PAO2)", () => {
+  const base = { crm: true, reporting: false, notForProfit: false, analytics: false, gst: false };
+  it("is an app only while Accounting is off and Payroll is on", () => {
+    expect(availableApps({ ...base, accounting: false, payroll: true })).toEqual(["payroll", "crm"]);
+    expect(availableApps({ ...base, accounting: true, payroll: true })).toEqual(["accounting", "crm"]);
+    expect(availableApps({ ...base, accounting: false, payroll: false })).toEqual(["crm"]);
+  });
+});

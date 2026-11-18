@@ -264,6 +264,7 @@ import { migration as m0286 } from "@/lib/db/migrations/tenant/0286-vegetation-s
 import { migration as m0287 } from "@/lib/db/migrations/tenant/0287-analytics-merchant-center";
 import { migration as m0288 } from "@/lib/db/migrations/tenant/0288-sales-platform-order-closed-at";
 import { migration as m0289 } from "@/lib/db/migrations/tenant/0289-analytics-business-profile-google-ads";
+import { migration as m0290 } from "@/lib/db/migrations/tenant/0290-payroll-add-on";
 
 /**
  * Migrations applied to every organisation's own database. Each organisation
@@ -595,4 +596,5 @@ export const tenantMigrations: readonly Migration[] = [
   m0287,
   m0288,
   m0289,
+  m0290,
 ];

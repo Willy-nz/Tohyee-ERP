@@ -41,6 +41,8 @@ export type OrganisationSettings = {
   accountingEnabled: boolean;
   /** The CRM module (MOD1, CRM1-CRM9). */
   crmEnabled: boolean;
+  /** Payroll (PAO1): on its own, or with Accounting, where it posts to the books. */
+  payrollEnabled: boolean;
   /** The Analytics module. */
   analyticsEnabled: boolean;
   /** The Not-for-profit module (NFP1). */
@@ -88,6 +90,7 @@ export async function getOrganisationSettings(tx: OrgTx): Promise<OrganisationSe
     gst_period_end_month: number | null;
     advanced_features: boolean;
     accounting_enabled: boolean;
+    payroll_enabled: boolean;
     crm_enabled: boolean;
     analytics_enabled: boolean;
     not_for_profit_enabled: boolean;
@@ -106,7 +109,7 @@ export async function getOrganisationSettings(tx: OrgTx): Promise<OrganisationSe
     payment_details: string | null;
     has_postings: boolean;
   }>(
-    `select organisation_id, display_name, base_currency, financial_year_end_month, gst_basis, gst_period_months, gst_period_end_month, advanced_features, accounting_enabled, crm_enabled, analytics_enabled, not_for_profit_enabled, allow_negative_stock,
+    `select organisation_id, display_name, base_currency, financial_year_end_month, gst_basis, gst_period_months, gst_period_end_month, advanced_features, accounting_enabled, payroll_enabled, crm_enabled, analytics_enabled, not_for_profit_enabled, allow_negative_stock,
             foreign_trade, (select t.code from tax_codes t where t.id = export_tax_code_id) as export_tax_code,
             postal_address, gst_number, gst_registered, gst_registered_from::text, gst_registered_until::text, payment_details,
             to_char(gst_registration_confirmed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as gst_registration_confirmed_at, gst_registration_confirmed_by,
@@ -128,6 +131,7 @@ export async function getOrganisationSettings(tx: OrgTx): Promise<OrganisationSe
         : gstPeriodSetting(row.gst_period_months, row.gst_period_end_month),
     advancedFeatures: row.advanced_features,
     accountingEnabled: row.accounting_enabled,
+    payrollEnabled: row.payroll_enabled,
     crmEnabled: row.crm_enabled,
     analyticsEnabled: row.analytics_enabled,
     notForProfitEnabled: row.not_for_profit_enabled,
@@ -223,6 +227,7 @@ export async function updateOrganisationSettings(
     gstPeriodEndMonth?: unknown;
     advancedFeatures?: unknown;
     accountingEnabled?: unknown;
+    payrollEnabled?: unknown;
     crmEnabled?: unknown;
     analyticsEnabled?: unknown;
     notForProfitEnabled?: unknown;
@@ -284,9 +289,13 @@ export async function updateOrganisationSettings(
     throw new ValidationError("accountingEnabled must be true or false.");
   }
   const accountingEnabled = input.accountingEnabled === undefined ? current.accountingEnabled : input.accountingEnabled;
-  // MOD5: one app stays on; Advanced reporting and Not-for-profit need Accounting.
-  if (!accountingEnabled && !crmEnabled && !analyticsEnabled) {
-    throw new ValidationError("Keep at least one of Accounting, CRM or Analytics on.");
+  if (input.payrollEnabled !== undefined && typeof input.payrollEnabled !== "boolean") {
+    throw new ValidationError("payrollEnabled must be true or false.");
+  }
+  const payrollEnabled = input.payrollEnabled === undefined ? current.payrollEnabled : input.payrollEnabled;
+  // MOD5: one app stays on (Payroll counts, PAO1); Advanced reporting and Not-for-profit need Accounting.
+  if (!accountingEnabled && !crmEnabled && !analyticsEnabled && !payrollEnabled) {
+    throw new ValidationError("Keep at least one of Accounting, Payroll, CRM or Analytics on.");
   }
   if (!accountingEnabled) {
     if (input.advancedFeatures === true || input.notForProfitEnabled === true) {
@@ -386,7 +395,7 @@ export async function updateOrganisationSettings(
             postal_address = $9, gst_number = $10, payment_details = $11, gst_period_months = $12,
             gst_period_end_month = $13, foreign_trade = $14,
             export_tax_code_id = coalesce($15::bigint, export_tax_code_id), analytics_enabled = $16,
-            gst_registered = $19, gst_registered_from = $17::date, gst_registered_until = $18::date, accounting_enabled = $20,
+            gst_registered = $19, gst_registered_from = $17::date, gst_registered_until = $18::date, accounting_enabled = $20, payroll_enabled = $23,
             gst_registration_confirmed_at = case when $21::boolean then now() else gst_registration_confirmed_at end,
             gst_registration_confirmed_by = case when $21::boolean then $22::text else gst_registration_confirmed_by end,
             updated_at = now()
@@ -414,6 +423,7 @@ export async function updateOrganisationSettings(
       accountingEnabled,
       confirmed,
       tx.actor.email || "Tohyee",
+      payrollEnabled,
     ],
   );
   await writeAuditEvent(tx, {
@@ -438,6 +448,7 @@ export async function updateOrganisationSettings(
       ...(exportTaxCode !== current.exportTaxCode ? { exportTaxCode } : {}),
       ...(analyticsEnabled !== current.analyticsEnabled ? { analyticsEnabled } : {}),
       ...(accountingEnabled !== current.accountingEnabled ? { accountingEnabled } : {}),
+      ...(payrollEnabled !== current.payrollEnabled ? { payrollEnabled } : {}),
       ...(gstRegistered !== current.gstRegistered ? { gstRegistered } : {}),
       ...(gstRegisteredFrom !== current.gstRegisteredFrom ? { gstRegisteredFrom } : {}),
       ...(gstRegisteredUntil !== current.gstRegisteredUntil ? { gstRegisteredUntil } : {}),
@@ -455,6 +466,7 @@ export async function updateOrganisationSettings(
     gstPeriod,
     advancedFeatures,
     accountingEnabled,
+    payrollEnabled,
     crmEnabled,
     analyticsEnabled,
     notForProfitEnabled,

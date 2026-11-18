@@ -3,7 +3,7 @@ import { type Role, roleAtLeast } from "@/lib/auth/roles";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { connectAsAdmin } from "@/lib/db/pools";
 import { coreQuery, wrapClient } from "@/lib/db/transactions";
-import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { requireBoolean } from "@/lib/validation";
 
 /**
@@ -36,7 +36,19 @@ export async function hasPayrollAccess(tx: OrgTx): Promise<boolean> {
  * P10) must too.
  */
 export async function requirePayrollAccess(tx: OrgTx): Promise<void> {
+  await requirePayroll(tx);
   if (!(await hasPayrollAccess(tx))) throw new ForbiddenError(PAYROLL_ACCESS_MESSAGE);
+}
+
+/** Whether the Payroll module is on (PAO1), with or without Accounting. */
+export async function payrollEnabled(tx: OrgTx): Promise<boolean> {
+  const result = await tx.query<{ payroll_enabled: boolean }>("select payroll_enabled from organisation_settings where id = true");
+  return result.rows[0]?.payroll_enabled !== false;
+}
+
+/** Refuses payroll while the module is off (PAO1). Its records are kept. */
+export async function requirePayroll(tx: OrgTx): Promise<void> {
+  if (!(await payrollEnabled(tx))) throw new ConflictError("Payroll is off for this organisation. An admin can turn it on under Modules.");
 }
 
 /** A current member of the organisation, as `listMembers` gives them (from the core database). */

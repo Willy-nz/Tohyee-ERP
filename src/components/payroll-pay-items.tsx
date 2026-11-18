@@ -1,5 +1,7 @@
 "use client";
 
+import { useModules } from "@/components/modules";
+
 import { InfoTip } from "@/components/info-tip";
 import { type FormEvent, useState } from "react";
 import { AccountSelect, useAccounts } from "@/components/books";
@@ -72,7 +74,9 @@ export function PayrollPayItems({ organisationId }: { organisationId: string }) 
   const items = useApiData<{ payItems: PayItem[] }>("/api/payroll/pay-items", { organisationId, includeArchived: includeArchived ? "true" : null });
   const me = useApiData<{ canManagePayrollAccess: boolean }>("/api/payroll/access/me", { organisationId });
   const settings = useApiData<{ settings: PayrollSettings }>("/api/payroll/settings", { organisationId });
-  const accounts = useAccounts(organisationId);
+  // Without Accounting a pay item needs no account (PAO7).
+  const accountingOn = useModules(organisationId)?.accounting !== false;
+  const accounts = useAccounts(accountingOn ? organisationId : null);
   const isAdmin = me.data?.canManagePayrollAccess ?? false;
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
@@ -271,9 +275,11 @@ export function PayrollPayItems({ organisationId }: { organisationId: string }) 
                   {ADDABLE.map((value) => <option key={value} value={value}>{PAY_ITEM_KIND_NAMES[value]}</option>)}
                 </select>
               </Field>
-              <Field label="Account">
-                <AccountSelect accounts={accountList} filter={accountFilter(kind)} required value={accountCode} onChange={setAccountCode} />
-              </Field>
+              {accountingOn ? (
+                <Field label="Account">
+                  <AccountSelect accounts={accountList} filter={accountFilter(kind)} required value={accountCode} onChange={setAccountCode} />
+                </Field>
+              ) : null}
               {kind === "overtime" ? (
                 <Field label="Times the hourly rate">
                   <input inputMode="decimal" required value={rateMultiplier} onChange={(event) => setRateMultiplier(event.target.value)} />

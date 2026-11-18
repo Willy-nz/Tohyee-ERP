@@ -28,6 +28,8 @@ export type Modules = {
   farming?: boolean;
   /** Accounting (MOD2): false only when it's been turned off; left out means on. */
   accounting?: boolean;
+  /** Payroll (PAO1): in Accounting's menus while Accounting is on, its own app while it's off. Left out means on. */
+  payroll?: boolean;
 };
 
 const CHANGED = "tohyee:modules-changed";
@@ -50,9 +52,9 @@ export function useModules(organisationId: string | null): Modules | null {
     window.addEventListener(CHANGED, reload);
     return () => window.removeEventListener(CHANGED, reload);
   }, [reload]);
-  if (reportViewer) return { crm: false, reporting: false, notForProfit: false, analytics: true, gst: false, accounting: false };
-  if (farmWorker) return { crm: false, reporting: false, notForProfit: false, analytics: false, gst: false, livestock: false, farming: true };
-  if (salesRole) return crmTeam.data ? { crm: crmTeam.data.crmEnabled, reporting: false, notForProfit: false, analytics: false, gst: false, accounting: false } : null;
+  if (reportViewer) return { crm: false, reporting: false, notForProfit: false, analytics: true, gst: false, accounting: false, payroll: false };
+  if (farmWorker) return { crm: false, reporting: false, notForProfit: false, analytics: false, gst: false, livestock: false, farming: true, payroll: false };
+  if (salesRole) return crmTeam.data ? { crm: crmTeam.data.crmEnabled, reporting: false, notForProfit: false, analytics: false, gst: false, accounting: false, payroll: false } : null;
   if (!settings.data) return null;
   return {
     crm: settings.data.settings.crmEnabled,
@@ -61,6 +63,7 @@ export function useModules(organisationId: string | null): Modules | null {
     analytics: settings.data.settings.analyticsEnabled,
     gst: settings.data.settings.gstRegistered,
     accounting: settings.data.settings.accountingEnabled,
+    payroll: settings.data.settings.payrollEnabled !== false,
     livestock: settings.data.settings.accountingEnabled && settings.data.settings.livestockEnabled,
     farming: settings.data.settings.accountingEnabled && settings.data.settings.farmingEnabled,
   };
@@ -167,6 +170,11 @@ export function ModulesCard({ organisationId }: { organisationId: string }) {
   }
   const current = settings.data?.settings;
   const accountingOn = current?.accountingEnabled !== false;
+  const payrollOn = current?.payrollEnabled !== false;
+  async function togglePayroll(on: boolean) {
+    if (on && !(await confirm("Turn Payroll off? Employees, pay runs and leave are kept and show again when it's turned back on."))) return;
+    await save("payroll", { payrollEnabled: !on });
+  }
   const livestockOn = current?.livestockEnabled === true;
   const farmingOn = current?.farmingEnabled === true;
   async function toggleFarming(on: boolean) {
@@ -198,7 +206,7 @@ export function ModulesCard({ organisationId }: { organisationId: string }) {
   return (
     <Card
       title="Modules"
-      description="Keep at least one of Accounting, CRM or Analytics on. Turning a module off hides it; anything entered is kept. Advanced reporting and Not-for-profit need Accounting."
+      description="Keep at least one of Accounting, Payroll, CRM or Analytics on. Turning a module off hides it; anything entered is kept. Advanced reporting and Not-for-profit need Accounting."
     >
       {error ? <Notice tone="error">{error}</Notice> : null}
       {settings.error ? <Notice tone="error">{settings.error}</Notice> : null}
@@ -209,13 +217,36 @@ export function ModulesCard({ organisationId }: { organisationId: string }) {
               <td>
                 <span className={ui.moduleIdentity}><IllustratedIcon name="accounting" size={32} /><strong>Accounting</strong></span>
                 <div className={ui.muted}>
-                  Invoices, bills, banking and bank feeds, payroll, reports and the GST return. Shopify and WooCommerce orders post here.
+                  Invoices, bills, banking and bank feeds, reports and the GST return. Shopify and WooCommerce orders post here.
                 </div>
               </td>
               <td>{accountingOn ? <Badge tone="green">On</Badge> : <Badge>Off</Badge>}</td>
               <td className={ui.num}>
                 <Button variant={accountingOn ? "secondary" : "primary"} size="small" disabled={!current || busy !== null} onClick={() => void toggleAccounting(accountingOn)}>
                   {busy === "accounting" ? "Saving…" : accountingOn ? "Turn off Accounting" : "Turn on Accounting"}
+                </Button>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <span className={ui.moduleIdentity}><IllustratedIcon name="payroll" size={32} /><strong>Payroll</strong></span>
+                <div className={ui.muted}>
+                  {accountingOn
+                    ? "Employees, pay runs with PAYE, KiwiSaver and student loan, leave, payslips, bank files, payday filing and payroll reports. In Accounting's Payroll menu, posting to the books."
+                    : "Employees, pay runs with PAYE, KiwiSaver and student loan, leave, payslips, bank files, payday filing and payroll reports. Its own app while Accounting is off: nothing posts to the books."}
+                </div>
+                {payrollOn ? (
+                  <div className={ui.actions}>
+                    <Link href="/operations/payroll/pay-runs">Pay runs</Link>
+                    <Link href="/operations/payroll/employees">Employees</Link>
+                    <Link href="/operations/payroll/reports">Reports</Link>
+                  </div>
+                ) : null}
+              </td>
+              <td>{payrollOn ? <Badge tone="green">On</Badge> : <Badge>Off</Badge>}</td>
+              <td className={ui.num}>
+                <Button variant={payrollOn ? "secondary" : "primary"} size="small" disabled={!current || busy !== null} onClick={() => void togglePayroll(payrollOn)}>
+                  {busy === "payroll" ? "Saving…" : payrollOn ? "Turn off Payroll" : "Turn on Payroll"}
                 </Button>
               </td>
             </tr>

@@ -21,6 +21,8 @@ export type RunRow = {
   created_by_email: string;
   prepared_by_user_ids: string[];
   approval_journal_id: string | null;
+  /** False for a pay run approved while Accounting was off (PAO3): no journal, now or later. */
+  in_books: boolean;
   approve_request_hash: string | null;
   approved_by_email: string | null;
   approved_at: string | null;
@@ -33,7 +35,7 @@ export type RunRow = {
 export const RUN_COLUMNS = `r.id, r.run_number::text, r.command_source, r.request_hash, r.pay_group_id, g.name as pay_group_name,
   r.pay_frequency, r.period_start::text, r.period_end::text, r.pay_date::text, r.status,
   (select count(*) from payroll_pay_run_employees e where e.pay_run_id = r.id)::text as employee_count,
-  r.created_by_email, r.prepared_by_user_ids::text[] as prepared_by_user_ids, r.approval_journal_id::text,
+  r.created_by_email, r.prepared_by_user_ids::text[] as prepared_by_user_ids, r.approval_journal_id::text, r.in_books,
   r.approve_request_hash, r.approved_by_email, r.approved_at::text, r.void_date::text, r.void_journal_id::text,
   r.void_request_hash, r.voided_by_email`;
 

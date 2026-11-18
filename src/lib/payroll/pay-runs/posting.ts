@@ -6,6 +6,7 @@ import { assertSameRequest,requestHash } from "@/lib/idempotency";
 import { controlAccountCode,type ControlAccount } from "@/lib/invoices/service";
 import { getJournal,parseJournalBody,postJournalBody } from "@/lib/ledger/journals";
 import { assertPostingDateAllowed } from "@/lib/ledger/period-controls";
+import { accountingEnabled } from "@/lib/organisations/accounting-switch";
 import {
 add,dec,
 type Decimal,isPositive,
@@ -37,9 +38,11 @@ export const ESCT_ACCOUNT: ControlAccount = { systemKey: "esct_payable", label: 
 export const STUDENT_LOAN_ACCOUNT: ControlAccount = { systemKey: "student_loan_payable", label: "Student loan payable", accountClass: "liability" };
 export const WAGES_ACCOUNT: ControlAccount = { systemKey: "wages_payable", label: "Wages payable", accountClass: "liability" };
 
-type ItemAccount = { id: string; name: string; rank: number; accountId: string; accountCode: string };
+/** A pay item with its account. Approved without the books (PAO3), the account is only kept if the item has one. */
+type ItemAccount = { id: string; name: string; rank: number; accountId: string | null; accountCode: string };
+type ItemEntry = ItemAccount | { id: string; name: string; rank: number; missing: true };
 
-async function itemAccounts(tx: OrgTx): Promise<Map<string, ItemAccount | { id: string; name: string; missing: true }>> {
+async function itemAccounts(tx: OrgTx): Promise<Map<string, ItemEntry>> {
   const result = await tx.query<{ id: string; name: string; rank: number; account_id: string | null; account_code: string | null; is_active: boolean | null }>(
     `select p.id, p.name, a.id::text as account_id, a.code as account_code, a.is_active,
             (row_number() over (order by array_position(array['earnings', 'deduction', 'employer_contribution'], p.category),
@@ -52,12 +55,18 @@ async function itemAccounts(tx: OrgTx): Promise<Map<string, ItemAccount | { id: 
       row.id,
       row.account_id && row.account_code
         ? { id: row.id, name: row.name, rank: row.rank, accountId: row.account_id, accountCode: row.account_code }
-        : { id: row.id, name: row.name, missing: true as const },
+        : { id: row.id, name: row.name, rank: row.rank, missing: true as const },
     ]),
   );
 }
 
-function accountFor(entry: ItemAccount | { id: string; name: string; missing: true } | undefined, refused: string): ItemAccount {
+/** Without the books, a pay item needs no account: its costs are still kept by employee, department and project for reports (PAO7). */
+function withoutBooks(entry: ItemEntry | undefined): ItemAccount {
+  if (!entry) throw new ValidationError("A pay item on this pay run wasn't found.");
+  return "missing" in entry ? { id: entry.id, name: entry.name, rank: entry.rank, accountId: null, accountCode: "" } : entry;
+}
+
+function accountFor(entry: ItemEntry | undefined, refused: string): ItemAccount {
   if (!entry || "missing" in entry) {
     throw new ValidationError(`The pay item ${entry?.name ?? ""} has no account, so ${refused}. Set one under Payroll › Pay items.`);
   }
@@ -83,7 +92,7 @@ type Share = {
 type Posting = {
   employeeId: string;
   payItemId: string;
-  accountId: string;
+  accountId: string | null;
   tags: TrackingTags;
   projectId: string | null;
   percentage: string;
@@ -136,7 +145,9 @@ export async function approvePayRun(
       throw new ForbiddenError(`You changed ${changed.rows[0].name}'s payroll details while ${reference} was a draft, so someone else has to approve it.`);
     }
   }
-  await assertPostingDateAllowed(tx, run.pay_date);
+  // With Accounting off, payroll is on its own (PAO3): worked out, paid and filed, but nothing posts, now or later (PAO4).
+  const inBooks = await accountingEnabled(tx);
+  if (inBooks) await assertPostingDateAllowed(tx, run.pay_date);
 
   const calculated = await calculateRun(tx, run);
   if (calculated.length === 0) throw new ValidationError(`${reference} has nobody on it. Delete it instead.`);
@@ -153,6 +164,7 @@ export async function approvePayRun(
   if (stale.length > 0) throw new ValidationError(`${reference} can't be approved yet: ${stale.join(" ")}`);
   const refused = `${reference} can't be approved`;
   const accounts = await itemAccounts(tx);
+  const pick = (entry: ItemEntry | undefined) => (inBooks ? accountFor(entry, refused) : withoutBooks(entry));
   const ctx = await loadTrackingContext(tx);
 
   const postings: Posting[] = [];
@@ -203,7 +215,7 @@ export async function approvePayRun(
     const byItem = new Map<string, Decimal>();
     for (const line of entry.lines) {
       if (line.category === "deduction") {
-        const item = accountFor(accounts.get(line.pay_item_id), refused);
+        const item = pick(accounts.get(line.pay_item_id));
         const current = deductions.get(item.id) ?? { item, amount: ZERO_DECIMAL };
         current.amount = add(current.amount, dec(line.amount));
         deductions.set(item.id, current);
@@ -213,16 +225,18 @@ export async function approvePayRun(
     }
     for (const [itemId, amount] of byItem) {
       if (isZero(amount)) continue;
-      addShare(entry.employee.employee_id, accountFor(accounts.get(itemId), refused), toFixedString(amount, 2), shares);
+      addShare(entry.employee.employee_id, pick(accounts.get(itemId)), toFixedString(amount, 2), shares);
     }
     if (!isZero(dec(pay.kiwiSaverEmployer))) {
-      if (!kiwiSaverItem) kiwiSaverItem = await kiwiSaverEmployerItem(tx, accounts, refused);
+      if (!kiwiSaverItem) kiwiSaverItem = await kiwiSaverEmployerItem(tx, accounts, refused, pick);
       addShare(entry.employee.employee_id, kiwiSaverItem, pay.kiwiSaverEmployer, shares);
     }
   }
 
   const debits = [...groups.values()].sort((a, b) => a.rank - b.rank || a.order - b.order);
   const totals = totalsOf(calculated);
+  const journalId = inBooks ? await postApprovalJournal() : null;
+  async function postApprovalJournal(): Promise<string> {
   const kiwiSaverPayable = add(dec(totals.kiwiSaverEmployee), calculated.reduce((total, entry) => add(total, dec(entry.pay!.kiwiSaverEmployerNet)), ZERO_DECIMAL));
   const credits: Array<{ accountCode: string; amount: string; description: string }> = [];
   const credit = async (control: ControlAccount, amount: string, description: string) => {
@@ -266,6 +280,8 @@ export async function approvePayRun(
     ),
     { origin: "payroll" },
   );
+  return posted.journal.id;
+  }
 
   for (const entry of calculated) {
     const pay = entry.pay!;
@@ -331,7 +347,7 @@ export async function approvePayRun(
         posting.projectId,
         posting.percentage,
         posting.amount,
-        lineOrder.get(posting.group),
+        inBooks ? lineOrder.get(posting.group) : null,
         posting.shareNumber,
       ],
     );
@@ -368,9 +384,10 @@ export async function approvePayRun(
     await tx.query(
       `update payroll_pay_runs
           set status = 'approved', approval_journal_id = $2, approve_command_source = $3, approve_idempotency_key = $4,
-              approve_request_hash = $5, approved_by_user_id = $6, approved_by_email = $7, approved_at = now(), updated_at = now()
+              approve_request_hash = $5, approved_by_user_id = $6, approved_by_email = $7, approved_at = now(), updated_at = now(),
+              in_books = $8
         where id = $1`,
-      [run.id, posted.journal.id, source, idempotencyKey, hash, tx.actor.userId, tx.actor.email],
+      [run.id, journalId, source, idempotencyKey, hash, tx.actor.userId, tx.actor.email, inBooks],
     );
   } catch (error) {
     if (isUniqueViolation(error)) throw new ConflictError("That idempotency key was already used for a different pay run approval. Use a new key.");
@@ -380,21 +397,22 @@ export async function approvePayRun(
     eventType: "payroll_pay_run.approved",
     entityType: "payroll_pay_run",
     entityId: run.id,
-    details: { reference, payDate: run.pay_date, journalId: posted.journal.id, employeeCount: calculated.length },
+    details: { reference, payDate: run.pay_date, journalId, employeeCount: calculated.length, ...(inBooks ? {} : { inBooks: false }) },
   });
   return { created: true, payRun: await getPayRun(tx, run.id) };
 }
 
 async function kiwiSaverEmployerItem(
   tx: OrgTx,
-  accounts: Map<string, ItemAccount | { id: string; name: string; missing: true }>,
+  accounts: Map<string, ItemEntry>,
   refused: string,
+  pick: (entry: ItemEntry | undefined) => ItemAccount,
 ): Promise<ItemAccount> {
   const result = await tx.query<{ id: string }>("select id from payroll_pay_items where is_system and kind = 'kiwisaver_employer'");
   if (!result.rows[0]) {
     throw new ValidationError(`There's no KiwiSaver employer contribution pay item, so ${refused}. Set it up under Payroll › Pay items.`);
   }
-  return accountFor(accounts.get(result.rows[0].id), refused);
+  return pick(accounts.get(result.rows[0].id));
 }
 
 /**
@@ -540,7 +558,13 @@ export async function voidPayRun(
       `${names} ${irdPayments.rows.length === 1 ? "pays" : "pay"} ${first.period_start} to ${first.period_end}, which includes ${reference}'s pay date. Void ${irdPayments.rows.length === 1 ? "it" : "them"} first.`,
     );
   }
-  const original = await getJournal(tx, run.approval_journal_id!);
+  // A pay run approved without the books has no journal to reverse (PAO5). One in the books needs Accounting on to reverse it.
+  if (run.in_books && !(await accountingEnabled(tx))) {
+    throw new ConflictError(`${reference} is in the books, so voiding it reverses its journal, and Accounting is off. Turn Accounting on to void it.`);
+  }
+  const voidJournalId = run.in_books ? await postVoidJournal(run.approval_journal_id!) : null;
+  async function postVoidJournal(approvalJournalId: string): Promise<string> {
+  const original = await getJournal(tx, approvalJournalId);
   const posted = await postJournalBody(
     tx,
     "payroll:void",
@@ -563,13 +587,15 @@ export async function voidPayRun(
     ),
     { origin: "payroll", relatedJournalId: original.id, correctionKind: "reversal" },
   );
+  return posted.journal.id;
+  }
   try {
     await tx.query(
       `update payroll_pay_runs
           set status = 'voided', void_date = $2, void_journal_id = $3, void_command_source = $4, void_idempotency_key = $5,
               void_request_hash = $6, voided_by_user_id = $7, voided_by_email = $8, voided_at = now(), updated_at = now()
         where id = $1`,
-      [run.id, voidDate, posted.journal.id, source, idempotencyKey, hash, tx.actor.userId, tx.actor.email],
+      [run.id, voidDate, voidJournalId, source, idempotencyKey, hash, tx.actor.userId, tx.actor.email],
     );
   } catch (error) {
     if (isUniqueViolation(error)) throw new ConflictError("That idempotency key was already used for a different pay run void. Use a new key.");
@@ -579,7 +605,7 @@ export async function voidPayRun(
     eventType: "payroll_pay_run.voided",
     entityType: "payroll_pay_run",
     entityId: run.id,
-    details: { reference, voidDate, journalId: posted.journal.id },
+    details: { reference, voidDate, journalId: voidJournalId },
   });
   return { created: true, payRun: await getPayRun(tx, run.id) };
 }
@@ -593,19 +619,19 @@ export async function listPayRunPostings(tx: OrgTx, runIdInput: unknown): Promis
     employee_id: string;
     employee_name: string;
     pay_item_name: string;
-    account_code: string;
+    account_code: string | null;
     tracking: TrackingTags;
     project_id: string | null;
     percentage: string;
     amount: string;
-    journal_line_order: number;
+    journal_line_order: number | null;
   }>(
     `select p.posting_number, p.employee_id, pe.employee_name, i.name as pay_item_name, a.code as account_code, p.tracking,
             p.project_id::text, p.percentage::text, p.amount::text, p.journal_line_order
        from payroll_pay_run_postings p
        join payroll_pay_run_employees pe on pe.pay_run_id = p.pay_run_id and pe.employee_id = p.employee_id
        join payroll_pay_items i on i.id = p.pay_item_id
-       join accounts a on a.id = p.account_id
+       left join accounts a on a.id = p.account_id
       where p.pay_run_id = $1
       order by p.posting_number`,
     [run.id],
