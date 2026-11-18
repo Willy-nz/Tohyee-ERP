@@ -373,7 +373,7 @@ function parseSettings(input: unknown, tables: Map<string, ColumnInfo[]>): Dashb
   const preset = isDatePreset(raw.preset) ? raw.preset : null;
   const theme = parseThemeChoice(raw.theme);
   const visualDefaults = parseVisualDefaults(raw.visualDefaults);
-  if (raw.coverImageId != null && raw.coverImageId !== "" && (typeof raw.coverImageId !== "string" || !/^\\d{1,18}$/.test(raw.coverImageId))) throw new ValidationError("Choose a picture uploaded to this report for its cover.");
+  if (raw.coverImageId != null && raw.coverImageId !== "" && (typeof raw.coverImageId !== "string" || !/^\d{1,18}$/.test(raw.coverImageId))) throw new ValidationError("Choose a picture uploaded to this report for its cover.");
   const coverImageId = typeof raw.coverImageId === "string" && raw.coverImageId !== "" ? raw.coverImageId : undefined;
   // Bookmarks keep only the report's own slicers' choices; hidden tiles are checked with the tiles.
   const bookmarks = parseBookmarks(raw.bookmarks, {
