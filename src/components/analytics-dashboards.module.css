@@ -4,6 +4,19 @@
   gap: 20px;
 }
 
+.reportCardLink {
+  display: grid;
+  gap: 12px;
+  color: inherit;
+  text-decoration: none;
+  min-width: 0;
+}
+.reportCardLink:focus-visible {
+  outline: 2px solid var(--accent);
+  outline-offset: 3px;
+  border-radius: 8px;
+}
+
 /* A report: a miniature of its first page, then its name. */
 .dashboardCard {
   display: grid;
