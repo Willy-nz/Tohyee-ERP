@@ -2,6 +2,7 @@ import type { AccountClass } from "@/lib/accounts/types";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { formatDate } from "@/lib/format";
 import { add, cmp, dec, type Decimal, neg, sub, sum, ZERO_DECIMAL } from "@/lib/money/decimal";
+import { requireAccounting } from "@/lib/organisations/accounting-switch";
 import { requirePayrollAccess } from "@/lib/payroll/access";
 import { irdPaymentReference } from "@/lib/payroll/ird-payments";
 import { payRunReference } from "@/lib/payroll/pay-runs";
@@ -60,6 +61,8 @@ type LinkRow = { journal_id: string; kind: "run" | "run_void" | "wages" | "wages
 
 export async function payrollReconciliation(tx: OrgTx, input: ReportInput): Promise<PayrollReconciliation> {
   await requirePayrollAccess(tx);
+  // It compares payroll with the books, so it needs Accounting, and leaves out pay runs approved without the books (PAO8).
+  await requireAccounting(tx);
   const { from, to } = await parseReportDates(tx, input);
   const payroll = new Map<string, Decimal>();
   const addTo = (accountId: string | null, amount: Decimal) => {
@@ -78,7 +81,7 @@ export async function payrollReconciliation(tx: OrgTx, input: ReportInput): Prom
   const postings = await tx.query<{ account_id: string; amount: string }>(
     `select p.account_id::text, sum(p.amount)::text as amount
        from payroll_pay_run_postings p join payroll_pay_runs r on r.id = p.pay_run_id
-      where r.status = 'approved' and r.pay_date between $1 and $2
+      where r.status = 'approved' and r.in_books and r.pay_date between $1 and $2
       group by p.account_id`,
     [from, to],
   );
@@ -89,7 +92,7 @@ export async function payrollReconciliation(tx: OrgTx, input: ReportInput): Prom
        from payroll_pay_run_lines l
        join payroll_pay_runs r on r.id = l.pay_run_id
        join payroll_pay_items i on i.id = l.pay_item_id
-      where r.status = 'approved' and r.pay_date between $1 and $2 and i.category = 'deduction'
+      where r.status = 'approved' and r.in_books and r.pay_date between $1 and $2 and i.category = 'deduction'
       group by i.account_id`,
     [from, to],
   );
@@ -101,7 +104,7 @@ export async function payrollReconciliation(tx: OrgTx, input: ReportInput): Prom
               coalesce(sum(pe.kiwisaver_employee + pe.kiwisaver_employer_net), 0)::text as kiwisaver,
               coalesce(sum(pe.esct), 0)::text as esct, coalesce(sum(pe.net_pay), 0)::text as net_pay
          from payroll_pay_run_employees pe join payroll_pay_runs r on r.id = pe.pay_run_id
-        where r.status = 'approved' and r.pay_date between $1 and $2`,
+        where r.status = 'approved' and r.in_books and r.pay_date between $1 and $2`,
       [from, to],
     )
   ).rows[0];
@@ -151,7 +154,7 @@ export async function payrollReconciliation(tx: OrgTx, input: ReportInput): Prom
   );
 
   // The journals the payroll figures are made of; every other journal on these accounts explains a difference.
-  const expected = `select approval_journal_id as id from payroll_pay_runs where status = 'approved' and pay_date between $1 and $2
+  const expected = `select approval_journal_id as id from payroll_pay_runs where status = 'approved' and in_books and pay_date between $1 and $2
     union select journal_id from payroll_wage_payments where status = 'active' and payment_date between $1 and $2
     union select journal_id from payroll_ird_payments where status = 'active' and payment_date between $1 and $2`;
   const others = (
@@ -264,7 +267,7 @@ export async function payrollReconciliation(tx: OrgTx, input: ReportInput): Prom
     .sort((a, b) => (a.side === b.side ? a.code.localeCompare(b.code, "en", { numeric: true }) : a.side === "debit" ? -1 : 1));
 
   const counted = await tx.query<{ kind: string; number: string }>(
-    `select 'run' as kind, run_number::text as number from payroll_pay_runs where status = 'approved' and pay_date between $1 and $2
+    `select 'run' as kind, run_number::text as number from payroll_pay_runs where status = 'approved' and in_books and pay_date between $1 and $2
      union all select 'wages', payment_number::text from payroll_wage_payments where status = 'active' and payment_date between $1 and $2
      union all select 'ird', payment_number::text from payroll_ird_payments where status = 'active' and payment_date between $1 and $2
      order by 1, 2`,

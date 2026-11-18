@@ -10,6 +10,7 @@ import { controlAccountCode } from "@/lib/invoices/service";
 import { getJournal, parseJournalBody, postJournalBody } from "@/lib/ledger/journals";
 import { assertPostingDateAllowed } from "@/lib/ledger/period-controls";
 import { add, cmp, dec, isZero, parseDecimalInput, sub, toFixedString, toPlainString, ZERO_DECIMAL } from "@/lib/money/decimal";
+import { requireAccounting } from "@/lib/organisations/accounting-switch";
 import { requirePayrollAccess } from "@/lib/payroll/access";
 import { payRunReference, WAGES_ACCOUNT } from "@/lib/payroll/pay-runs";
 import { optionalSource, requireIdempotencyKey } from "@/lib/validation";
@@ -216,6 +217,8 @@ export async function recordWagePayment(
   command: { source?: unknown; idempotencyKey: unknown; paymentDate: unknown; amount: unknown; bankAccountCode: unknown; employeeId?: unknown },
 ): Promise<PaymentResult> {
   await requirePayrollAccess(tx);
+  // Paying and posting are the books' part (PAO6): with Accounting off, payroll makes the files but records no payments.
+  await requireAccounting(tx);
   const runId = parseUuid(runIdInput, "pay run");
   const source = optionalSource(command.source);
   const idempotencyKey = requireIdempotencyKey(command.idempotencyKey);
@@ -339,6 +342,8 @@ export async function voidWagePayment(
   command: { source?: unknown; idempotencyKey: unknown; voidDate: unknown },
 ): Promise<PaymentResult> {
   await requirePayrollAccess(tx);
+  // Paying and posting are the books' part (PAO6): with Accounting off, payroll makes the files but records no payments.
+  await requireAccounting(tx);
   const runId = parseUuid(runIdInput, "pay run");
   const paymentId = parseUuid(paymentIdInput, "wage payment");
   const source = optionalSource(command.source);

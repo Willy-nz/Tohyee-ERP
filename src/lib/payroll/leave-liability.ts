@@ -7,6 +7,7 @@ import { assertSameRequest, requestHash } from "@/lib/idempotency";
 import { getJournal, parseJournalBody, postJournalBody } from "@/lib/ledger/journals";
 import { assertPostingDateAllowed } from "@/lib/ledger/period-controls";
 import { add, dec, isZero, sub, toFixedString } from "@/lib/money/decimal";
+import { accountingEnabled, requireAccounting } from "@/lib/organisations/accounting-switch";
 import { hasPayrollAccess, requirePayrollAccess } from "@/lib/payroll/access";
 import { addDays } from "@/lib/payroll/leave/dates";
 import { type DepartmentLiability, liabilityChanges, postingLines } from "@/lib/payroll/leave/liability-posting";
@@ -166,6 +167,8 @@ export async function postLeaveLiability(
   command: { source?: unknown; idempotencyKey: unknown; asAt: unknown },
 ): Promise<{ created: boolean; posting: LeaveLiabilityPosting }> {
   await requirePayrollAccess(tx);
+  // Posting is the books' part (PAO6).
+  await requireAccounting(tx);
   const source = optionalSource(command.source);
   const idempotencyKey = requireIdempotencyKey(command.idempotencyKey);
   const asAt = parseIsoDate(command.asAt, "As at");
@@ -349,6 +352,8 @@ export async function voidLeaveLiabilityPosting(
   command: { source?: unknown; idempotencyKey: unknown; voidDate: unknown },
 ): Promise<{ created: boolean; posting: LeaveLiabilityPosting }> {
   await requirePayrollAccess(tx);
+  // Posting is the books' part (PAO6).
+  await requireAccounting(tx);
   if (typeof idInput !== "string" || !UUID_PATTERN.test(idInput)) throw new NotFoundError("That leave liability posting wasn't found.");
   const id = idInput;
   const source = optionalSource(command.source);
@@ -432,6 +437,8 @@ export type LeaveLiabilityReminder = { monthEnd: string; lastPosting: string | n
  */
 export async function leaveLiabilityReminders(tx: OrgTx, todayInput?: unknown): Promise<LeaveLiabilityReminder[]> {
   if (!(await hasPayrollAccess(tx))) return [];
+  // Nothing to post while Accounting is off (PAO6).
+  if (!(await accountingEnabled(tx))) return [];
   const today = todayInput === undefined ? todayIsoDate() : parseIsoDate(todayInput, "Today");
   const monthEnd = addDays(`${today.slice(0, 7)}-01`, -1);
   const usesLeave = await tx.query("select 1 from payroll_leave_settings limit 1");

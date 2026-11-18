@@ -1,5 +1,7 @@
 "use client";
 
+import { useModules } from "@/components/modules";
+
 import { DateInput } from "@/components/date-input";
 import Link from "next/link";
 import { type FormEvent, useState } from "react";
@@ -307,6 +309,8 @@ function IrdPeriodPay({
  * part, and voiding payments.
  */
 export function IrdPayments({ organisationId }: { organisationId: string }) {
+  // With Accounting off there's no bank feed to show a payment was made, so none is recorded (PAO6): only what's due.
+  const accountingOn = useModules(organisationId)?.accounting !== false;
   const loaded = useApiData<{ frequency: "monthly" | "twice_monthly"; periods: IrdPeriodSummary[] }>("/api/payroll/ird-payments", { organisationId });
   const [replaced, setReplaced] = useState<Record<string, IrdPeriodSummary>>({});
   const [open, setOpen] = useState<string | null>(null);
@@ -347,6 +351,9 @@ export function IrdPayments({ organisationId }: { organisationId: string }) {
         You pay IRD {loaded.data?.frequency === "twice_monthly" ? "twice a month" : "monthly"} (change it under Payroll › Pay items). Pay runs count in the
         period of their pay date. {PUBLIC_HOLIDAY_NOTE}
       </Notice>
+      {!accountingOn ? (
+        <Notice tone="info">Accounting is off, so Tohyee shows what each period&apos;s pay runs make due, and you pay IRD yourself. Payments aren&apos;t recorded here.</Notice>
+      ) : null}
       {periods.length === 0 ? <Empty>No approved pay runs yet, so nothing is owing to IRD.</Empty> : null}
       {periods.map((period) => {
         const id = `${period.start}|${period.end}`;
@@ -357,15 +364,22 @@ export function IrdPayments({ organisationId }: { organisationId: string }) {
             title={`${formatDate(period.start)} to ${formatDate(period.end)}`}
             description={period.payRuns.length ? `Pay runs: ${period.payRuns.map((run) => run.reference).join(", ")}` : "No approved pay runs in this period."}
             actions={
-              period.totalOwing === "0.00" ? <Badge tone="green">Paid</Badge> : late ? <Badge tone="red">Late</Badge> : <Badge tone="amber">Owing</Badge>
+              !accountingOn ? null : period.totalOwing === "0.00" ? <Badge tone="green">Paid</Badge> : late ? <Badge tone="red">Late</Badge> : <Badge tone="amber">Owing</Badge>
             }
           >
-            <div className={ui.statRow}>
-              <Stat label="Owing" value={formatMoney(period.totalOwing)} />
-              <Stat label="Paid" value={formatMoney(period.totalPaid)} />
-              <Stat label="Due" value={<DueDate period={period} />} />
-            </div>
-            {open === id ? (
+            {accountingOn ? (
+              <div className={ui.statRow}>
+                <Stat label="Owing" value={formatMoney(period.totalOwing)} />
+                <Stat label="Paid" value={formatMoney(period.totalPaid)} />
+                <Stat label="Due" value={<DueDate period={period} />} />
+              </div>
+            ) : (
+              <div className={ui.statRow}>
+                <Stat label="From pay runs" value={formatMoney(period.totalFromPayRuns)} />
+                <Stat label="Due" value={<DueDate period={period} />} />
+              </div>
+            )}
+            {!accountingOn ? null : open === id ? (
               <IrdPeriodPay
                 organisationId={organisationId}
                 period={period}

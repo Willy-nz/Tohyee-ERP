@@ -1,3 +1,4 @@
+import { accountingEnabled } from "@/lib/organisations/accounting-switch";
 import { writeAuditEvent } from "@/lib/audit";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
@@ -424,7 +425,9 @@ export async function createPayItem(tx: OrgTx, input: Record<string, unknown>): 
   assertAllTaxesTogether(input);
   const treatment = treatmentFor(kind, input);
   const name = parseName(input.name);
-  const accountId = await resolveAccount(tx, input.accountCode, category, null);
+  // Without Accounting, a pay item needs no account (PAO7); one can be set when Accounting is turned on.
+  const noAccount = (input.accountCode === undefined || input.accountCode === null || input.accountCode === "") && !(await accountingEnabled(tx));
+  const accountId = noAccount ? null : await resolveAccount(tx, input.accountCode, category, null);
   const countsForHolidayPay = holidayGrossFor(kind, treatment, input.discretionary);
   const rateMultiplier = kind === "overtime" ? parseMultiplier(input.rateMultiplier ?? "1.5") : null;
   if (kind !== "overtime" && input.rateMultiplier !== undefined && input.rateMultiplier !== null) {

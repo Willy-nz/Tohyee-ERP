@@ -133,6 +133,8 @@ export type PayRunSummary = {
 export type PayRun = PayRunSummary & {
   approvalJournalId: string | null;
   voidJournalId: string | null;
+  /** False when approved while Accounting was off (PAO3): it never posts. */
+  inBooks: boolean;
   /** True if the signed-in person created or changed the draft (PRUN7). */
   preparedByMe: boolean;
   approverMustDiffer: boolean;
@@ -156,10 +158,12 @@ export type PayRunPosting = {
   employeeId: string;
   employeeName: string;
   payItemName: string;
-  accountCode: string;
+  /** None for a pay run approved without the books when its pay item has no account (PAO7). */
+  accountCode: string | null;
   tracking: TrackingTags;
   projectId: string | null;
   percentage: string;
   amount: string;
-  journalLineOrder: number;
+  /** None without the books: there's no journal (PAO7). */
+  journalLineOrder: number | null;
 };

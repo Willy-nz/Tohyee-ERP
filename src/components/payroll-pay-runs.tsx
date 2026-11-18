@@ -20,6 +20,7 @@ import type { PayRate } from "@/lib/payroll/pay-rates";
 import type { PayRun, PayRunEmployee, PayRunPosting, PayRunStatus, PayRunSummary, PayRunTotals } from "@/lib/payroll/pay-runs";
 import styles from "./payroll-employees.module.css";
 import { useConfirm } from "@/components/confirm-dialog";
+import { useModules } from "@/components/modules";
 
 const STATUS: Record<PayRunStatus, { label: string; tone: "amber" | "green" | "neutral" }> = {
   draft: { label: "Draft", tone: "amber" },
@@ -625,6 +626,9 @@ function BackPay({
 /** One pay run: the per-employee breakdown, then approve or void (PRUN1-PRUN11). */
 export function PayRunView({ organisationId, payRunId }: { organisationId: string; payRunId: string }) {
   const confirm = useConfirm();
+  // With Accounting off, payroll is on its own: nothing posts and no payments are recorded (PAO3, PAO6).
+  const modules = useModules(organisationId);
+  const accountingOn = modules?.accounting !== false;
   const router = useRouter();
   const loaded = useApiData<{ payRun: PayRun }>(`/api/payroll/pay-runs/${payRunId}`, { organisationId });
   const items = useApiData<{ payItems: PayItem[] }>("/api/payroll/pay-items", { organisationId, includeArchived: "true" });
@@ -657,16 +661,20 @@ export function PayRunView({ organisationId, payRunId }: { organisationId: strin
   };
 
   const approve = async () => {
-    if (!(await confirm(`Approve ${run.reference}? This posts its journal dated ${formatDate(run.payDate)}. It can't be changed afterwards, only voided.`))) return;
+    const posts = accountingOn
+      ? `This posts its journal dated ${formatDate(run.payDate)}.`
+      : "Accounting is off, so nothing posts to the books, now or if Accounting is turned on later.";
+    if (!(await confirm(`Approve ${run.reference}? ${posts} It can't be changed afterwards, only voided.`))) return;
     void act(
       () => api(`/api/payroll/pay-runs/${run.id}/approve`, { method: "POST", body: { organisationId, idempotencyKey: newIdempotencyKey("pay-run-approve") } }),
-      `${run.reference} approved and its journal posted.`,
+      accountingOn ? `${run.reference} approved and its journal posted.` : `${run.reference} approved.`,
     );
   };
 
   const voidRun = async (event: FormEvent<HTMLFormElement>) => {
     event.preventDefault();
-    if (!(await confirm(`Void ${run.reference}? This posts a reversing journal dated ${formatDate(voidDate)}.`))) return;
+    const reverses = run.inBooks ? `This posts a reversing journal dated ${formatDate(voidDate)}.` : "It was approved without the books, so nothing posts.";
+    if (!(await confirm(`Void ${run.reference}? ${reverses}`))) return;
     void act(
       () =>
         api(`/api/payroll/pay-runs/${run.id}/void`, {
@@ -698,7 +706,11 @@ export function PayRunView({ organisationId, payRunId }: { organisationId: strin
       <Card
         title={`${run.reference} · ${run.payGroupName}`}
         description={`${PAY_FREQUENCY_LABELS[run.payFrequency]} · ${formatDate(run.periodStart)} to ${formatDate(run.periodEnd)} · paid ${formatDate(run.payDate)}`}
-        actions={<StatusBadge status={run.status} />}
+        actions={
+          <>
+            {run.status !== "draft" && !run.inBooks ? <Badge>Not in the books</Badge> : null} <StatusBadge status={run.status} />
+          </>
+        }
       >
         <div className={ui.statRow}>
           <Stat label="Gross" value={formatMoney(run.totals.gross)} />
@@ -772,7 +784,7 @@ export function PayRunView({ organisationId, payRunId }: { organisationId: strin
       {run.status === "approved" ? <PayRunPaydayFilingCard key={`${run.id}:payday-filing`} organisationId={organisationId} payRunId={run.id} /> : null}
       {run.status === "approved" ? <PayRunBankFileCard key={`${run.id}:bank-file`} organisationId={organisationId} payRunId={run.id} payDate={run.payDate} /> : null}
 
-      {run.status !== "draft" ? <PayRunWagePayments key={`${run.id}:${run.status}`} organisationId={organisationId} payRunId={run.id} /> : null}
+      {run.status !== "draft" && accountingOn ? <PayRunWagePayments key={`${run.id}:${run.status}`} organisationId={organisationId} payRunId={run.id} /> : null}
 
       {run.status === "approved" ? <PayRunPayslips key={`${run.id}:payslips`} organisationId={organisationId} payRunId={run.id} /> : null}
 
@@ -797,7 +809,11 @@ export function PayRunView({ organisationId, payRunId }: { organisationId: strin
       {run.status !== "draft" ? (
         <Card
           title="Cost allocation"
-          description="How each person's earnings and employer KiwiSaver were split by their allocation on the pay date. Only people with payroll access see this; the journal shows totals by account and tracking."
+          description={
+            run.inBooks
+              ? "How each person's earnings and employer KiwiSaver were split by their allocation on the pay date. Only people with payroll access see this; the journal shows totals by account and tracking."
+              : "How each person's earnings and employer KiwiSaver were split by their allocation on the pay date, for payroll's reports. Only people with payroll access see this."
+          }
         >
           {postings.error ? <Notice tone="error">{postings.error}</Notice> : null}
           {postings.loading ? <Empty>Loading…</Empty> : postings.data?.postings.length ? (
@@ -809,8 +825,8 @@ export function PayRunView({ organisationId, payRunId }: { organisationId: strin
                     <tr key={posting.postingNumber}>
                       <td data-label="Employee">{posting.employeeName}</td>
                       <td data-label="Pay item">{posting.payItemName}</td>
-                      <td data-label="Account">{posting.accountCode}</td>
-                      <td data-label="Journal line">{posting.journalLineOrder}</td>
+                      <td data-label="Account">{posting.accountCode ?? "–"}</td>
+                      <td data-label="Journal line">{posting.journalLineOrder ?? "–"}</td>
                       <td data-label="Share" className={ui.num}>{posting.percentage}%</td>
                       <td data-label="Amount"><Money value={posting.amount} /></td>
                     </tr>

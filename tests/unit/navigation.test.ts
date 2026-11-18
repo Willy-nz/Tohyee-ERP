@@ -436,3 +436,22 @@ describe("farm staff", () => {
     for (const path of ["/operations", "/operations/invoices", "/operations/farming/benchmarks", "/operations/farming/fertiliser", "/operations/farming/notebook", "/operations/livestock"]) expect(farmWorkAllowsPath(path)).toBe(false);
   });
 });
+
+describe("Payroll as an add-on (PAO2)", () => {
+  const can = () => true;
+  const withoutAccounting = { crm: false, reporting: false, notForProfit: false, analytics: false, gst: false, accounting: false, payroll: true };
+  const withAccounting = { ...withoutAccounting, accounting: true };
+
+  it("payroll's pages are the Payroll app while Accounting is off, and Accounting's otherwise", () => {
+    expect(appForPath("accounting", "/operations/payroll/pay-runs", withoutAccounting)).toBe("payroll");
+    expect(appForPath("accounting", "/operations/settings/payroll-access", withoutAccounting)).toBe("payroll");
+    expect(appForPath("accounting", "/operations/payroll/pay-runs", withAccounting)).toBe("accounting");
+    expect(appForPath("accounting", "/operations/invoices", withoutAccounting)).toBe("accounting");
+  });
+
+  it("the Payroll app's menus are Accounting's Payroll columns; Accounting's Payroll menu goes with the module", () => {
+    expect(visibleMenus("payroll", { can, modules: withoutAccounting }).map((menu) => menu.label)).toEqual(["Pay", "People and reports", "Settings"]);
+    expect(visibleMenus("accounting", { can, modules: withAccounting }).some((menu) => menu.label === "Payroll")).toBe(true);
+    expect(visibleMenus("accounting", { can, modules: { ...withAccounting, payroll: false } }).some((menu) => menu.label === "Payroll")).toBe(false);
+  });
+});

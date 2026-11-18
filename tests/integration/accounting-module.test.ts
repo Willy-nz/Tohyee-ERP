@@ -49,7 +49,7 @@ describeWithDatabase("turning Accounting off (MOD2-MOD7)", () => {
   it("MOD2-MOD4: modules are chosen when an organisation is created; at least one app is needed", async () => {
     const none = await create("koru-none", "Koru None", { accounting: false, crm: false, analytics: false });
     expect(none.status).toBe(400);
-    expect(((await none.json()) as { error: string }).error).toBe("Keep at least one of Accounting, CRM or Analytics on.");
+    expect(((await none.json()) as { error: string }).error).toBe("Keep at least one of Accounting, Payroll, CRM or Analytics on.");
 
     expect((await create("koru-leads", "Koru Leads", { accounting: false, crm: true })).status).toBe(201);
     expect(await as("koru-leads", (tx) => getOrganisationSettings(tx))).toMatchObject({ accountingEnabled: false, crmEnabled: true, analyticsEnabled: false });
@@ -83,19 +83,19 @@ describeWithDatabase("turning Accounting off (MOD2-MOD7)", () => {
 
   it("MOD5: the last app can't be turned off; Advanced reporting and Not-for-profit need Accounting and go off with it", async () => {
     await expect(as("koru-numbers", (tx) => updateOrganisationSettings(tx, { analyticsEnabled: false }))).rejects.toThrow(
-      "Keep at least one of Accounting, CRM or Analytics on.",
+      "Keep at least one of Accounting, Payroll, CRM or Analytics on.",
     );
     await expect(as("koru-numbers", (tx) => updateOrganisationSettings(tx, { advancedFeatures: true }))).rejects.toThrow(
       "Advanced reporting and Not-for-profit need Accounting. Turn Accounting on first.",
     );
     await as("koru-books", (tx) => updateOrganisationSettings(tx, { advancedFeatures: true, notForProfitEnabled: true, crmEnabled: true }));
-    await expect(as("koru-books", (tx) => updateOrganisationSettings(tx, { accountingEnabled: false, crmEnabled: false }))).rejects.toThrow(
-      "Keep at least one of Accounting, CRM or Analytics on.",
+    await expect(as("koru-books", (tx) => updateOrganisationSettings(tx, { accountingEnabled: false, crmEnabled: false, payrollEnabled: false }))).rejects.toThrow(
+      "Keep at least one of Accounting, Payroll, CRM or Analytics on.",
     );
     const off = await as("koru-books", (tx) => updateOrganisationSettings(tx, { accountingEnabled: false }));
     expect(off).toMatchObject({ accountingEnabled: false, advancedFeatures: false, notForProfitEnabled: false, crmEnabled: true });
     // The database refuses it too.
-    await expect(as("koru-books", (tx) => tx.query("update organisation_settings set crm_enabled = false where id = true"))).rejects.toThrow(
+    await expect(as("koru-books", (tx) => tx.query("update organisation_settings set crm_enabled = false, payroll_enabled = false where id = true"))).rejects.toThrow(
       /organisation_settings_one_app_on/,
     );
   });

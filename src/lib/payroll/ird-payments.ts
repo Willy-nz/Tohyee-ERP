@@ -10,6 +10,7 @@ import { type ControlAccount, controlAccountCode } from "@/lib/invoices/service"
 import { getJournal, parseJournalBody, postJournalBody } from "@/lib/ledger/journals";
 import { assertPostingDateAllowed } from "@/lib/ledger/period-controls";
 import { add, cmp, dec, type Decimal, isZero, parseDecimalInput, sub, toFixedString, ZERO_DECIMAL } from "@/lib/money/decimal";
+import { requireAccounting } from "@/lib/organisations/accounting-switch";
 import { requirePayrollAccess } from "@/lib/payroll/access";
 import { type IrdPaymentFrequency, type IrdPeriod, irdPeriodFromStart, irdPeriodsBetween } from "@/lib/payroll/ird-due-dates";
 import { ESCT_ACCOUNT, KIWISAVER_ACCOUNT, PAYE_ACCOUNT, payRunReference, STUDENT_LOAN_ACCOUNT } from "@/lib/payroll/pay-runs";
@@ -274,6 +275,8 @@ export async function recordIrdPayment(
   command: { source?: unknown; idempotencyKey: unknown; periodStart: unknown; paymentDate: unknown; bankAccountCode: unknown; lines: unknown },
 ): Promise<PaymentResult> {
   await requirePayrollAccess(tx);
+  // Paying and posting are the books' part (PAO6): with Accounting off, payroll makes the files but records no payments.
+  await requireAccounting(tx);
   const source = optionalSource(command.source);
   const idempotencyKey = requireIdempotencyKey(command.idempotencyKey);
   const replayHashInput = { periodStart: command.periodStart, paymentDate: command.paymentDate, bankAccountCode: command.bankAccountCode, lines: command.lines };
@@ -415,6 +418,8 @@ export async function voidIrdPayment(
   command: { source?: unknown; idempotencyKey: unknown; voidDate: unknown },
 ): Promise<PaymentResult> {
   await requirePayrollAccess(tx);
+  // Paying and posting are the books' part (PAO6): with Accounting off, payroll makes the files but records no payments.
+  await requireAccounting(tx);
   if (typeof paymentIdInput !== "string" || !UUID_PATTERN.test(paymentIdInput)) throw new NotFoundError("That IRD payment wasn't found.");
   const paymentId = paymentIdInput;
   const source = optionalSource(command.source);

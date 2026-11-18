@@ -746,11 +746,11 @@ function AccountingOff() {
 function Shell({ app: layoutApp, children, warnings }: { app: AppKey; children: ReactNode; warnings: string[] }) {
   const router = useRouter();
   const pathname = usePathname();
-  // Farm pages live under /operations but are the Farm app, with its own top bar.
-  const app = appForPath(layoutApp, pathname);
   const { can, current, user, organisations } = useWorkspace();
   const confirm = useConfirm();
   const modules = useModules(current?.id ?? null);
+  // Farm pages live under /operations but are the Farm app, with its own top bar; so are Payroll's while Accounting is off.
+  const app = appForPath(layoutApp, pathname, modules);
   const reportViewer = current?.role === "report_viewer";
   const owner = current?.role === "owner";
   // Sales reps and managers have the CRM and their own profile only.
@@ -790,6 +790,7 @@ function Shell({ app: layoutApp, children, warnings }: { app: AppKey; children: 
         ...destinations(farmMenus, []).map((item) => ({ ...item, group: item.group === item.label ? "Farm" : `Farm › ${item.group}` })),
         ...(app !== "accounting" && !reportViewer && !farmWorker && modules?.accounting !== false ? [{ href: "/operations", label: "Accounting", group: "Apps" }] : []),
         ...(app !== "farm" && !reportViewer && modules?.farming && modules.accounting !== false ? [{ href: "/operations/farm", label: "Farm", group: "Apps" }] : []),
+        ...(app !== "payroll" && !reportViewer && !farmWorker && modules?.accounting === false && modules.payroll === true ? [{ href: "/operations/payroll/pay-runs", label: "Payroll", group: "Apps" }] : []),
         ...(app !== "crm" && modules?.crm ? [{ href: "/crm", label: "CRM", group: "Apps" }] : []),
         ...(app !== "analytics" && modules?.analytics ? [{ href: "/analytics", label: "Analytics", group: "Apps" }] : []),
       ]),
@@ -809,9 +810,9 @@ function Shell({ app: layoutApp, children, warnings }: { app: AppKey; children: 
   }, [farmAway, router]);
   // MOD2: with Accounting off, its home goes to the app that's on, and its other pages say it's off.
   const accountingOff = layoutApp === "accounting" && !reportViewer && modules?.accounting === false;
-  const accountingPageOff = accountingOff && !ACCOUNTING_OFF_PAGES.some((path) => pathname === path || pathname.startsWith(`${path}/`));
+  const accountingPageOff = accountingOff && app !== "payroll" && !ACCOUNTING_OFF_PAGES.some((path) => pathname === path || pathname.startsWith(`${path}/`));
   useEffect(() => {
-    if (accountingOff && pathname === "/operations") router.replace(modules?.crm ? "/crm" : "/analytics");
+    if (accountingOff && pathname === "/operations") router.replace(modules?.crm ? "/crm" : modules?.payroll === true ? "/operations/payroll/pay-runs" : "/analytics");
   }, [accountingOff, pathname, modules, router]);
   const page = useRef<HTMLDivElement>(null);
   usePageEntrance(page, pathname, app === "farm");
@@ -849,7 +850,7 @@ function Shell({ app: layoutApp, children, warnings }: { app: AppKey; children: 
       </a>
       <header className={styles.topbar} data-print="hide">
         <div className={styles.topRow}>
-          <Link href={app === "crm" ? "/crm" : app === "analytics" ? "/analytics" : app === "farm" || farmWorker ? "/operations/farm" : "/operations"} className={styles.brand} aria-label="Tohyee home">
+          <Link href={app === "crm" ? "/crm" : app === "analytics" ? "/analytics" : app === "payroll" ? "/operations/payroll/pay-runs" : app === "farm" || farmWorker ? "/operations/farm" : "/operations"} className={styles.brand} aria-label="Tohyee home">
             <BrandMark size={26} className={styles.brandMark} />
             <span className={styles.brandText}>Tohyee</span>
           </Link>

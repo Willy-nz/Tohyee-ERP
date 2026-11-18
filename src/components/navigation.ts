@@ -1,9 +1,10 @@
+import type { AppKey } from "@/components/app-switcher";
 import type { Modules } from "@/components/modules";
 import type { Role } from "@/lib/auth/roles";
 import type { IllustratedIconName } from "@/components/illustrated-icon";
 
 /** An optional module a menu or link belongs to (example MOD1); shown only while it's on. Accounting counts as on unless it's been turned off (MOD2). */
-export type ModuleKey = "accounting" | "crm" | "reporting" | "notForProfit" | "analytics" | "gst" | "livestock" | "farming";
+export type ModuleKey = "accounting" | "payroll" | "crm" | "reporting" | "notForProfit" | "analytics" | "gst" | "livestock" | "farming";
 /** `section`: the sub-heading the link sits under inside its column; links of a section are kept together. */
 export type MenuLink = { href: string; label: string; minRole?: Role; module?: ModuleKey; section?: string };
 export type MenuGroup = { heading: string; links: MenuLink[] };
@@ -134,6 +135,7 @@ export const MENUS: Menu[] = [
   },
   {
     label: "Payroll",
+    module: "payroll",
     groups: [
       {
         heading: "Pay",
@@ -655,9 +657,18 @@ export const FARM_MENUS: Menu[] = [
 ];
 
 /** Which app's top bar a page shows: farm pages are in the Farm app, though they live under /operations. */
-export function appForPath(app: "accounting" | "farm" | "crm" | "analytics", pathname: string): "accounting" | "farm" | "crm" | "analytics" {
+export function appForPath(app: AppKey, pathname: string, modules: Modules | null = null): AppKey {
   if (app !== "accounting") return app;
+  // Payroll's pages are the Payroll app while Accounting is off (PAO2).
+  if (modules?.accounting === false && modules.payroll === true && isPayrollPath(pathname)) return "payroll";
   return ["/operations/farm", "/operations/farming"].some((path) => pathname === path || pathname.startsWith(`${path}/`)) ? "farm" : app;
+}
+
+/** Payroll's pages, with its two settings pages. */
+export const PAYROLL_PATHS = ["/operations/payroll", "/operations/settings/bank-files", "/operations/settings/payroll-access"];
+
+export function isPayrollPath(pathname: string): boolean {
+  return PAYROLL_PATHS.some((path) => pathname === path || pathname.startsWith(`${path}/`));
 }
 
 /** Where farm staff may go; anywhere else in Accounting sends them to the first. */
@@ -671,6 +682,8 @@ export function farmWorkAllowsPath(pathname: string): boolean {
 function moduleOn(module: ModuleKey | undefined, modules: Modules | null): boolean {
   if (!module) return true;
   if (module === "accounting") return modules !== null && modules.accounting !== false;
+  // Left out means on, as it always was in Accounting (PAO1).
+  if (module === "payroll") return modules !== null && modules.payroll !== false;
   return Boolean(modules?.[module]);
 }
 
@@ -690,7 +703,15 @@ function farmWorkLink(href: string): boolean {
 }
 
 /** The menus someone may see in an app: their role and the organisation's modules decide. */
-export function visibleMenus(app: "accounting" | "farm" | "crm" | "analytics", access: Access): Menu[] {
+export function visibleMenus(app: AppKey, access: Access): Menu[] {
+  // The Payroll app (PAO2): Accounting's Payroll menu, its columns as menus of their own.
+  if (app === "payroll") {
+    if (access.modules?.payroll === false || access.farmWorker) return [];
+    const payroll = MENUS.find((menu) => menu.label === "Payroll");
+    return (payroll?.groups ?? [])
+      .map((group) => ({ label: group.heading, groups: filterGroups([group], access) }))
+      .filter((menu) => menu.groups.length > 0);
+  }
   // MOD2: no Accounting menus while it's off; Farm needs Accounting.
   if ((app === "accounting" || app === "farm") && access.modules?.accounting === false) return [];
   if (access.farmWorker) {

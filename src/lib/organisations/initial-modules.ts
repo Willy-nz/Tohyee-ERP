@@ -13,13 +13,13 @@ import { updateOrganisationSettings } from "@/lib/organisations/settings";
  * out, it stays Tohyee's unconfirmed starting guess (NR8: registered).
  */
 export type GstChoice = boolean | "unsure";
-export type InitialModules = { accounting: boolean; gstRegistered: GstChoice | null; crm: boolean; analytics: boolean };
+export type InitialModules = { accounting: boolean; gstRegistered: GstChoice | null; crm: boolean; analytics: boolean; payroll: boolean };
 
 export function parseInitialModules(input: unknown): InitialModules | null {
   if (input === undefined || input === null) return null;
   if (typeof input !== "object" || Array.isArray(input)) throw new ValidationError("modules must be an object.");
   const record = input as Record<string, unknown>;
-  const flag = (name: "accounting" | "crm" | "analytics", fallback: boolean) => {
+  const flag = (name: "accounting" | "crm" | "analytics" | "payroll", fallback: boolean) => {
     const value = record[name];
     if (value === undefined) return fallback;
     if (typeof value !== "boolean") throw new ValidationError(`modules.${name} must be true or false.`);
@@ -29,8 +29,10 @@ export function parseInitialModules(input: unknown): InitialModules | null {
   if (gst !== undefined && gst !== null && typeof gst !== "boolean" && gst !== "unsure") {
     throw new ValidationError('modules.gstRegistered must be true, false or "unsure".');
   }
-  const modules = { accounting: flag("accounting", true), gstRegistered: (gst ?? null) as GstChoice | null, crm: flag("crm", false), analytics: flag("analytics", false) };
-  if (!modules.accounting && !modules.crm && !modules.analytics) throw new ValidationError("Keep at least one of Accounting, CRM or Analytics on.");
+  const accounting = flag("accounting", true);
+  // Payroll starts on with Accounting, as it always has, and can be chosen on its own (PAO1).
+  const modules = { accounting, gstRegistered: (gst ?? null) as GstChoice | null, crm: flag("crm", false), analytics: flag("analytics", false), payroll: flag("payroll", accounting) };
+  if (!modules.accounting && !modules.crm && !modules.analytics && !modules.payroll) throw new ValidationError("Keep at least one of Accounting, Payroll, CRM or Analytics on.");
   return modules;
 }
 
@@ -48,6 +50,7 @@ export async function applyInitialModules(organisation: OrganisationRecord, modu
       // CRM and Analytics first, so Accounting can go off in the same change (MOD5).
       crmEnabled: modules.crm,
       analyticsEnabled: modules.analytics,
+      payrollEnabled: modules.payroll,
       accountingEnabled: modules.accounting,
       // A new organisation has no GST number yet and starts registered, so "registered" is a confirmation alone (NR8, GSR1).
       ...gstChoiceSettings(modules.gstRegistered),

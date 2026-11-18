@@ -27,6 +27,7 @@ export async function getPayRun(tx: OrgTx, idInput: unknown): Promise<PayRun> {
     ...toSummary(run),
     approvalJournalId: run.approval_journal_id,
     voidJournalId: run.void_journal_id,
+    inBooks: run.in_books,
     preparedByMe: tx.actor.userId !== null && run.prepared_by_user_ids.includes(tx.actor.userId),
     approverMustDiffer: await approverMustDiffer(tx),
     employees: calculated.map((entry) => ({

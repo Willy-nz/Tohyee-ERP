@@ -19533,6 +19533,52 @@ books. The sales are made up: Otago 2 at 10.00 on 5 March and 1 at 0.20 on
   refused, "That source is already loading.", and nothing starts. The
   source's settings are unchanged.
 
+## Payroll as an add-on (PAO1-PAO9; 18 Nov 2026; following common practice, not yet reviewed)
+
+Tested in `tests/integration/payroll-add-on.test.ts`,
+`tests/integration/accounting-module.test.ts`, `tests/unit/navigation.test.ts`
+and `tests/unit/app-switcher.test.ts`. A made-up organisation pays Mere
+Tipene $52,000 a year, fortnightly, KiwiSaver 3.5% and 3.5%, ESCT 17.5%.
+
+- **PAO1 A module of its own.** Payroll has its own switch under Modules.
+  It counts as an app that's on: with Accounting, CRM and Analytics off,
+  Payroll on is enough; with all four off, the change is refused ("Keep at
+  least one of Accounting, Payroll, CRM or Analytics on."). With Payroll
+  off, every payroll action is refused ("Payroll is off for this
+  organisation.") and its records are kept. Existing organisations keep
+  what they had: Payroll on where Accounting is on.
+- **PAO2 Where it shows.** With Accounting on, payroll is Accounting's
+  Payroll menu, as before. With Accounting off and Payroll on, it's its own
+  app in the app switcher, with Pay, People and reports, and Settings menus
+  (bank file settings and payroll access included).
+- **PAO3 A pay run without the books.** With Accounting off, the pay run
+  for 28 Sep to 11 Oct 2026, paid 14 Oct, works out as always: gross
+  **$2,000.00**, PAYE, KiwiSaver employee **$70.00**, employer KiwiSaver and
+  ESCT. Approving it posts no journal and doesn't check the lock date. It's
+  marked **Not in the books**. Its payslips and payday filing details are
+  there as usual.
+- **PAO4 Turning Accounting on later.** Pay runs approved while it was off
+  stay history: they never post. What was owing when the books start
+  (wages, PAYE, KiwiSaver) comes in through the opening balances, the usual
+  way to start a set of books. Pay runs approved after it's on post as
+  always.
+- **PAO5 Voiding.** A pay run approved without the books voids without a
+  journal, whether Accounting is on or off by then. One in the books needs
+  Accounting on, because voiding reverses its journal.
+- **PAO6 No paid status.** With Accounting off there's no bank feed to show
+  wages or IRD were paid, so neither is recorded: recording a wage or IRD
+  payment, or a leave liability posting, is refused ("Accounting is off").
+  IRD payments shows what each period's pay runs make due and when.
+- **PAO7 Costs kept for reports.** Without the books, a pay item needs no
+  account. Each employee's costs are still kept by pay item, department,
+  project and R&D activity, with the item's account if it has one, so the
+  labour cost, summary, earnings, headcount and IRD reports work.
+- **PAO8 Reconciliation needs the books.** The reconciliation to the
+  ledger is refused while Accounting is off and isn't offered in Payroll ›
+  Reports. With it on, it leaves out pay runs approved without the books.
+- **PAO9 New organisations.** Payroll starts on with Accounting, and can be
+  chosen on its own when an organisation is created.
+
 ## Report pictures and dark cards (PIC1-PIC6, PBG1, DTX1; issue #9, 18 Nov 2026; following common practice, not yet reviewed)
 
 Tested in `tests/integration/ai-analytics-dashboards.test.ts` and

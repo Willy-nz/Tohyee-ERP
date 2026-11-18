@@ -1,5 +1,7 @@
 "use client";
 
+import { useModules } from "@/components/modules";
+
 import { DateInput } from "@/components/date-input";
 import Link from "next/link";
 import { Fragment, useState } from "react";
@@ -536,6 +538,9 @@ function Ird({ data }: { data: IrdDeductionsReport }) {
 
 export function PayrollReports({ organisationId }: { organisationId: string }) {
   const today = todayInBrowser();
+  // The reconciliation compares payroll with the books, so it's there only while Accounting is on (PAO8).
+  const accountingOn = useModules(organisationId)?.accounting !== false;
+  const reports = PAYROLL_REPORTS.filter((entry) => accountingOn || entry !== "reconciliation");
   const [name, setName] = useState<PayrollReportName>("labour-cost");
   const [from, setFrom] = useState(() => monthStart(today));
   const [to, setTo] = useState(() => monthEnd(today));
@@ -581,7 +586,7 @@ export function PayrollReports({ organisationId }: { organisationId: string }) {
   return (
     <>
       <div className={ui.tabs} role="tablist" aria-label="Payroll reports" data-print="hide">
-        {PAYROLL_REPORTS.map((entry) => (
+        {reports.map((entry) => (
           <button
             key={entry}
             type="button"

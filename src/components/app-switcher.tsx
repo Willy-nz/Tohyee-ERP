@@ -5,11 +5,12 @@ import { IllustratedIcon } from "@/components/illustrated-icon";
 import type { Modules } from "@/components/modules";
 import styles from "./app-shell.module.css";
 
-/** Tohyee's apps, each with its own top bar: Accounting (with Tax), Farm, the CRM and Analytics. */
-export type AppKey = "accounting" | "farm" | "crm" | "analytics";
+/** Tohyee's apps, each with its own top bar: Accounting (with Tax), Payroll (only while Accounting is off), Farm, the CRM and Analytics. */
+export type AppKey = "accounting" | "payroll" | "farm" | "crm" | "analytics";
 
 const APPS: Array<{ key: AppKey; label: string; href: string }> = [
   { key: "accounting", label: "Accounting", href: "/operations" },
+  { key: "payroll", label: "Payroll", href: "/operations/payroll/pay-runs" },
   { key: "farm", label: "Farm", href: "/operations/farm" },
   { key: "crm", label: "CRM", href: "/crm" },
   { key: "analytics", label: "Analytics", href: "/analytics" },
@@ -28,6 +29,8 @@ export function availableApps(modules: Modules | null, reportViewer = false, far
   return APPS.filter(
     (app) =>
       (app.key !== "accounting" || modules?.accounting !== false) &&
+      // Payroll is in Accounting's menus while Accounting is on, its own app while it's off (PAO2).
+      (app.key !== "payroll" || (modules?.accounting === false && modules.payroll === true)) &&
       (app.key !== "farm" || (modules?.farming === true && modules.accounting !== false)) &&
       (app.key !== "crm" || modules?.crm === true) &&
       (app.key !== "analytics" || modules?.analytics === true),
