@@ -4,7 +4,7 @@
     {
       "date": "2026-11-18",
       "title": "Tohyee 0.38.0: Payroll on its own, and employees from a file",
-      "body": "Payroll can now run without Accounting, as its own app. Bring employees in from an HR system's export or a spreadsheet. Also: Analytics fits phones, cover photos fill the page, the AI can manage report pictures, and the PowerPoint add-in shows one page per slide.",
+      "body": "Payroll can now run without Accounting, as its own app. Bring employees in from an HR system's export or a spreadsheet. Also: report cards with a picture of each report, Shopify orders older than 60 days, Analytics on phones, report pictures for the AI, and the PowerPoint add-in shows one page per slide.",
       "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.38.0"
     },
     {
