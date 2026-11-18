@@ -40,6 +40,7 @@ const draft = (overrides: Partial<PostingDraft> = {}): PostingDraft => ({
   shippingAccountCode: "",
   clearingAccountCode: "1010",
   payoutAccountCode: "1000",
+  payoutBankWords: "",
   feesAccountCode: "6020",
   chargebacksAccountCode: "",
   reserveAccountCode: "",

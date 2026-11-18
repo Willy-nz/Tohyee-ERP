@@ -4,6 +4,7 @@
  * counts taken from the connection's mappings, documents and sync log. Pure,
  * shared with the browser. Nothing here guesses a count it wasn't given.
  */
+import { ALL_ORDERS_SCOPE } from "@/lib/sales-platforms/order-history";
 import { ORDER_SCOPE, PAYOUT_SCOPES, type SalesPlatformConnection, type SyncLogAction, type SyncRecordKind } from "@/lib/sales-platforms/types";
 
 export const COVERAGE_KINDS = ["customers", "products", "orders", "payouts"] as const;
@@ -155,6 +156,15 @@ export function coverageFor(kind: CoverageKind, connection: SalesPlatformConnect
       ? `${count(facts.postedOrders, "order")}${facts.postedRefunds ? ` and ${count(facts.postedRefunds, "refund")}` : ""} posted since ${connection.startDate}`
       : `${count(facts.postedPayouts, "payout")} posted since ${connection.startDate}`;
   if (!connection.lastSyncAt) return { ...base, state: "not_synced", summary: "Not synced yet", reasons: [], action: null };
+  // SPC47: orders before Shopify's 60 days were never read, so nothing about them is in the log.
+  if (kind === "orders" && connection.olderOrders) {
+    return {
+      ...base,
+      state: "partly",
+      summary: `${posted}; orders from ${connection.olderOrders.from} to ${connection.olderOrders.to} weren't read: Shopify needs ${ALL_ORDERS_SCOPE}`,
+      action: { kind: "scopes", text: "Which scopes" },
+    };
+  }
   if (problems.length === 0) {
     return connection.lastError
       ? { ...base, state: "failed", summary: `${posted}; the last sync failed`, action: null }

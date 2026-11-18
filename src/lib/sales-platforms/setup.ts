@@ -194,6 +194,8 @@ export type PostingDraft = {
   shippingAccountCode: string;
   clearingAccountCode: string;
   payoutAccountCode: string;
+  /** SPC50: words on a payout's bank line besides "Shopify", comma separated as typed. */
+  payoutBankWords: string;
   feesAccountCode: string;
   chargebacksAccountCode: string;
   reserveAccountCode: string;
@@ -297,6 +299,14 @@ export function stepGaps(
   return gaps;
 }
 
+/** SPC50: "Glimmers Ltd, GLIMMERS" -> ["Glimmers Ltd", "GLIMMERS"]; blanks dropped. */
+export function bankWordsList(text: string): string[] {
+  return text
+    .split(",")
+    .map((word) => word.trim().replace(/\s+/g, " "))
+    .filter((word) => word.length > 0);
+}
+
 /** The body the final step sends (PATCH on the connection). Posting is on only when the person chose it. */
 export function draftToSettings(draft: PostingDraft, platform: SalesPlatform, turnOn: boolean): Record<string, unknown> {
   const or = (value: string) => value || null;
@@ -324,6 +334,7 @@ export function draftToSettings(draft: PostingDraft, platform: SalesPlatform, tu
             })),
           clearingAccountCode: or(draft.clearingAccountCode),
           payoutAccountCode: or(draft.payoutAccountCode),
+          payoutBankWords: bankWordsList(draft.payoutBankWords),
           feesAccountCode: or(draft.feesAccountCode),
           chargebacksAccountCode: or(draft.chargebacksAccountCode),
           reserveAccountCode: or(draft.reserveAccountCode),

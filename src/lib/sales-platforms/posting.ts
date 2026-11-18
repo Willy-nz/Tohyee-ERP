@@ -8,7 +8,7 @@ import { HttpError } from "@/lib/errors";
 import type { AmountsMode } from "@/lib/invoices/amounts";
 import { recordPayment } from "@/lib/invoices/payments";
 import { approveInvoice, getInvoice, voidInvoice } from "@/lib/invoices/service";
-import { cmp, dec, type Decimal, isPositive, sub } from "@/lib/money/decimal";
+import { cmp, dec, type Decimal, isPositive, isZero, sub } from "@/lib/money/decimal";
 import { getOrganisationSettings } from "@/lib/organisations/settings";
 import { approveSalesOrder, cancelSalesOrder, createSalesOrder, invoiceSalesOrder } from "@/lib/sales-orders/service";
 import type { PlatformCustomer, PlatformOrder, PlatformPayout } from "@/lib/sales-platforms/connector";
@@ -498,6 +498,17 @@ export async function postOrder(tx: OrgTx, context: PostingContext, order: Platf
         recordKind: kind,
         externalId: id,
         message: `${order.name} was cancelled in ${shop} before it was paid or brought in, so there's nothing to post.`,
+      });
+      return;
+    }
+    // SPC49: a free order (a giveaway, a remake) charges nothing, so there's no sales order or invoice to make.
+    if (isZero(dec(order.total)) && order.refunds.length === 0) {
+      await settle();
+      await log(tx, context, {
+        action: "skipped",
+        recordKind: kind,
+        externalId: id,
+        message: `${order.name} comes to 0.00 ${order.currency}, so there's nothing to post. It's brought in if ${shop} later adds a charge to it.`,
       });
       return;
     }

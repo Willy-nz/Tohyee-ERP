@@ -82,7 +82,7 @@ describe("Shopify and WooCommerce orders (GSR3, GSR6)", () => {
 });
 
 const taxCodes = NZ_DEFAULT_TAX_CODES.map((code) => ({ ...code, isActive: true, availableOn: "both" }));
-const draft = { startDate: "2026-10-01", salesAccountCode: "4000", separateShipping: false, shippingAccountCode: "", clearingAccountCode: "1010", payoutAccountCode: "1000", feesAccountCode: "6020", chargebacksAccountCode: "", reserveAccountCode: "", untaxedTaxCode: "", guestContactId: "", taxCodes: [], paymentMethods: [] } as PostingDraft;
+const draft = { startDate: "2026-10-01", salesAccountCode: "4000", separateShipping: false, shippingAccountCode: "", clearingAccountCode: "1010", payoutAccountCode: "1000", payoutBankWords: "", feesAccountCode: "6020", chargebacksAccountCode: "", reserveAccountCode: "", untaxedTaxCode: "", guestContactId: "", taxCodes: [], paymentMethods: [] } as PostingDraft;
 
 describe("the guided store setup (GSR3, GSR6, GSR7)", () => {
   it("asks GST questions and suggests 15% → GST only for a confirmed registration from the start date on", () => {

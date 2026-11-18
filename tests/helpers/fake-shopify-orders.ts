@@ -463,6 +463,11 @@ export type StoreState = {
   notPermitted: boolean;
   /** Every call, in order ("token", "shop", "orders", "order:5001", "refund:6001", "payouts", "balance:70001"...). */
   calls: string[];
+  /**
+   * The store's clock (SPC47): when set, an app without read_all_orders
+   * gets only orders processed in the 60 days before it, as Shopify does.
+   */
+  now?: string;
 };
 
 export function storeState(overrides: Partial<StoreState> = {}): StoreState {
@@ -579,17 +584,20 @@ export function fakeShopifyStore(state: StoreState) {
         },
       });
     }
+    // SPC47: Shopify's 60 days of orders without read_all_orders.
+    const readable = (o: OrderFixture) =>
+      !state.now || state.scopes.includes("read_all_orders") || Date.parse(o.processedAt) >= Date.parse(state.now) - 60 * 86_400_000;
     if (query.includes("orders(first")) {
       state.calls.push("orders");
       const processed = after("processed_at");
-      const rows = recent(state.orders).filter((o) => !processed || Date.parse(o.processedAt) >= Date.parse(processed));
+      const rows = recent(state.orders).filter((o) => readable(o) && (!processed || Date.parse(o.processedAt) >= Date.parse(processed)));
       const result = page(rows);
       return json({ data: { orders: { nodes: result.nodes.map((o) => ({ id: gid("Order", o.id), updatedAt: o.updatedAt })), pageInfo: result.pageInfo } } });
     }
     if (query.includes("order(id: $id)")) {
       const id = numeric(variables.id);
       state.calls.push(`order:${id}`);
-      const found = state.orders.find((o) => o.id === id);
+      const found = state.orders.find((o) => o.id === id && readable(o));
       return json({ data: { order: found ? orderNode(found) : null } });
     }
     if (query.includes("refund(id: $id)")) {

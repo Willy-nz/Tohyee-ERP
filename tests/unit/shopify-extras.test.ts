@@ -32,7 +32,7 @@ import {
 describe("Shopify parts and scopes", () => {
   it("lists every scope once, in one comma-separated line, with no write scopes", () => {
     expect(SHOPIFY_SCOPES_LINE).toBe(
-      "read_customers,read_products,read_orders,read_shopify_payments_payouts,read_shopify_payments_accounts,read_inventory,read_locations,read_reports,read_discounts,read_gift_cards,read_gift_card_transactions,read_merchant_managed_fulfillment_orders",
+      "read_customers,read_products,read_orders,read_all_orders,read_shopify_payments_payouts,read_shopify_payments_accounts,read_inventory,read_locations,read_reports,read_discounts,read_gift_cards,read_gift_card_transactions,read_merchant_managed_fulfillment_orders",
     );
     expect(SHOPIFY_ALL_SCOPES.every((scope) => scope.startsWith("read_"))).toBe(true);
     expect(new Set(SHOPIFY_ALL_SCOPES).size).toBe(SHOPIFY_ALL_SCOPES.length);

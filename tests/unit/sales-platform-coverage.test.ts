@@ -50,6 +50,9 @@ const connection = (overrides: Partial<SalesPlatformConnection> = {}): SalesPlat
   untaxedTaxCode: null,
   taxCodes: [],
   grantedScopes: ["read_customers", "read_products", "read_orders", "read_shopify_payments_payouts", "read_shopify_payments_accounts"],
+  ordersReadFrom: null,
+  olderOrders: null,
+  payoutBankWords: [],
   ...overrides,
 });
 

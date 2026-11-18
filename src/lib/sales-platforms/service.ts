@@ -63,6 +63,7 @@ import {
   type SyncResult,
 } from "@/lib/sales-platforms/types";
 import { decryptSecret, encryptSecret, secretsAvailable } from "@/lib/secrets";
+import { needsFullRead, olderOrdersGap, readableFrom } from "@/lib/sales-platforms/order-history";
 import { asRecord, optionalBoolean, optionalString, requireArray, requireId, requireOneOf, requireString } from "@/lib/validation";
 
 /**
@@ -133,6 +134,8 @@ type ConnectionRow = {
   untaxed_tax_code_id: string | null;
   granted_scopes: string[];
   orders_synced_until: string | null;
+  orders_read_from: string | null;
+  payout_bank_words: string[];
   payouts_synced_until: string | null;
   extras_synced_at: string | null;
   stats_synced_at: string | null;
@@ -162,7 +165,7 @@ const COLUMNS =
   "sync_products, status, customers_synced_until, products_synced_until, last_sync_at, last_successful_sync_at, last_error, failures, connected_by_email, " +
   "connected_at, disconnected_by_email, disconnected_at, post_to_accounts, stock_items, start_date, clearing_account_id, payout_account_id, " +
   "fees_account_id, sales_account_id, shipping_account_id, chargebacks_account_id, reserve_account_id, sales_when_sent_account_id, gift_card_account_id, untaxed_tax_code_id, granted_scopes, " +
-  "orders_synced_until, payouts_synced_until, extras_synced_at, stats_synced_at, customer_scope, " +
+  "orders_synced_until, orders_read_from::text, payout_bank_words, payouts_synced_until, extras_synced_at, stats_synced_at, customer_scope, " +
   "(select count(*)::int from sales_platform_mappings v where v.connection_id = sales_platform_connections.id and v.record_kind = 'product_variant') as variants_linked, " +
   "(select count(*)::int from sales_platform_mappings v where v.connection_id = sales_platform_connections.id and v.record_kind = 'product_variant'" +
   " and coalesce(v.synced_values->>'sku', '') = '') as variants_without_sku, " +
@@ -232,8 +235,14 @@ function toConnection(row: ConnectionRow): SalesPlatformConnection {
     giftCardItemSuggestions: row.gift_card_item_suggestions,
     taxCodes: row.tax_codes.map((entry) => ({ rate: toPlainString(mul(dec(entry.rate), dec("100"))), taxCode: entry.taxCode })),
     grantedScopes: [...row.granted_scopes].sort(),
+    ordersReadFrom: row.orders_read_from,
+    olderOrders: olderOrdersGap(historyOf(row)),
+    payoutBankWords: row.payout_bank_words,
   };
 }
+
+/** What order-history.ts needs of a connection. */
+const historyOf = (row: ConnectionRow) => ({ platform: row.platform, startDate: row.start_date, grantedScopes: row.granted_scopes, ordersReadFrom: row.orders_read_from });
 
 function connectorFor(platform: string): SalesPlatformConnector {
   const connector = CONNECTORS[platform as SalesPlatform];
@@ -770,6 +779,19 @@ async function chooseTaxCode(tx: OrgTx, input: unknown, field: string): Promise<
   return row;
 }
 
+/** SPC50: up to 5 words or phrases, each 3-60 characters, kept as typed (matched ignoring case). */
+function parsePayoutBankWords(input: unknown): string[] {
+  const list = requireArray(input, "payoutBankWords");
+  if (list.length > 5) throw new ValidationError("Give at most 5 words or phrases that mean a payout.");
+  const words: string[] = [];
+  for (const entry of list) {
+    const word = requireString(entry, "payoutBankWords").trim().replace(/\s+/g, " ");
+    if (word.length < 3 || word.length > 60) throw new ValidationError("Each word or phrase that means a payout must be 3 to 60 characters.");
+    if (!words.some((seen) => seen.toLowerCase() === word.toLowerCase())) words.push(word);
+  }
+  return words;
+}
+
 /** Shopify's rate typed as a percentage ("15") -> the fraction stored ("0.15"). */
 function parsePercent(input: unknown, field: string): string {
   const percent = dec(parseDecimalInput(input, field, { maxScale: 4 }));
@@ -794,6 +816,7 @@ export async function updateConnectionSettings(tx: OrgTx, connectionIdInput: unk
   // SSD1: a made-to-order shop says no, and its products come in as non-stock even when Shopify tracks them.
   const stockItems = optionalBoolean(body.stockItems, "stockItems") ?? row.stock_items;
   const startDate = body.startDate === undefined ? row.start_date : parseOptionalIsoDate(body.startDate, "startDate");
+  const payoutBankWords = body.payoutBankWords === undefined ? row.payout_bank_words : parsePayoutBankWords(body.payoutBankWords);
   const shop = label(row.platform);
   const changes: string[] = [];
 
@@ -1023,6 +1046,11 @@ export async function updateConnectionSettings(tx: OrgTx, connectionIdInput: unk
     await tx.query("update sales_platform_connections set stock_items = $2 where id = $1", [row.id, stockItems]);
   }
   if (startDate !== row.start_date) changes.push(`start date: ${startDate ?? "none"}`);
+  if (payoutBankWords.join("\n") !== row.payout_bank_words.join("\n")) {
+    // SPC50: words on a bank line that mean this store's payout, besides the platform's name.
+    changes.push(`words that mean a payout on the bank line: ${payoutBankWords.length ? payoutBankWords.map((word) => `"${word}"`).join(", ") : "none"}`);
+    await tx.query("update sales_platform_connections set payout_bank_words = $2 where id = $1", [row.id, payoutBankWords]);
+  }
   const named = (choice: AccountChoice | null | undefined, current: string | null, text: string) => {
     if (choice !== undefined && (choice?.id ?? null) !== current) changes.push(`${text}: ${choice ? `${choice.code} ${choice.name}` : "none"}`);
   };
@@ -1876,9 +1904,16 @@ export async function syncConnection(
     });
     let orders: OrdersResult | null = null;
     let payouts: PayoutsResult | null = null;
+    // SPC47-SPC48: every order from the start date when a read now reaches further back than before.
+    const fullRead = posts(row) && needsFullRead(historyOf(row), row.orders_synced_until, now);
     if (posts(row)) {
       const startInstant = startOfLocalDate(row.start_date!);
-      orders = await connector.fetchOrders(context, token, { updatedSince: iso(row.orders_synced_until), processedFrom: startInstant, retryIds, parts: orderParts(row) });
+      orders = await connector.fetchOrders(context, token, {
+        updatedSince: fullRead ? null : iso(row.orders_synced_until),
+        processedFrom: startInstant,
+        retryIds,
+        parts: orderParts(row),
+      });
       if (readsPayouts(row)) {
         const saved = iso(row.payouts_synced_until);
         const again = recheckFrom ? startOfLocalDate(recheckFrom) : null;
@@ -1924,6 +1959,15 @@ export async function syncConnection(
           for (const note of payouts.notes) await writeNote(tx, row.id, "sync", note);
         } else if (connectorFor(current.platform).hasPayouts) {
           await writeNote(tx, row.id, "sync", NO_PAYOUT_SCOPES);
+        }
+      }
+      if (posting && orders && fullRead) {
+        const reach = readableFrom(historyOf(current), now);
+        if (reach !== null) {
+          await tx.query("update sales_platform_connections set orders_read_from = least(coalesce(orders_read_from, $2::date), $2::date) where id = $1", [row.id, reach]);
+          if (row.orders_read_from !== null) {
+            await writeNote(tx, row.id, "sync", `Read every ${label(row.platform)} order from ${reach} again, to bring in any that weren't read before.`);
+          }
         }
       }
       // The read-only extras: saved as Shopify said them, never posted.

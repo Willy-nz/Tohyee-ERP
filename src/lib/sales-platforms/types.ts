@@ -105,6 +105,12 @@ export type SalesPlatformConnection = {
   taxCodes: Array<{ rate: string; taxCode: string }>;
   /** The access scopes the store gave the app, as it last said. */
   grantedScopes: string[];
+  /** The first day orders were read back to (SPC47); null before the first read. */
+  ordersReadFrom: string | null;
+  /** Orders from the start date Shopify never let the app read, or null (SPC47). */
+  olderOrders: { from: string; to: string; message: string } | null;
+  /** Words on a bank line that mean this store's payout, besides the platform's name (SPC50). */
+  payoutBankWords: string[];
 };
 
 /** The scopes stage 2 reads with: orders (with their transactions and refunds), and Shopify Payments payouts. */
