@@ -18,6 +18,15 @@ const MOST_TILES = 12;
  * drawn as the kind of chart it is. No figures are loaded.
  */
 export function ReportPreview({ report, organisationId }: { report: Dashboard; organisationId: string }) {
+  if (report.settings.coverImageId) {
+    const url = `/api/analytics/dashboards/${encodeURIComponent(report.id)}/images/${encodeURIComponent(report.settings.coverImageId)}?organisationId=${encodeURIComponent(organisationId)}`;
+    return (
+      <div className={styles.customCover}>
+        {/* The user explicitly chose this picture; it takes priority over the automatic page preview. */}
+        <img src={url} alt="" loading="lazy" />
+      </div>
+    );
+  }
   const theme = BUILT_IN_THEMES[isBuiltInTheme(report.settings.theme) ? report.settings.theme : DEFAULT_THEME_ID];
   const { light, dark } = theme;
   const colours = {
