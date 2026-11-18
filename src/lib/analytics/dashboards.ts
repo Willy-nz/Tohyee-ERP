@@ -124,6 +124,8 @@ export type DashboardSettings = {
   slicers: Slicer[];
   /** The report's theme: a built-in theme's id or "custom:<id>"; left out, Tohyee's. */
   theme?: string;
+  /** Optional report library cover. One of this report's uploaded image IDs. */
+  coverImageId?: string;
   /** A default format per chart type for this report; a tile's own settings win. */
   visualDefaults?: VisualDefaults;
   /** The report's pages; left out, one page. */
@@ -190,6 +192,7 @@ function toDashboard(row: Row, dates: DateContext): Dashboard {
       preset,
       slicers: row.settings.slicers ?? [],
       ...(row.settings.theme ? { theme: row.settings.theme } : {}),
+      ...(row.settings.coverImageId ? { coverImageId: row.settings.coverImageId } : {}),
       ...(row.settings.visualDefaults ? { visualDefaults: row.settings.visualDefaults } : {}),
       ...(row.settings.pages?.length ? { pages: row.settings.pages } : {}),
       ...(row.settings.bookmarks?.length ? { bookmarks: row.settings.bookmarks } : {}),
@@ -370,6 +373,8 @@ function parseSettings(input: unknown, tables: Map<string, ColumnInfo[]>): Dashb
   const preset = isDatePreset(raw.preset) ? raw.preset : null;
   const theme = parseThemeChoice(raw.theme);
   const visualDefaults = parseVisualDefaults(raw.visualDefaults);
+  if (raw.coverImageId != null && raw.coverImageId !== "" && (typeof raw.coverImageId !== "string" || !/^\\d{1,18}$/.test(raw.coverImageId))) throw new ValidationError("Choose a picture uploaded to this report for its cover.");
+  const coverImageId = typeof raw.coverImageId === "string" && raw.coverImageId !== "" ? raw.coverImageId : undefined;
   // Bookmarks keep only the report's own slicers' choices; hidden tiles are checked with the tiles.
   const bookmarks = parseBookmarks(raw.bookmarks, {
     pageIds,
@@ -391,6 +396,7 @@ function parseSettings(input: unknown, tables: Map<string, ColumnInfo[]>): Dashb
     preset,
     slicers,
     ...(theme ? { theme } : {}),
+    ...(coverImageId ? { coverImageId } : {}),
     ...(visualDefaults ? { visualDefaults } : {}),
     ...(pagesWithFilters ? { pages: pagesWithFilters } : {}),
     ...(bookmarks ? { bookmarks } : {}),
@@ -596,7 +602,7 @@ export async function createDashboard(tx: OrgTx, input: Record<string, unknown>)
   const tiles = carryCommentary([], parseTiles(input.tiles ?? [], tables, settings.pages, settings.bookmarks));
   checkParameters(settings, tiles);
   // An image is uploaded to a report that's already saved.
-  if (tiles.some((tile) => tile.visual === "image") || pagePictureIds(settings.pages).length) throw new ValidationError("Save the report first, then add images to it.");
+  if (tiles.some((tile) => tile.visual === "image") || pagePictureIds(settings.pages).length || settings.coverImageId) throw new ValidationError("Save the report first, then add images to it.");
   await checkPlacedReports(tx, tiles, []);
   const result = await tx.query<{ id: string }>(
     `insert into analytics_dashboards (name, description, settings, tiles, created_by_email, updated_by_email)
@@ -678,7 +684,7 @@ export async function updateDashboard(
   const tiles = input.tiles === undefined || options.commentary === "as_given" ? parsed : carryCommentary(current.tiles, parsed, Boolean(tx.actor.via));
   if (input.tiles !== undefined || input.settings !== undefined) checkParameters(settings, tiles);
   // Images must be this report's own; ones no tile uses any more are removed.
-  if (input.tiles !== undefined || input.settings !== undefined) await checkDashboardImages(tx, current.id, tiles, pagePictureIds(settings.pages));
+  if (input.tiles !== undefined || input.settings !== undefined) await checkDashboardImages(tx, current.id, tiles, pagePictureIds(settings.pages), settings.coverImageId);
   if (input.tiles !== undefined) await checkPlacedReports(tx, tiles, current.tiles);
   const updated = await tx.query(
     `update analytics_dashboards set name = $2, description = $3, settings = $4::jsonb, tiles = $5::jsonb,
