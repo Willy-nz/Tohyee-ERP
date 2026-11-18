@@ -63,13 +63,15 @@ export async function checkDashboardImages(
   tiles: Array<{ title: string; visual: string; image?: { id: string } }>,
   /** Images the report's pages use as backgrounds: kept, and checked, like a tile's. */
   pagePictures: string[] = [],
+  coverImageId?: string,
 ): Promise<void> {
-  const used = [...tiles.flatMap((tile) => (tile.visual === "image" && tile.image ? [tile.image.id] : [])), ...pagePictures];
+  const used = [...tiles.flatMap((tile) => (tile.visual === "image" && tile.image ? [tile.image.id] : [])), ...pagePictures, ...(coverImageId ? [coverImageId] : [])];
   const result = await tx.query<{ id: string }>("select id::text from analytics_dashboard_images where dashboard_id = $1", [dashboardId]);
   const own = new Set(result.rows.map((row) => row.id));
   const missing = tiles.find((tile) => tile.visual === "image" && tile.image && !own.has(tile.image.id));
   if (missing) throw new ValidationError(`${missing.title}: that image isn't one of this report's. Upload it again.`);
   if (pagePictures.some((id) => !own.has(id))) throw new ValidationError("A page's background picture isn't one of this report's. Upload it again.");
+  if (coverImageId && !own.has(coverImageId)) throw new ValidationError("That cover picture isn't one of this report's. Upload it again.");
   // Kept while a version in the report's History uses it, so putting that version back brings it back (PIC4).
   await tx.query(
     `delete from analytics_dashboard_images image
@@ -87,7 +89,9 @@ const USED_IN_VERSION = `array(
    where tile->>'visual' = 'image'
   union all
   select page->'picture'->>'id' from jsonb_array_elements(case when jsonb_typeof(version.settings->'pages') = 'array' then version.settings->'pages' else '[]'::jsonb end) page
-   where page ? 'picture')`;
+   where page ? 'picture'
+  union all
+  select version.settings->>'coverImageId' where version.settings ? 'coverImageId')`;
 
 /** The images the report uses now: its image tiles and page backgrounds. */
 export async function imagesInUse(tx: OrgTx, dashboardId: string): Promise<string[]> {
