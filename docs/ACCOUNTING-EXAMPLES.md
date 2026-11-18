@@ -7115,9 +7115,9 @@ unit tests `sales-platform-customer-matches`, `sales-platform-setup`,
 
 ### Shopify order history, free orders and payout words (SPC47-SPC51; following common practice, not yet reviewed)
 
-From the owner's check of her own store against the books (18 Nov 2026):
-Tohyee had 96 orders and Shopify 234, a $0 order failed at every sync, and a
-payout deposit only fitted on amount and date. Made-up store: GST registered,
+Found by checking a store against its books: orders older than Shopify's
+60 days were missing, a $0 order failed at every sync, and a payout deposit
+only fitted on amount and date. Made-up store: GST registered,
 prices include tax, posting on from **1 Aug 2026**, connected on **3 Nov
 2026**. Orders are SPC11's #1001 (46.00, here processed 13 Aug) and #1002
 (28.90, 3 Oct); payout 70001 (49.38, 7 Oct) has both orders' charges.
