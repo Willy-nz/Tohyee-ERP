@@ -1744,6 +1744,14 @@ that something happened.
   name that tells them apart, e.g. "Alex Example (Shopify)", which they
   can change). The log and audit trail record who decided; later syncs
   treat the customer as linked, and waiting orders come in.
+- **Shopify order history, free orders and payout words** (SPC47-SPC51, tenant migration 0291; following common practice, not yet
+  reviewed). Shopify gives an app without `read_all_orders` only the last 60 days of orders, so a store
+  remembers how far back its orders were read; when its start date is earlier, its Orders line, the AI
+  diagnosis and the guided setup say which dates weren't read and that `read_all_orders` is needed. Once the
+  store gives it (or the start date moves back within reach) the next sync reads every order from the start
+  date again, posting nothing twice. A 0.00 order is logged once as nothing to post instead of failing at
+  every sync. A store can list words that mean its payout on the bank line (its own name, say), which count
+  like "Shopify" on the payouts account only. A payout's orders not in the books now say why.
 - **Shopify import fixes from the first live sync** (SPC38-SPC42, follows the owner's issue report, not yet reviewed). Customers
   can come in as **only customers who have ordered** (a contact is added
   when their first order is posted; the default for new connections,

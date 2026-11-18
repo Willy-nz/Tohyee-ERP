@@ -105,6 +105,8 @@ export type PayoutCandidate = {
   refusal: string | null;
   /** Orders in the settlement not in the books (before the start date, waiting for GST, refused). */
   ordersNotInBooks: string[];
+  /** Why each of those orders isn't in the books (SPC51), when it was worked out. */
+  ordersNotInBooksWhy?: Array<{ name: string; why: string }>;
 };
 
 /** A connection that pays out (Shopify), as the matcher needs it. */
@@ -113,6 +115,12 @@ export type PayoutConnection = {
   platformLabel: string;
   /** Lower case words to look for on a bank line ("shopify"). */
   names: string[];
+  /**
+   * The store's own words for its payout (SPC50), lower case: they count
+   * only on the account payouts arrive in, where the store name on a
+   * payout is expected; anywhere else they could be any transfer.
+   */
+  bankWords?: string[];
   postingOn: boolean;
   /** The bank account payouts arrive in, by id. */
   payoutAccountId: string | null;
@@ -181,9 +189,10 @@ export function mentionsId(text: string, externalId: string): boolean {
   return words(text).includes(externalId.toLowerCase());
 }
 
-function mentionsPlatform(text: string, connection: PayoutConnection): boolean {
+function mentionsPlatform(text: string, connection: PayoutConnection, accountId: string | null = null): boolean {
   const lower = text.toLowerCase();
-  return connection.names.some((name) => lower.includes(name));
+  if (connection.names.some((name) => lower.includes(name))) return true;
+  return accountId !== null && accountId === connection.payoutAccountId && (connection.bankWords ?? []).some((word) => lower.includes(word));
 }
 
 const MONTHS = ["Jan", "Feb", "Mar", "Apr", "May", "Jun", "Jul", "Aug", "Sep", "Oct", "Nov", "Dec"];
@@ -270,7 +279,7 @@ function settle(chosen: PayoutCandidate[], evidence: NonNullable<PayoutGuidance[
  */
 export function guidePayoutLine(line: DepositLine, connections: readonly PayoutConnection[], payouts: readonly PayoutCandidate[]): PayoutGuidance | null {
   const moneyIn = !line.amount.startsWith("-");
-  const named = connections.filter((connection) => mentionsPlatform(line.text, connection));
+  const named = connections.filter((connection) => mentionsPlatform(line.text, connection, line.accountId));
   const intoAccount = connections.filter((connection) => connection.payoutAccountId === line.accountId);
   const ids = new Set([...named, ...intoAccount].map((connection) => connection.connectionId));
   const relevant = connections.filter((connection) => ids.has(connection.connectionId));
@@ -282,7 +291,7 @@ export function guidePayoutLine(line: DepositLine, connections: readonly PayoutC
     const withdrawals = ofRelevant.filter((payout) => payout.direction === "WITHDRAWAL");
     const out = abs(dec(line.amount));
     const named = withdrawals.filter((payout) => mentionsId(line.text, payout.externalId));
-    const fits = named.length > 0 ? named : withdrawals.filter((payout) => mentionsPlatform(line.text, connections.find((c) => c.connectionId === payout.connectionId)!) && inTimingWindow(payout.issuedOn, line.date) && cmp(abs(dec(payout.net)), out) === 0);
+    const fits = named.length > 0 ? named : withdrawals.filter((payout) => mentionsPlatform(line.text, connections.find((c) => c.connectionId === payout.connectionId)!, line.accountId) && inTimingWindow(payout.issuedOn, line.date) && cmp(abs(dec(payout.net)), out) === 0);
     if (fits.length !== 1) return null;
     const withdrawal = fits[0];
     if (cmp(abs(dec(withdrawal.net)), out) !== 0) {

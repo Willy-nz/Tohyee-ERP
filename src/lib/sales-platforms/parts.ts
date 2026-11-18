@@ -25,7 +25,14 @@ export type ShopifyPart = {
 /** In the order the settings page lists them. */
 export const SHOPIFY_PARTS: readonly ShopifyPart[] = [
   { key: "records", label: "Customers and products", scopes: ["read_customers", "read_products"], brings: "Customers into contacts, product variants into items." },
-  { key: "orders", label: "Orders and refunds", scopes: ["read_orders"], brings: "Orders and refunds into the accounts, when posting is on." },
+  {
+    key: "orders",
+    label: "Orders and refunds",
+    scopes: ["read_orders"],
+    optionalScopes: ["read_all_orders"],
+    brings: "Orders and refunds into the accounts, when posting is on.",
+    needsApproval: "Orders older than 60 days need read_all_orders, which Shopify may need to approve. Without it only the last 60 days of orders can be read.",
+  },
   {
     key: "payouts",
     label: "Payouts",

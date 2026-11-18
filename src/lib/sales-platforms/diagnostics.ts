@@ -4,6 +4,7 @@ import { getGstRegistration } from "@/lib/tax/registration";
 import { storeGstSetup } from "@/lib/sales-platforms/setup";
 import { syncFreshness } from "@/lib/sales-platforms/freshness";
 import { listConnections } from "@/lib/sales-platforms/service";
+import { ALL_ORDERS_SCOPE } from "@/lib/sales-platforms/order-history";
 import {
   ORDER_SCOPE,
   PAYOUT_SCOPES,
@@ -202,6 +203,8 @@ function scopeReport(connection: SalesPlatformConnection) {
     { scope: "read_products", neededFor: "products", neededNow: connection.syncProducts },
     { scope: ORDER_SCOPE, neededFor: "orders and refunds (posting to the accounts)", neededNow: connection.postToAccounts },
     ...PAYOUT_SCOPES.map((scope) => ({ scope, neededFor: "payouts (posting to the accounts)", neededNow: connection.postToAccounts })),
+    // SPC47: needed only while orders from the start date were never read.
+    { scope: ALL_ORDERS_SCOPE, neededFor: "orders older than Shopify's 60 days", neededNow: connection.postToAccounts && connection.olderOrders !== null },
   ].map((entry) => ({ ...entry, granted: granted.has(entry.scope) }));
   return {
     applies: true,
@@ -309,6 +312,8 @@ async function connectionReport(tx: OrgTx, connection: SalesPlatformConnection, 
         notBroughtIn: total(problems.order),
         problems: problems.order ?? {},
         fetchedUpTo: iso(cursors.orders_synced_until),
+        readFrom: connection.ordersReadFrom,
+        ...(connection.olderOrders ? { neverRead: connection.olderOrders } : {}),
       },
       refunds: {
         status: orderStatus,

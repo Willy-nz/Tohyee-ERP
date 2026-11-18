@@ -7113,6 +7113,58 @@ Built. Tests:
 unit tests `sales-platform-customer-matches`, `sales-platform-setup`,
 `sales-platform-orders` and `sales-platforms`.
 
+### Shopify order history, free orders and payout words (SPC47-SPC51; following common practice, not yet reviewed)
+
+From the owner's check of her own store against the books (18 Nov 2026):
+Tohyee had 96 orders and Shopify 234, a $0 order failed at every sync, and a
+payout deposit only fitted on amount and date. Made-up store: GST registered,
+prices include tax, posting on from **1 Aug 2026**, connected on **3 Nov
+2026**. Orders are SPC11's #1001 (46.00, here processed 13 Aug) and #1002
+(28.90, 3 Oct); payout 70001 (49.38, 7 Oct) has both orders' charges.
+
+Shopify gives an app with `read_orders` only the orders of the last 60 days;
+older ones need `read_all_orders` as well, which Shopify may need to
+approve. The 60 days are counted back from the day the orders are read.
+
+- **SPC47** The first sync on 3 Nov reads orders from **4 Sep 2026** (60
+  days back), so #1002 is invoiced and #1001 is never seen: nothing about it
+  is in the log. The store remembers it read orders from 4 Sep. Its Orders
+  line says the orders from 2026-08-01 to 2026-09-03 weren't read and
+  Shopify needs `read_all_orders`, with "Which scopes"; the AI diagnosis
+  lists `read_all_orders` as missing now. Setting up a store with a start
+  date more than 60 days back warns about the same before it's saved.
+  Connections made before this was built are taken to have read from their
+  connection day less 60 days (or the start date, if later).
+- **SPC48** The store gives `read_all_orders` and the connection is tested.
+  The next sync reads every order from 1 Aug again: #1001 is invoiced, #1002
+  isn't posted twice (posting is safe to repeat), the log says every order
+  from 2026-08-01 was read again, and the warning goes. Later syncs read
+  only what changed. Moving the start date back to 1 Jul reads back to it
+  once more. Without `read_all_orders`, moving the start date back inside the
+  60 days does the same; further back, SPC47's warning shows.
+- **SPC49** Order #1009 (2 x Wax melts at 9.00, a 100% discount: 0.00, paid,
+  no transactions) is logged once, as skipped: "#1009 comes to 0.00 NZD, so
+  there's nothing to post". No sales order or invoice; it isn't tried again
+  at each sync. If Shopify later adds a charge to it, it changes, so it's
+  read again and brought in.
+- **SPC50** The bank line "GLENMORE CANDLES TRF 1Z6", 49.38 on 8 Oct, into
+  the account payouts arrive in, fits payout 70001 only on amount and date:
+  a person chooses. The store's settings take up to 5 words or phrases
+  (3-60 characters each, any case, repeats dropped) that mean its payout on
+  the bank line, besides "Shopify". With "Glenmore Candles" saved (and
+  logged), the same line is matched to the payout, as if it said Shopify.
+  The words count only on the payouts account: anywhere else a store's name
+  could be any transfer, so they mean nothing there. A 12.00 line with the
+  words is still not matched: nothing is matched on words alone.
+- **SPC51** Payout 70001 lists #1001 as not in the books (SPC47), now with
+  why: "Never read from Shopify", then SPC47's words naming the dates and
+  `read_all_orders`. An order Tohyee did read but couldn't post gives its
+  latest log line instead (a customer to check, no stock on hand). Shown
+  under the payout on the bank reconcile screen and to the AI.
+
+Built. Tests: `tests/integration/shopify-order-history.test.ts` (SPC47-SPC51)
+and `tests/unit/sales-platform-order-history.test.ts`.
+
 ### Shopify products as stock or non-stock (SSD1-SSD3; the details are Claude's, not yet reviewed)
 
 Products Shopify tracks stock for came in as stock items with nothing on

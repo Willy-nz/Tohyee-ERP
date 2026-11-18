@@ -35,6 +35,7 @@ import {
   suggestTaxCodes,
   workedExample,
 } from "@/lib/sales-platforms/setup";
+import { ALL_ORDERS_SCOPE, SHOPIFY_ORDER_DAYS } from "@/lib/sales-platforms/order-history";
 import { SALES_PLATFORM_LABELS, type SalesPlatform, type SalesPlatformConnection, SHOPIFY_AUTH_METHODS, type ShopifyAuthMethod } from "@/lib/sales-platforms/types";
 import type { TaxCode } from "@/lib/tax/codes";
 import type { GstRegistration } from "@/lib/tax/registration";
@@ -174,6 +175,7 @@ export function initialDraft(
     shippingAccountCode: shipping && shipping !== sales ? shipping : "",
     clearingAccountCode: connection.clearingAccountCode ?? suggested.clearing.existing ?? "",
     payoutAccountCode: connection.payoutAccountCode ?? suggested.payout.existing ?? "",
+    payoutBankWords: connection.payoutBankWords.join(", "),
     feesAccountCode: connection.feesAccountCode ?? suggested.fees.existing ?? "",
     chargebacksAccountCode: connection.chargebacksAccountCode ?? suggested.chargebacks.existing ?? "",
     reserveAccountCode: connection.reserveAccountCode ?? suggested.reserve.existing ?? "",
@@ -719,6 +721,10 @@ export function SkuNote({ connection }: { connection: SalesPlatformConnection })
   return note ? <Notice tone={note.tone}>{note.text}</Notice> : null;
 }
 
+function daysBefore(date: string, days: number): string {
+  return new Date(Date.parse(`${date}T00:00:00Z`) - days * 86_400_000).toISOString().slice(0, 10);
+}
+
 function firstOfMonth(today: string): string {
   return `${today.slice(0, 8)}01`;
 }
@@ -743,6 +749,12 @@ function StartStep({ platform, draft, set }: { platform: SalesPlatform; draft: P
       <Field label="Start date">
         <DateInput value={draft.startDate} onChange={(event) => set({ startDate: event.target.value })} />
       </Field>
+      {platform === "shopify" && draft.startDate && draft.startDate < daysBefore(today, SHOPIFY_ORDER_DAYS) ? (
+        <Notice tone="warning">
+          Shopify gives orders older than {SHOPIFY_ORDER_DAYS} days only to an app with <code>{ALL_ORDERS_SCOPE}</code>. Add it to the app&apos;s scopes in Shopify, or
+          orders before {formatDate(daysBefore(today, SHOPIFY_ORDER_DAYS))} won&apos;t come in.
+        </Notice>
+      ) : null}
       <div className={styles.quickDates}>
         <Button size="small" variant="secondary" onClick={() => set({ startDate: firstOfMonth(today) })}>
           1st of this month
@@ -851,6 +863,9 @@ function AccountsStep({
           </Role>
           <Role label="Payouts arrive in" hint="The bank account Shopify pays you into.">
             {picker("payout", "Payouts arrive in", "payoutAccountCode")}
+            <Field label="Other words on a payout's bank line" hint="Optional, comma separated: e.g. your shop's name, if the bank shows it instead of Shopify.">
+              <input value={draft.payoutBankWords} onChange={(event) => set({ payoutBankWords: event.target.value })} maxLength={320} />
+            </Field>
           </Role>
           <Role label="Shopify's fees" hint="Card and transaction fees Shopify keeps from each payout.">
             {picker("fees", "Shopify fees account", "feesAccountCode")}

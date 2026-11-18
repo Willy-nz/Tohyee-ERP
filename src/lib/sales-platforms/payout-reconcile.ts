@@ -210,6 +210,8 @@ async function payoutConnections(tx: OrgTx, connectionId: string | null = null):
       connectionId: connection.id,
       platformLabel: label,
       names: [label.toLowerCase()],
+      // SPC50: the words the store's settings say mean its payout too (the store name the bank shows, say).
+      bankWords: connection.payoutBankWords.map((word) => word.toLowerCase()),
       postingOn: connection.postToAccounts && connection.status !== "disconnected",
       payoutAccountId: byId.get(connection.id)?.payout_account_id ?? null,
       payoutAccountCode: connection.payoutAccountCode,
@@ -220,6 +222,47 @@ async function payoutConnections(tx: OrgTx, connectionId: string | null = null):
       readsPayouts: PAYOUT_SCOPES.every((scope) => connection.grantedScopes.includes(scope)),
     };
   });
+}
+
+/**
+ * Why each order in a payout isn't in the books (SPC51): the latest log
+ * line about it, or, when nothing about it was ever read, Shopify's
+ * 60-day limit if that's what kept it out. Read-only.
+ */
+async function whyNotInBooks(tx: OrgTx, rows: PayoutRow[]): Promise<Map<string, Array<{ name: string; why: string }>>> {
+  const out = new Map<string, Array<{ name: string; why: string }>>();
+  const wanted = rows.filter((row) => row.orders_not_in_books.length > 0);
+  if (wanted.length === 0) return out;
+  const connections = new Map((await listConnections(tx)).map((connection) => [connection.id, connection]));
+  for (const row of wanted) {
+    const found = await tx.query<{ name: string; message: string | null }>(
+      `select d.name,
+              (select g.message from sales_platform_sync_log g
+                where g.connection_id in (select c.id from sales_platform_connections c where c.platform = d.platform and c.store_domain = d.store_domain)
+                  and g.record_kind = 'order' and g.external_id = d.external_id
+                order by g.id desc limit 1) as message
+         from sales_platform_documents d
+        where d.platform = $1 and d.store_domain = $2 and d.record_kind = 'order' and d.name = any($3::text[])`,
+      [row.platform, row.store_domain, row.orders_not_in_books],
+    );
+    const said = new Map(found.rows.map((entry) => [entry.name, entry.message]));
+    const connection = connections.get(row.connection_id);
+    const label = SALES_PLATFORM_LABELS[row.platform as SalesPlatform] ?? row.platform;
+    out.set(
+      row.external_id,
+      row.orders_not_in_books.map((name) => {
+        if (said.has(name)) {
+          const message = said.get(name);
+          return { name, why: message ? redactSecrets(message) : `Brought in from ${label} but not finished yet; it's tried again at the next sync.` };
+        }
+        if (connection?.olderOrders) {
+          return { name, why: `Never read from ${label}: ${connection.olderOrders.message}` };
+        }
+        return { name, why: `Never read from ${label}. It's looked for again at the next sync.` };
+      }),
+    );
+  }
+  return out;
 }
 
 function shiftDays(date: string, days: number): string {
@@ -255,10 +298,11 @@ export async function payoutGuidanceForLine(tx: OrgTx, lineIdInput: unknown): Pr
     shiftDays(line.date, -PAYOUT_DAYS_BEFORE),
     shiftDays(line.date, PAYOUT_DAYS_AFTER),
   );
+  const why = await whyNotInBooks(tx, payouts);
   const guidance = guidePayoutLine(
     { id: line.id, accountId: line.accountId, date: line.date, amount: line.amount, text: lineText(line) },
     connections,
-    payouts.map(candidateOf),
+    payouts.map((row) => ({ ...candidateOf(row), ...(why.has(row.external_id) ? { ordersNotInBooksWhy: why.get(row.external_id) } : {}) })),
   );
   if (!guidance) return null;
   const status = gstStatusOn(await getGstRegistration(tx), line.date);
@@ -288,6 +332,7 @@ export async function payoutMatchReport(tx: OrgTx, options: { connectionId?: unk
   const registration = await getGstRegistration(tx);
   const ids = connections.map((connection) => connection.connectionId);
   const rows = await loadPayouts(tx, ids, from, to);
+  const why = await whyNotInBooks(tx, rows);
   const payouts = rows.map((row) => {
     const candidate = candidateOf(row);
     const gst = gstStatusOn(registration, candidate.issuedOn);
@@ -304,7 +349,11 @@ export async function payoutMatchReport(tx: OrgTx, options: { connectionId?: unk
       ...(candidate.refusal ? { whyNotInAccounts: candidate.refusal } : {}),
       bankLine: candidate.posted?.reconciledLineId ? { lineId: candidate.posted.reconciledLineId, date: candidate.posted.reconciledLineDate } : null,
       ...(candidate.ordersNotInBooks.length > 0
-        ? { ordersNotInBooks: candidate.ordersNotInBooks, ordersNote: "These orders' charges are in the payout but the orders aren't in the books, so the clearing account won't clear." }
+        ? {
+            ordersNotInBooks: candidate.ordersNotInBooks,
+            ordersNotInBooksWhy: why.get(row.external_id) ?? [],
+            ordersNote: "These orders' charges are in the payout but the orders aren't in the books, so the clearing account won't clear.",
+          }
         : {}),
       gst: { status: gst, note: gstNote(gst) },
     };

@@ -55,7 +55,20 @@ function Settlement({ payout }: { payout: PayoutCandidate }) {
         </span>
       )}
       {payout.ordersNotInBooks.length > 0 ? (
-        <span className={ui.muted}>Not in the books: {payout.ordersNotInBooks.join(", ")}</span>
+        payout.ordersNotInBooksWhy && payout.ordersNotInBooksWhy.length > 0 ? (
+          <div className={ui.muted}>
+            Not in the books:
+            <ul style={{ margin: "2px 0 0", paddingLeft: 18 }}>
+              {payout.ordersNotInBooksWhy.map((entry) => (
+                <li key={entry.name}>
+                  {entry.name}: {entry.why}
+                </li>
+              ))}
+            </ul>
+          </div>
+        ) : (
+          <span className={ui.muted}>Not in the books: {payout.ordersNotInBooks.join(", ")}</span>
+        )
       ) : null}
     </div>
   );
