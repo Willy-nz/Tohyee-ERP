@@ -43,6 +43,9 @@
          foreground service for tractor mode, notifications for reminders. -->
 
     <uses-permission android:name="android.permission.INTERNET" />
+    <!-- Voice notes in farm chat (FCH9). Android asks the first time someone taps Voice. -->
+    <uses-permission android:name="android.permission.RECORD_AUDIO" />
+    <uses-permission android:name="android.permission.MODIFY_AUDIO_SETTINGS" />
     <!-- Reminders don't need exact alarms (they're scheduled inexact), so the app never asks for "Alarms & reminders". -->
     <uses-permission android:name="android.permission.SCHEDULE_EXACT_ALARM" tools:node="remove" />
 </manifest>
