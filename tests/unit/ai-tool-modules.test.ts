@@ -86,13 +86,16 @@ describe("tool groups by module", () => {
       expect.objectContaining({ group: "livestock", offered: true }),
       expect.objectContaining({ group: "tracking", offered: false, hiddenBecause: expect.stringContaining("Advanced reporting") }),
       expect.objectContaining({ group: "analytics", offered: false, hiddenBecause: "Analytics is turned off for this organisation (Settings › Modules)." }),
+      expect.objectContaining({ group: "chat", offered: false, hiddenBecause: "Chat is turned off for this organisation (Settings › Modules)." }),
     ]);
     expect(toolGroupStatuses(null).every((group) => group.offered)).toBe(true);
   });
 
   it("reads the switches as the menus do: Farming and Livestock need Accounting", () => {
     const row = { accounting_enabled: false, farming_enabled: true, livestock_enabled: true, advanced_features: false, not_for_profit_enabled: false, analytics_enabled: true };
-    expect(toolModulesFrom(row)).toEqual({ accounting: false, farming: false, livestock: false, reporting: false, notForProfit: false, analytics: true });
+    expect(toolModulesFrom(row)).toEqual({ accounting: false, farming: false, livestock: false, reporting: false, notForProfit: false, analytics: true, chat: false });
+    // Chat (TCH7) doesn't need Accounting.
+    expect(toolModulesFrom({ ...row, chat_enabled: true })).toMatchObject({ chat: true });
     expect(toolModulesFrom({ ...row, accounting_enabled: true })).toMatchObject({ accounting: true, farming: true, livestock: true });
   });
 });

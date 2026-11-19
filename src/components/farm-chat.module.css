@@ -218,6 +218,11 @@
     left: 8px;
     z-index: 5;
   }
+
+  /* The Chat app (TCH1) has no farm tabs under it. */
+  .chat[data-room="team"] .compose {
+    bottom: calc(8px + env(safe-area-inset-bottom));
+  }
 }
 
 button.tool {

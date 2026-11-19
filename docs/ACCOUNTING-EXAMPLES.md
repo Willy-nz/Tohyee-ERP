@@ -19711,6 +19711,37 @@ a farm worker is on Home farm only.
   note and how long it is, but the AI can't hear it, and it can't post one.
 - **FCH11 Later.** Phone notifications are the next stage.
 
+## Team chat (TCH1-TCH8; 19 Nov 2026; following common practice, not yet reviewed)
+
+Tested in `tests/integration/team-chat.test.ts`, `tests/unit/navigation.test.ts`
+and `tests/unit/ai-tool-modules.test.ts`. A made-up shop has an owner, a
+bookkeeper, a viewer, a sales rep, a farm worker and a report viewer.
+
+- **TCH1 Its own app.** Chat is a module of its own, off until an admin turns
+  it on in Settings, Modules. It doesn't need Accounting. While it's on, it's
+  in the app switcher as Chat. Turning it off keeps the messages for when
+  it's back on; while it's off, its screens and tools say "Chat is off."
+- **TCH2 One chat for everyone.** The organisation has one team chat, newest
+  at the bottom, older messages on request. It's apart from each farm's chat:
+  neither shows the other's messages.
+- **TCH3 What a message holds.** Words, up to 6 photos and one voice note, with
+  the same limits as a farm's chat (FCH2, FCH9). Team chat messages don't link
+  to records ("Team chat messages don't link to records.").
+- **TCH4 Taking one down.** Whoever posted a message, or an owner or admin, can
+  take it down, as in a farm's chat (FCH5).
+- **TCH5 Unread.** The Chat app shows how many messages others have posted
+  since you last read. Posting counts as reading up to there.
+- **TCH6 Who's in it.** Everyone in the organisation but farm staff (they have
+  their farm's chat) and report viewers. Sales reps and managers read and
+  post, as bookkeepers and up do; viewers read only.
+- **TCH7 The AI.** A person's own AI can read the team chat (read_team_chat)
+  and post words in it when they ask (post_team_chat_message), marked "via
+  their AI". The tools are offered only while Chat is on.
+- **TCH8 Where it's kept.** Messages, photos and voice notes are kept in the
+  organisation's own database on its Tohyee server, like everything else.
+  Phone notifications, the next stage, will say only that there's a new
+  message, not what it says.
+
 ## Employees from a file (EMI1-EMI8; 18 Nov 2026; following common practice, not yet reviewed)
 
 Tested in `tests/integration/payroll-employee-import.test.ts`. A made-up HR

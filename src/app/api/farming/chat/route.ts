@@ -10,8 +10,8 @@ export const GET = route(async (request) => {
 
 /** POST: a message on a farm's chat: `farmId`, `body`, `photos` [{fileName, contentBase64}], `links` [{kind, id}], `idempotencyKey` (FCH2, FCH3). Farm staff and up. */
 export const POST = route(async (request) => {
-  // Up to six 10 MB photos, as base64.
-  const body = await readJson(request, { maxBytes: Math.max(MAX_FILE_JSON_BYTES, 60 * 1024 * 1024) });
+  // Up to six 10 MB photos and a 5 MB voice note, as base64.
+  const body = await readJson(request, { maxBytes: Math.max(MAX_FILE_JSON_BYTES, 90 * 1024 * 1024) });
   const message = await withFarmWork(request, body.organisationId, "record", (tx) => postChatMessage(tx, body));
   return json({ message }, { status: 201 });
 });

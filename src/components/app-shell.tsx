@@ -16,7 +16,7 @@ import {
   useState,
   useSyncExternalStore,
 } from "react";
-import { type AppKey, AppSwitcher } from "@/components/app-switcher";
+import { type AppKey, AppSwitcher, availableApps, useTeamChatUnread } from "@/components/app-switcher";
 import { DestinationArt } from "@/components/destination-art";
 import { BrandMark } from "@/components/brand-mark";
 import { CommandPalette } from "@/components/command-palette";
@@ -438,7 +438,7 @@ function NoticesMenu({ notices }: { notices: Array<{ id: string; message: string
 }
 
 /** Phones and narrow windows: a ☰ button opens every section as a full-screen list. */
-function PhoneMenu({ app, modules, menus, onSignOut }: { app: AppKey; modules: Modules | null; menus: Menu[]; onSignOut: () => void }) {
+function PhoneMenu({ app, modules, menus, chatUnread, onSignOut }: { app: AppKey; modules: Modules | null; menus: Menu[]; chatUnread: number; onSignOut: () => void }) {
   const pathname = usePathname();
   const search = useSearchParams();
   const { user, current } = useWorkspace();
@@ -515,7 +515,7 @@ function PhoneMenu({ app, modules, menus, onSignOut }: { app: AppKey; modules: M
       {open ? (
         <div ref={dialog} className={styles.phoneMenu} style={{ top }} role="dialog" aria-modal="true" aria-label="Menu">
           <div className={styles.phoneApps}>
-            <AppSwitcher current={app} modules={modules} reportViewer={reportViewer} farmWorker={farmWorker} />
+            <AppSwitcher current={app} modules={modules} reportViewer={reportViewer} farmWorker={farmWorker} chatUnread={chatUnread} />
           </div>
           <nav aria-label="Main">
             {menus.map((menu) => {
@@ -755,7 +755,8 @@ function Shell({ app: layoutApp, children, warnings }: { app: AppKey; children: 
   const owner = current?.role === "owner";
   // Sales reps and managers have the CRM and their own profile only.
   const salesRole = current?.role === "sales_rep" || current?.role === "sales_manager";
-  const salesAway = salesRole && app !== "crm" && !pathname.startsWith("/operations/profile");
+  // Chat is theirs too (TCH6).
+  const salesAway = salesRole && app !== "crm" && app !== "chat" && !pathname.startsWith("/operations/profile");
   // Farm staff have the field-work pages only; the server refuses them everything else anyway.
   const farmWorker = current?.role === "farm_worker";
   const farmAway = farmWorker && !(layoutApp === "accounting" && farmWorkAllowsPath(pathname));
@@ -775,6 +776,8 @@ function Shell({ app: layoutApp, children, warnings }: { app: AppKey; children: 
     [warnings, noticeData.data],
   );
   const menus = useMemo(() => visibleMenus(app, { can, modules, farmWorker }), [app, can, modules, farmWorker]);
+  // Unread team chat (TCH5), for the app switcher while you're in another app.
+  const chatUnread = useTeamChatUnread(current?.id ?? null, app !== "chat" && availableApps(modules, reportViewer, farmWorker).includes("chat"));
   // Ctrl K finds the farm's pages from any app.
   const farmMenus = useMemo(() => (app === "farm" ? [] : visibleMenus("farm", { can, modules, farmWorker })), [app, can, modules, farmWorker]);
   const newActions = useMemo(() => visibleNewActions({ can, modules, farmWorker }), [can, modules, farmWorker]);
@@ -793,6 +796,7 @@ function Shell({ app: layoutApp, children, warnings }: { app: AppKey; children: 
         ...(app !== "payroll" && !reportViewer && !farmWorker && modules?.accounting === false && modules.payroll === true ? [{ href: "/operations/payroll/pay-runs", label: "Payroll", group: "Apps" }] : []),
         ...(app !== "crm" && modules?.crm ? [{ href: "/crm", label: "CRM", group: "Apps" }] : []),
         ...(app !== "analytics" && modules?.analytics ? [{ href: "/analytics", label: "Analytics", group: "Apps" }] : []),
+        ...(app !== "chat" && modules?.chat && !reportViewer && !farmWorker ? [{ href: "/chat", label: "Chat", group: "Apps" }] : []),
       ]),
     [menus, farmMenus, newActions, settings, app, modules, reportViewer, owner, farmWorker],
   );
@@ -850,12 +854,12 @@ function Shell({ app: layoutApp, children, warnings }: { app: AppKey; children: 
       </a>
       <header className={styles.topbar} data-print="hide">
         <div className={styles.topRow}>
-          <Link href={app === "crm" ? "/crm" : app === "analytics" ? "/analytics" : app === "payroll" ? "/operations/payroll/pay-runs" : app === "farm" || farmWorker ? "/operations/farm" : "/operations"} className={styles.brand} aria-label="Tohyee home">
+          <Link href={app === "crm" ? "/crm" : app === "analytics" ? "/analytics" : app === "chat" ? "/chat" : app === "payroll" ? "/operations/payroll/pay-runs" : app === "farm" || farmWorker ? "/operations/farm" : "/operations"} className={styles.brand} aria-label="Tohyee home">
             <BrandMark size={26} className={styles.brandMark} />
             <span className={styles.brandText}>Tohyee</span>
           </Link>
           <div className={styles.desktopOnly}>
-            <AppSwitcher current={app} modules={modules} reportViewer={reportViewer} farmWorker={farmWorker} />
+            <AppSwitcher current={app} modules={modules} reportViewer={reportViewer} farmWorker={farmWorker} chatUnread={chatUnread} />
           </div>
           <OrganisationPicker />
           <span className={styles.divider} aria-hidden />
@@ -866,7 +870,7 @@ function Shell({ app: layoutApp, children, warnings }: { app: AppKey; children: 
             <TopBarActions newActions={newActions} notices={notices} onSearch={() => setPaletteOpen(true)} onSignOut={() => void signOut()} />
           </Suspense>
           <Suspense fallback={null}>
-            <PhoneMenu app={app} modules={modules} menus={menus} onSignOut={() => void signOut()} />
+            <PhoneMenu app={app} modules={modules} menus={menus} chatUnread={chatUnread} onSignOut={() => void signOut()} />
           </Suspense>
         </div>
       </header>

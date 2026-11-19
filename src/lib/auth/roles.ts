@@ -84,3 +84,10 @@ export const ROLE_LABELS: Record<Role, string> = {
   admin: "Admin",
   owner: "Owner",
 };
+
+/** Who may read and post in team chat (TCH6): everyone but farm staff and report viewers; viewers read. */
+export function teamChatAllows(role: Role, need: "read" | "post"): boolean {
+  if (role === "farm_worker" || role === "report_viewer") return false;
+  if (role === "viewer") return need === "read";
+  return true;
+}

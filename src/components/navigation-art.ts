@@ -5,7 +5,7 @@ import type { IllustratedIconName } from "./illustrated-icon";
 const ROUTES: Array<[string, IllustratedIconName]> = [
   ["/operations/farm/effluent", "effluent"], ["/operations/farm/safety", "safety"],
   ["/operations/farm/map", "maps"], ["/operations/farm/tractor", "location"],
-  ["/operations/farm/offline", "offline"], ["/operations/farm/security", "camera"], ["/operations/farm/log", "photo"], ["/operations/farm/chat", "mail"],
+  ["/operations/farm/offline", "offline"], ["/operations/farm/security", "camera"], ["/operations/farm/log", "photo"], ["/operations/farm/chat", "chat"],
   ["/operations/farm/mobs", "livestock"], ["/operations/farm/animals", "scales"], ["/operations/farm/timeline", "clock"],
   ["/operations/farming/safety", "safety"], ["/operations/farming/calendar", "calendar"], ["/operations/farming/tasks", "checklist"],
   ["/operations/farming/notebook", "documents"], ["/operations/farming/compare", "analytics"],
@@ -74,6 +74,7 @@ const ROUTES: Array<[string, IllustratedIconName]> = [
   ["/crm/teams", "team"], ["/crm/reassign", "reassign"], ["/crm/duplicates", "duplicates"],
   ["/crm/record-types", "form"], ["/crm/stages", "pipeline"], ["/crm/dashboard", "analytics"], ["/crm", "crm"],
   ["/analytics/sources", "documents"], ["/analytics/shaping", "funnel"], ["/analytics", "analytics"],
+  ["/chat", "chat"],
   ["/server/analytics", "analytics"], ["/server/bank-files", "banking"],
   ["/server/users", "team"], ["/server/sign-ins", "key"], ["/server/google-sign-in", "key"],
   ["/server/remote-access", "key"], ["/server/organisations", "accounting"],

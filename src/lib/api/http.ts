@@ -1,7 +1,7 @@
 import { CLIENT_PG_ERRORS, pgErrorCode, plainDatabaseError } from "@/lib/db/plain-errors";
 import { NextResponse } from "next/server";
 import { assertSameOrigin, authenticate, type AuthContext, requireOrganisationRole } from "@/lib/auth/guard";
-import { farmWorkAllows, type Role } from "@/lib/auth/roles";
+import { farmWorkAllows, type Role, teamChatAllows } from "@/lib/auth/roles";
 import { type OrgRunner, type OrgTx, withOrganisationTransaction } from "@/lib/db/org-transaction";
 import { type CrmNeed, type CrmScope, crmAllows, crmScope } from "@/lib/crm/access";
 import { ForbiddenError, HttpError, ValidationError } from "@/lib/errors";
@@ -180,6 +180,33 @@ export async function withFarmWork<T>(
   assertDemoAllows(request, membership.organisation);
   if (!farmWorkAllows(membership.role, need)) {
     throw new ForbiddenError(need === "record" ? "Recording farm work needs the farm staff or bookkeeper role or higher in this organisation." : "Farm records need the farm staff or viewer role or higher in this organisation.");
+  }
+  const people = await loadMemberNames(membership.organisation.id);
+  const result = await withOrganisationTransaction(
+    membership.organisation,
+    { userId: auth.user.id, email: auth.user.email, role: membership.role },
+    (tx) => work(tx, { auth, membership }),
+    { people },
+  );
+  return addPersonNames(result, people);
+}
+
+/**
+ * `withOrganisation` for team chat (TCH6): everyone in the organisation but
+ * farm staff and report viewers; viewers read, everyone else posts too.
+ */
+export async function withTeamChat<T>(
+  request: Request,
+  organisationIdInput: unknown,
+  need: "read" | "post",
+  work: (tx: OrgTx, context: { auth: AuthContext; membership: Membership }) => Promise<T>,
+): Promise<T> {
+  const auth = await requireAuth(request);
+  const organisationId = parseOrganisationId(organisationIdInput);
+  const membership = await requireOrganisationRole(auth, organisationId, "farm_worker");
+  assertDemoAllows(request, membership.organisation);
+  if (!teamChatAllows(membership.role, need)) {
+    throw new ForbiddenError(need === "post" ? "Posting in Chat needs the bookkeeper role or higher, or a sales role, in this organisation." : "Chat isn't open to your role in this organisation.");
   }
   const people = await loadMemberNames(membership.organisation.id);
   const result = await withOrganisationTransaction(

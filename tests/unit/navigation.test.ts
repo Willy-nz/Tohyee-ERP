@@ -456,3 +456,12 @@ describe("Payroll as an add-on (PAO2)", () => {
     expect(visibleMenus("accounting", { can, modules: { ...withAccounting, payroll: false } }).some((menu) => menu.label === "Payroll")).toBe(false);
   });
 });
+
+describe("the Chat app's menu (TCH1, TCH6)", () => {
+  const modules = { crm: false, reporting: false, notForProfit: false, analytics: false, gst: false, chat: true };
+  it("is the one Chat page while Chat is on, and nothing for farm staff or while it's off", () => {
+    expect(visibleMenus("chat", { can: () => true, modules }).map((menu) => [menu.label, menu.href])).toEqual([["Chat", "/chat"]]);
+    expect(visibleMenus("chat", { can: () => true, modules: { ...modules, chat: false } })).toEqual([]);
+    expect(visibleMenus("chat", { can: () => false, modules, farmWorker: true })).toEqual([]);
+  });
+});

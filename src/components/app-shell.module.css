@@ -916,3 +916,29 @@
 .dropdownLink, .phoneLink { display: flex; align-items: center; gap: 10px; min-height: 44px; white-space: normal; }
 .dropdownLink > span:last-child, .phoneLink > span:last-child { min-width: 0; overflow-wrap: anywhere; }
 .sectionIdentity { display: inline-flex; align-items: center; gap: 10px; min-width: 0; }
+
+/* Unread team chat (TCH5): a dot on the apps button, the count beside Chat. */
+.appLauncherButton {
+  position: relative;
+}
+
+.appLauncherDot {
+  position: absolute;
+  top: 6px;
+  right: 6px;
+  width: 9px;
+  height: 9px;
+  border: 2px solid var(--surface);
+  border-radius: 50%;
+  background: var(--danger-text);
+}
+
+.appLauncherBadge {
+  margin-left: auto;
+  padding: 1px 8px;
+  border-radius: 999px;
+  background: var(--danger-text);
+  color: #fff;
+  font-size: var(--text-xs, 12px);
+  font-weight: 600;
+}
