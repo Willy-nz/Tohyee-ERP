@@ -30,6 +30,8 @@ export type Modules = {
   accounting?: boolean;
   /** Payroll (PAO1): in Accounting's menus while Accounting is on, its own app while it's off. Left out means on. */
   payroll?: boolean;
+  /** Chat (TCH1): one chat for the whole organisation, its own app. */
+  chat?: boolean;
 };
 
 const CHANGED = "tohyee:modules-changed";
@@ -47,6 +49,8 @@ export function useModules(organisationId: string | null): Modules | null {
   // Farm staff do field work only: Farming, without asking for the organisation's settings.
   const farmWorker = current?.id === organisationId && current?.role === "farm_worker";
   const crmTeam = useApiData<{ crmEnabled: boolean }>(organisationId && salesRole ? "/api/crm/team" : null, organisationId ? { organisationId } : {});
+  // Sales roles can't read the settings, so whether Chat is on comes from Chat itself (TCH6).
+  const salesChat = useApiData<{ enabled: boolean }>(organisationId && salesRole ? "/api/chat/unread" : null, organisationId ? { organisationId } : {});
   const { reload } = settings;
   useEffect(() => {
     window.addEventListener(CHANGED, reload);
@@ -54,7 +58,7 @@ export function useModules(organisationId: string | null): Modules | null {
   }, [reload]);
   if (reportViewer) return { crm: false, reporting: false, notForProfit: false, analytics: true, gst: false, accounting: false, payroll: false };
   if (farmWorker) return { crm: false, reporting: false, notForProfit: false, analytics: false, gst: false, livestock: false, farming: true, payroll: false };
-  if (salesRole) return crmTeam.data ? { crm: crmTeam.data.crmEnabled, reporting: false, notForProfit: false, analytics: false, gst: false, accounting: false, payroll: false } : null;
+  if (salesRole) return crmTeam.data ? { crm: crmTeam.data.crmEnabled, reporting: false, notForProfit: false, analytics: false, gst: false, accounting: false, payroll: false, chat: salesChat.data?.enabled === true } : null;
   if (!settings.data) return null;
   return {
     crm: settings.data.settings.crmEnabled,
@@ -66,6 +70,7 @@ export function useModules(organisationId: string | null): Modules | null {
     payroll: settings.data.settings.payrollEnabled !== false,
     livestock: settings.data.settings.accountingEnabled && settings.data.settings.livestockEnabled,
     farming: settings.data.settings.accountingEnabled && settings.data.settings.farmingEnabled,
+    chat: settings.data.settings.chatEnabled === true,
   };
 }
 
@@ -190,6 +195,21 @@ export function ModulesCard({ organisationId }: { organisationId: string }) {
       setBusy(null);
     }
   }
+  const chatOn = current?.chatEnabled === true;
+  async function toggleChat(on: boolean) {
+    if (on && !(await confirm("Turn Chat off? Its messages are kept and show again when it's turned back on."))) return;
+    setBusy("chat");
+    setError(null);
+    try {
+      await api("/api/chat/settings", { method: "PATCH", body: { organisationId, enabled: !on } });
+      settings.reload();
+      window.dispatchEvent(new Event(CHANGED));
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(null);
+    }
+  }
   async function toggleLivestock(on: boolean) {
     setBusy("livestock");
     setError(null);
@@ -305,6 +325,25 @@ export function ModulesCard({ organisationId }: { organisationId: string }) {
               <td className={ui.num}>
                 <Button variant={farmingOn ? "secondary" : "primary"} size="small" disabled={!current || busy !== null || !accountingOn} onClick={() => void toggleFarming(farmingOn)}>
                   {busy === "farming" ? "Saving…" : farmingOn ? "Turn off Farming" : "Turn on Farming"}
+                </Button>
+              </td>
+            </tr>
+            <tr>
+              <td>
+                <span className={ui.moduleIdentity}><IllustratedIcon name="chat" size={32} /><strong>Chat</strong></span>
+                <div className={ui.muted}>
+                  One chat for everyone in the organisation, with photos and voice notes, kept on this server. Its own app. Farm staff use their farm&apos;s chat instead.
+                </div>
+                {chatOn ? (
+                  <div className={ui.actions}>
+                    <Link href="/chat">Open Chat</Link>
+                  </div>
+                ) : null}
+              </td>
+              <td>{chatOn ? <Badge tone="green">On</Badge> : <Badge>Off</Badge>}</td>
+              <td className={ui.num}>
+                <Button variant={chatOn ? "secondary" : "primary"} size="small" disabled={!current || busy !== null} onClick={() => void toggleChat(chatOn)}>
+                  {busy === "chat" ? "Saving…" : chatOn ? "Turn off Chat" : "Turn on Chat"}
                 </Button>
               </td>
             </tr>

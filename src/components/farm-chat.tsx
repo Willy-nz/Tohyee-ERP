@@ -15,7 +15,15 @@ import styles from "./farm-chat.module.css";
 /** How often an open chat checks for new messages. */
 const POLL_MS = 15_000;
 
-type Named = ChatMessage & { postedByName?: string; removedByName?: string };
+/** A farm's message, or the team chat's (TCH1), which has no farm or links. */
+type Named = Omit<ChatMessage, "farmId" | "links"> & { farmId?: string; links?: ChatLink[]; postedByName?: string; removedByName?: string };
+
+/** Which chat: a farm's (FCH1), or the organisation's team chat (TCH1). */
+export type ChatRoomKind = { kind: "farm"; farm: Farm } | { kind: "team"; name: string };
+
+function chatApi(room: ChatRoomKind): string {
+  return room.kind === "farm" ? "/api/farming/chat" : "/api/chat";
+}
 type LinkChoice = { kind: ChatLinkKind; id: string; label: string };
 
 /** Where a chip goes: the paddock's or mob's timeline, or the farm's tasks. */
@@ -34,7 +42,7 @@ function when(at: string): string {
 }
 
 /** One message, as the chat and a paddock's or mob's page show it. */
-export function ChatBubble({ message, organisationId, onRemove }: { message: Named; organisationId: string; onRemove?: (message: Named) => void }) {
+export function ChatBubble({ message, organisationId, onRemove, api: base = "/api/farming/chat" }: { message: Named; organisationId: string; onRemove?: (message: Named) => void; api?: string }) {
   return (
     <li className={`${styles.message} ${message.mine ? styles.mine : ""}`}>
       <div className={styles.meta}>
@@ -52,7 +60,7 @@ export function ChatBubble({ message, organisationId, onRemove }: { message: Nam
               {message.attachments
                 .filter((file) => file.kind === "photo")
                 .map((file) => {
-                  const src = `/api/farming/chat/attachments/${file.id}?organisationId=${encodeURIComponent(organisationId)}`;
+                  const src = `${base}/attachments/${file.id}?organisationId=${encodeURIComponent(organisationId)}`;
                   return (
                     <a key={file.id} href={src} target="_blank" rel="noreferrer">
                       {/* eslint-disable-next-line @next/next/no-img-element -- a private photo from Tohyee's own API */}
@@ -66,14 +74,14 @@ export function ChatBubble({ message, organisationId, onRemove }: { message: Nam
             .filter((file) => file.kind === "voice")
             .map((file) => (
               <div key={file.id} className={styles.voice}>
-                <audio controls preload="none" src={`/api/farming/chat/attachments/${file.id}?organisationId=${encodeURIComponent(organisationId)}`} aria-label="Voice note" />
+                <audio controls preload="none" src={`${base}/attachments/${file.id}?organisationId=${encodeURIComponent(organisationId)}`} aria-label="Voice note" />
                 {file.seconds ? <span>{voiceLength(file.seconds)}</span> : null}
               </div>
             ))}
-          {message.links.length ? (
+          {message.links?.length ? (
             <div className={styles.chips}>
               {message.links.map((link) => (
-                <Link key={`${link.kind}-${link.id}`} className={styles.chip} href={chatLinkHref(message.farmId, link)}>
+                <Link key={`${link.kind}-${link.id}`} className={styles.chip} href={chatLinkHref(message.farmId ?? "", link)}>
                   {link.kind === "paddock" ? "Paddock" : link.kind === "mob" ? "Mob" : "Task"}: {link.label}
                 </Link>
               ))}
@@ -96,11 +104,25 @@ export function ChatBubble({ message, organisationId, onRemove }: { message: Nam
  * it's open, and reading it clears the unread count.
  */
 export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationId: string; farm: Farm; canRemoveAny: boolean }) {
+  return <ChatRoom organisationId={organisationId} room={{ kind: "farm", farm }} canRemoveAny={canRemoveAny} canPost />;
+}
+
+/** The organisation's team chat (TCH1-TCH6): words, photos and voice notes, no links. Viewers read only. */
+export function TeamChat({ organisationId, name, canRemoveAny, canPost }: { organisationId: string; name: string; canRemoveAny: boolean; canPost: boolean }) {
+  return <ChatRoom organisationId={organisationId} room={{ kind: "team", name }} canRemoveAny={canRemoveAny} canPost={canPost} />;
+}
+
+function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisationId: string; room: ChatRoomKind; canRemoveAny: boolean; canPost: boolean }) {
   const confirm = useConfirm();
-  const chat = useApiData<{ messages: Named[]; more: boolean }>("/api/farming/chat", { organisationId, farmId: farm.id });
-  const paddocks = useApiData<{ paddocks: Paddock[] }>(`/api/farming/farms/${farm.id}/paddocks`, { organisationId });
-  const mobs = useApiData<{ mobs: Array<{ id: string; name: string }> }>(`/api/farming/farms/${farm.id}/mobs`, { organisationId });
-  const tasks = useApiData<{ tasks: Array<{ id: string; title: string }> }>(`/api/farming/farms/${farm.id}/tasks`, { organisationId });
+  const base = chatApi(room);
+  const farm = room.kind === "farm" ? room.farm : null;
+  const scope: Record<string, string> = farm ? { farmId: farm.id } : {};
+  const roomName = farm ? farm.name : room.kind === "team" ? room.name : "";
+  const farmKey = farm?.id ?? "";
+  const chat = useApiData<{ messages: Named[]; more: boolean }>(base, { organisationId, ...scope });
+  const paddocks = useApiData<{ paddocks: Paddock[] }>(farm ? `/api/farming/farms/${farm.id}/paddocks` : null, { organisationId });
+  const mobs = useApiData<{ mobs: Array<{ id: string; name: string }> }>(farm ? `/api/farming/farms/${farm.id}/mobs` : null, { organisationId });
+  const tasks = useApiData<{ tasks: Array<{ id: string; title: string }> }>(farm ? `/api/farming/farms/${farm.id}/tasks` : null, { organisationId });
   const [older, setOlder] = useState<Named[]>([]);
   const [olderMore, setOlderMore] = useState<boolean | null>(null);
   const [body, setBody] = useState("");
@@ -136,8 +158,9 @@ export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationI
   useEffect(() => {
     if (!latest) return;
     endRef.current?.scrollIntoView({ block: "end" });
-    void api("/api/farming/chat/read", { method: "POST", body: { organisationId, farmId: farm.id, upTo: latest } }).catch(() => undefined);
-  }, [latest, organisationId, farm.id]);
+    void api(`${base}/read`, { method: "POST", body: { organisationId, ...scope, upTo: latest } }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scope is the farm's id, already in farmKey
+  }, [latest, organisationId, base, farmKey]);
 
   const choices: LinkChoice[] = [
     ...(paddocks.data?.paddocks ?? []).map((entry) => ({ kind: "paddock" as const, id: entry.id, label: entry.name })),
@@ -149,7 +172,7 @@ export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationI
     const first = messages[0]?.id;
     if (!first) return;
     const answer = await api<{ messages: Named[]; more: boolean }>(
-      `/api/farming/chat?organisationId=${encodeURIComponent(organisationId)}&farmId=${encodeURIComponent(farm.id)}&before=${encodeURIComponent(first)}`,
+      `${base}?${new URLSearchParams({ organisationId, ...scope, before: first }).toString()}`,
     );
     setOlder((current) => [...answer.messages, ...current]);
     setOlderMore(answer.more);
@@ -162,9 +185,17 @@ export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationI
     try {
       const encoded = await Promise.all(photos.map(async (file) => ({ fileName: file.name, contentBase64: await readFileAsBase64(file) })));
       const recorded = voice.note ? { seconds: voice.note.seconds, contentBase64: await readFileAsBase64(voice.note.file) } : undefined;
-      await api("/api/farming/chat", {
+      await api(base, {
         method: "POST",
-        body: { organisationId, farmId: farm.id, body, photos: encoded, voice: recorded, links: links.map(({ kind, id }) => ({ kind, id })), idempotencyKey: newIdempotencyKey("farm-chat") },
+        body: {
+          organisationId,
+          ...scope,
+          body,
+          photos: encoded,
+          voice: recorded,
+          ...(farm ? { links: links.map(({ kind, id }) => ({ kind, id })) } : {}),
+          idempotencyKey: newIdempotencyKey(farm ? "farm-chat" : "team-chat"),
+        },
       });
       setBody("");
       setPhotos([]);
@@ -181,7 +212,7 @@ export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationI
   async function remove(message: Named) {
     if (!(await confirm("Take this message down? Its words, photos and voice note go for everyone; a note that it was taken down stays."))) return;
     try {
-      await api(`/api/farming/chat/${message.id}?organisationId=${encodeURIComponent(organisationId)}`, { method: "DELETE" });
+      await api(`${base}/${message.id}?organisationId=${encodeURIComponent(organisationId)}`, { method: "DELETE" });
       setOlder((current) => current.filter((entry) => entry.id !== message.id));
       reload();
     } catch (caught) {
@@ -191,7 +222,7 @@ export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationI
 
   const showOlder = olderMore ?? chat.data?.more ?? false;
   return (
-    <div className={styles.chat} ref={chatRef}>
+    <div className={styles.chat} ref={chatRef} data-room={room.kind}>
       {error ? <Notice tone="error">{error}</Notice> : null}
       {chat.error ? <Notice tone="error">{chat.error}</Notice> : null}
       <div className={styles.list}>
@@ -200,116 +231,122 @@ export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationI
             Show older messages
           </button>
         ) : null}
-        {chat.data && messages.length === 0 ? <p className={styles.empty}>No messages yet. Say what&apos;s happening on {farm.name}.</p> : null}
+        {chat.data && messages.length === 0 ? <p className={styles.empty}>{farm ? <>No messages yet. Say what&apos;s happening on {roomName}.</> : <>No messages yet. Say hello to the team.</>}</p> : null}
         <ol>
           {messages.map((message) => (
-            <ChatBubble key={message.id} message={message} organisationId={organisationId} onRemove={!message.removed && (message.mine || canRemoveAny) ? remove : undefined} />
+            <ChatBubble key={message.id} api={base} message={message} organisationId={organisationId} onRemove={!message.removed && (message.mine || canRemoveAny) ? remove : undefined} />
           ))}
         </ol>
       </div>
-      <form
-        ref={composeRef}
-        className={styles.compose}
-        onSubmit={(event) => {
-          event.preventDefault();
-          void send();
-        }}
-      >
-        {voice.problem ? <Notice tone="error">{voice.problem}</Notice> : null}
-        {voice.note ? (
-          <div className={styles.voice}>
-            <audio controls src={voice.note.url} aria-label="Your voice note" />
-            <span>{voiceLength(voice.note.seconds)}</span>
-            <button type="button" className={styles.chip} onClick={voice.clear}>
-              Remove voice note
-            </button>
-          </div>
-        ) : null}
-        {links.length || photos.length ? (
-          <div className={styles.chips}>
-            {links.map((link) => (
-              <button key={`${link.kind}-${link.id}`} type="button" className={styles.chip} onClick={() => setLinks(links.filter((entry) => entry !== link))} aria-label={`Remove ${link.label}`}>
-                {link.label} ×
-              </button>
-            ))}
-            {photos.map((file, index) => (
-              <button key={`${file.name}-${index}`} type="button" className={styles.chip} onClick={() => setPhotos(photos.filter((_, at) => at !== index))} aria-label={`Remove ${file.name}`}>
-                📷 {file.name} ×
-              </button>
-            ))}
-          </div>
-        ) : null}
-        <textarea
-          value={body}
-          maxLength={4000}
-          rows={2}
-          placeholder={`Message ${farm.name}`}
-          aria-label="Message"
-          onChange={(event) => setBody(event.target.value)}
-          onKeyDown={(event) => {
-            if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
-              event.preventDefault();
-              void send();
-            }
+      {canPost ? (
+        <form
+          ref={composeRef}
+          className={styles.compose}
+          onSubmit={(event) => {
+            event.preventDefault();
+            void send();
           }}
-        />
-        <div className={styles.tools}>
-          <label className={styles.tool}>
-            Photo
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp,image/heic"
-              capture="environment"
-              multiple
-              onChange={(event) => {
-                const chosen = [...(event.target.files ?? [])];
-                event.target.value = "";
-                setPhotos((current) => [...current, ...chosen].slice(0, 6));
-              }}
-            />
-          </label>
-          {voice.recording ? (
-            <button type="button" className={`${styles.tool} ${styles.recording}`} onClick={voice.stop} aria-label="Stop recording">
-              ■ Stop {voiceLength(voice.elapsed)}
-            </button>
-          ) : (
-            <button
-              type="button"
-              className={styles.tool}
-              onClick={() => void voice.start()}
-              aria-label={voice.note ? "Record the voice note again" : "Record a voice note"}
-            >
-              {voice.note ? "Redo" : "Voice"}
-            </button>
-          )}
-          <select
-            className={styles.about}
-            value=""
-            aria-label="About a paddock, mob or task"
-            onChange={(event) => {
-              const picked = choices.find((choice) => `${choice.kind}:${choice.id}` === event.target.value);
-              if (picked && !links.some((link) => link.kind === picked.kind && link.id === picked.id)) setLinks([...links, picked].slice(0, 10));
+        >
+          {voice.problem ? <Notice tone="error">{voice.problem}</Notice> : null}
+          {voice.note ? (
+            <div className={styles.voice}>
+              <audio controls src={voice.note.url} aria-label="Your voice note" />
+              <span>{voiceLength(voice.note.seconds)}</span>
+              <button type="button" className={styles.chip} onClick={voice.clear}>
+                Remove voice note
+              </button>
+            </div>
+          ) : null}
+          {links.length || photos.length ? (
+            <div className={styles.chips}>
+              {links.map((link) => (
+                <button key={`${link.kind}-${link.id}`} type="button" className={styles.chip} onClick={() => setLinks(links.filter((entry) => entry !== link))} aria-label={`Remove ${link.label}`}>
+                  {link.label} ×
+                </button>
+              ))}
+              {photos.map((file, index) => (
+                <button key={`${file.name}-${index}`} type="button" className={styles.chip} onClick={() => setPhotos(photos.filter((_, at) => at !== index))} aria-label={`Remove ${file.name}`}>
+                  📷 {file.name} ×
+                </button>
+              ))}
+            </div>
+          ) : null}
+          <textarea
+            value={body}
+            maxLength={4000}
+            rows={2}
+            placeholder={`Message ${roomName}`}
+            aria-label="Message"
+            onChange={(event) => setBody(event.target.value)}
+            onKeyDown={(event) => {
+              if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
+                event.preventDefault();
+                void send();
+              }
             }}
-          >
-            <option value="">About…</option>
-            {(["paddock", "mob", "task"] as const).map((kind) => {
-              const group = choices.filter((choice) => choice.kind === kind);
-              return group.length ? (
-                <optgroup key={kind} label={kind === "paddock" ? "Paddocks" : kind === "mob" ? "Mobs" : "Tasks"}>
-                  {group.map((choice) => (
-                    <option key={`${kind}:${choice.id}`} value={`${kind}:${choice.id}`}>
-                      {choice.label}
-                    </option>
-                  ))}
-                </optgroup>
-              ) : null;
-            })}
-          </select>
-          <Button type="submit" disabled={busy || voice.recording || (!body.trim() && photos.length === 0 && !voice.note)}>
-            {busy ? "Sending…" : "Send"}
-          </Button>
-        </div>
-      </form>
+          />
+          <div className={styles.tools}>
+            <label className={styles.tool}>
+              Photo
+              <input
+                type="file"
+                accept="image/jpeg,image/png,image/webp,image/heic"
+                capture="environment"
+                multiple
+                onChange={(event) => {
+                  const chosen = [...(event.target.files ?? [])];
+                  event.target.value = "";
+                  setPhotos((current) => [...current, ...chosen].slice(0, 6));
+                }}
+              />
+            </label>
+            {voice.recording ? (
+              <button type="button" className={`${styles.tool} ${styles.recording}`} onClick={voice.stop} aria-label="Stop recording">
+                ■ Stop {voiceLength(voice.elapsed)}
+              </button>
+            ) : (
+              <button
+                type="button"
+                className={styles.tool}
+                onClick={() => void voice.start()}
+                aria-label={voice.note ? "Record the voice note again" : "Record a voice note"}
+              >
+                {voice.note ? "Redo" : "Voice"}
+              </button>
+            )}
+            {farm ? (
+              <select
+                className={styles.about}
+                value=""
+                aria-label="About a paddock, mob or task"
+                onChange={(event) => {
+                  const picked = choices.find((choice) => `${choice.kind}:${choice.id}` === event.target.value);
+                  if (picked && !links.some((link) => link.kind === picked.kind && link.id === picked.id)) setLinks([...links, picked].slice(0, 10));
+                }}
+              >
+                <option value="">About…</option>
+                {(["paddock", "mob", "task"] as const).map((kind) => {
+                  const group = choices.filter((choice) => choice.kind === kind);
+                  return group.length ? (
+                    <optgroup key={kind} label={kind === "paddock" ? "Paddocks" : kind === "mob" ? "Mobs" : "Tasks"}>
+                      {group.map((choice) => (
+                        <option key={`${kind}:${choice.id}`} value={`${kind}:${choice.id}`}>
+                          {choice.label}
+                        </option>
+                      ))}
+                    </optgroup>
+                  ) : null;
+                })}
+              </select>
+            ) : null}
+            <Button type="submit" disabled={busy || voice.recording || (!body.trim() && photos.length === 0 && !voice.note)}>
+              {busy ? "Sending…" : "Send"}
+            </Button>
+          </div>
+        </form>
+      ) : (
+        <p className={styles.empty}>You can read this chat. Posting needs the bookkeeper role or higher, or a sales role.</p>
+      )}
       <div ref={endRef} className={styles.end} />
     </div>
   );

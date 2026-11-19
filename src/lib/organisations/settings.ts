@@ -51,6 +51,8 @@ export type OrganisationSettings = {
   livestockEnabled: boolean;
   /** Farming: farms, paddocks and maps; turned on in Modules. */
   farmingEnabled: boolean;
+  /** Chat (TCH1): one chat for the whole organisation, its own app; turned on in Modules. */
+  chatEnabled: boolean;
   /** Whether stock may go below zero (ST9-ST12); off by default. */
   allowNegativeStock: boolean;
   /** Foreign trade (EX3, EX4): overseas customers' new sales lines start with the tax code for exports. Off by default. */
@@ -96,6 +98,7 @@ export async function getOrganisationSettings(tx: OrgTx): Promise<OrganisationSe
     not_for_profit_enabled: boolean;
     livestock_enabled: boolean;
     farming_enabled: boolean;
+    chat_enabled: boolean;
     allow_negative_stock: boolean;
     foreign_trade: boolean;
     export_tax_code: string | null;
@@ -115,6 +118,7 @@ export async function getOrganisationSettings(tx: OrgTx): Promise<OrganisationSe
             to_char(gst_registration_confirmed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as gst_registration_confirmed_at, gst_registration_confirmed_by,
             coalesce((select enabled from livestock_settings where id = true), false) as livestock_enabled,
             coalesce((select enabled from farming_settings where id = true), false) as farming_enabled,
+            coalesce((select enabled from team_chat_settings where id = true), false) as chat_enabled,
             exists (select 1 from ledger_journals) as has_postings
        from organisation_settings where id = true`,
   );
@@ -137,6 +141,7 @@ export async function getOrganisationSettings(tx: OrgTx): Promise<OrganisationSe
     notForProfitEnabled: row.not_for_profit_enabled,
     livestockEnabled: row.livestock_enabled,
     farmingEnabled: row.farming_enabled,
+    chatEnabled: row.chat_enabled,
     allowNegativeStock: row.allow_negative_stock,
     foreignTrade: row.foreign_trade,
     exportTaxCode: row.export_tax_code,

@@ -5,6 +5,7 @@ import { type AiAccessLevel, levelAllows } from "@/lib/ai/access-levels";
 import { ANALYTICS_READ_TOOLS, ANALYTICS_WRITE_TOOLS } from "@/lib/ai/analytics-tools";
 import { BANK_PROPOSAL_READ_TOOLS, BANK_PROPOSAL_WRITE_TOOLS } from "@/lib/ai/bank-proposal-tools";
 import { BANK_READ_TOOLS, BANK_WRITE_TOOLS } from "@/lib/ai/bank-tools";
+import { TEAM_CHAT_READ_TOOLS, TEAM_CHAT_WRITE_TOOLS } from "@/lib/ai/team-chat-tools";
 import { FARM_DETAIL_READ_TOOLS, FARM_MORE_READ_TOOLS, FARM_OVERVIEW_TOOLS, FARM_RECORD_READ_TOOLS, FARM_RECORD_WRITE_TOOLS } from "@/lib/ai/farm-record-tools";
 import { FARM_POST_TOOLS } from "@/lib/ai/farm-post-tools";
 import { FARM_REPORTING_READ_TOOLS, FARM_SETUP_READ_TOOLS } from "@/lib/ai/farm-setup-read-tools";
@@ -45,6 +46,7 @@ export const AI_TOOLS: readonly AiTool[] = [
   ...CATCH_UP_READ_TOOLS,
   ...SIGNING_READ_TOOLS,
   ...ANALYTICS_READ_TOOLS,
+  ...TEAM_CHAT_READ_TOOLS,
   ...WRITE_TOOLS,
   ...REPORT_WRITE_TOOLS,
   ...BANK_WRITE_TOOLS,
@@ -60,6 +62,7 @@ export const AI_TOOLS: readonly AiTool[] = [
   ...CATCH_UP_WRITE_TOOLS,
   ...DOCUMENT_ACTION_TOOLS,
   ...SETTINGS_ACTION_TOOLS,
+  ...TEAM_CHAT_WRITE_TOOLS,
 ];
 
 export function findAiTool(name: unknown): AiTool | null {

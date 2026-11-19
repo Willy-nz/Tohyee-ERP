@@ -83,3 +83,17 @@ describe("the Payroll app (PAO2)", () => {
     expect(availableApps({ ...base, accounting: false, payroll: false })).toEqual(["crm"]);
   });
 });
+
+describe("the Chat app (TCH1, TCH6)", () => {
+  const base = { crm: false, reporting: false, notForProfit: false, analytics: false, gst: false };
+  it("is an app while Chat is on, without needing Accounting", () => {
+    expect(availableApps({ ...base, chat: true })).toEqual(["accounting", "chat"]);
+    expect(availableApps({ ...base, chat: false })).toEqual(["accounting"]);
+    expect(availableApps({ ...base, accounting: false, analytics: true, chat: true })).toEqual(["analytics", "chat"]);
+  });
+
+  it("isn't offered to farm staff or report viewers", () => {
+    expect(availableApps({ ...base, farming: true, chat: true }, false, true)).toEqual(["farm"]);
+    expect(availableApps({ ...base, analytics: true, chat: true }, true)).toEqual(["analytics"]);
+  });
+});

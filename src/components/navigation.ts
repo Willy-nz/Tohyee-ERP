@@ -520,6 +520,9 @@ export const CRM_MENUS: Menu[] = (
 ).map((menu) => ({ ...menu, module: "crm" as const }));
 
 /** Analytics' tabs (its own app, under /analytics); shown only while Analytics is on. */
+/** The Chat app (TCH1): one page, the organisation's chat. */
+export const CHAT_MENUS: Menu[] = [{ label: "Chat", href: "/chat", groups: [], area: ["/chat"] }];
+
 export const ANALYTICS_MENUS: Menu[] = [
   { label: "Reports", href: "/analytics", area: ["/analytics", "/analytics/dashboards"] },
   { label: "Data sources", href: "/analytics/sources", area: ["/analytics/sources"], minRole: "viewer" as const },
@@ -713,6 +716,8 @@ export function visibleMenus(app: AppKey, access: Access): Menu[] {
       .map((group) => ({ label: group.heading, groups: filterGroups([group], access) }))
       .filter((menu) => menu.groups.length > 0);
   }
+  // Chat (TCH1, TCH6): while it's on, for everyone but farm staff and report viewers.
+  if (app === "chat") return access.modules?.chat === true && !access.farmWorker ? CHAT_MENUS : [];
   // MOD2: no Accounting menus while it's off; Farm needs Accounting.
   if ((app === "accounting" || app === "farm") && access.modules?.accounting === false) return [];
   if (access.farmWorker) {

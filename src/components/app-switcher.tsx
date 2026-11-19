@@ -1,12 +1,14 @@
 "use client";
 
 import Link from "next/link";
+import { useEffect } from "react";
+import { useApiData } from "@/components/hooks";
 import { IllustratedIcon } from "@/components/illustrated-icon";
 import type { Modules } from "@/components/modules";
 import styles from "./app-shell.module.css";
 
-/** Tohyee's apps, each with its own top bar: Accounting (with Tax), Payroll (only while Accounting is off), Farm, the CRM and Analytics. */
-export type AppKey = "accounting" | "payroll" | "farm" | "crm" | "analytics";
+/** Tohyee's apps, each with its own top bar: Accounting (with Tax), Payroll (only while Accounting is off), Farm, the CRM, Analytics and Chat. */
+export type AppKey = "accounting" | "payroll" | "farm" | "crm" | "analytics" | "chat";
 
 const APPS: Array<{ key: AppKey; label: string; href: string }> = [
   { key: "accounting", label: "Accounting", href: "/operations" },
@@ -14,6 +16,7 @@ const APPS: Array<{ key: AppKey; label: string; href: string }> = [
   { key: "farm", label: "Farm", href: "/operations/farm" },
   { key: "crm", label: "CRM", href: "/crm" },
   { key: "analytics", label: "Analytics", href: "/analytics" },
+  { key: "chat", label: "Chat", href: "/chat" },
 ];
 
 /**
@@ -33,8 +36,22 @@ export function availableApps(modules: Modules | null, reportViewer = false, far
       (app.key !== "payroll" || (modules?.accounting === false && modules.payroll === true)) &&
       (app.key !== "farm" || (modules?.farming === true && modules.accounting !== false)) &&
       (app.key !== "crm" || modules?.crm === true) &&
-      (app.key !== "analytics" || modules?.analytics === true),
+      (app.key !== "analytics" || modules?.analytics === true) &&
+      // Chat while it's on (TCH1); viewers and sales roles too.
+      (app.key !== "chat" || modules?.chat === true),
   ).map((app) => app.key);
+}
+
+/** Team chat messages this person hasn't read (TCH5), checked every minute while Chat is on. */
+export function useTeamChatUnread(organisationId: string | null, on: boolean): number {
+  const unread = useApiData<{ enabled: boolean; unread: number }>(on && organisationId ? "/api/chat/unread" : null, { organisationId: organisationId ?? "" });
+  const reload = unread.reload;
+  useEffect(() => {
+    if (!on) return;
+    const timer = window.setInterval(() => reload(), 60_000);
+    return () => window.clearInterval(timer);
+  }, [on, reload]);
+  return unread.data?.unread ?? 0;
 }
 
 /**
@@ -42,8 +59,22 @@ export function availableApps(modules: Modules | null, reportViewer = false, far
  * there's somewhere to switch to, so people without the CRM never see it
  * (nor while the organisation's modules are still loading).
  */
-export function AppSwitcher({ current, modules, reportViewer = false, farmWorker = false }: { current: AppKey; modules: Modules | null; reportViewer?: boolean; farmWorker?: boolean }) {
+export function AppSwitcher({
+  current,
+  modules,
+  reportViewer = false,
+  farmWorker = false,
+  chatUnread = 0,
+}: {
+  current: AppKey;
+  modules: Modules | null;
+  reportViewer?: boolean;
+  farmWorker?: boolean;
+  /** Unread team chat messages (TCH5), shown while you're in another app. */
+  chatUnread?: number;
+}) {
   const keys = availableApps(modules, reportViewer, farmWorker);
+  const unread = current === "chat" ? 0 : chatUnread;
   if (keys.length < 2) return null;
   const apps = APPS.filter((app) => keys.includes(app.key));
   return (
@@ -53,7 +84,8 @@ export function AppSwitcher({ current, modules, reportViewer = false, farmWorker
         event.currentTarget.querySelector("summary")?.focus();
       }
     }}>
-      <summary className={styles.appLauncherButton} aria-label="Apps">
+      <summary className={styles.appLauncherButton} aria-label={unread > 0 ? `Apps, ${unread} unread in Chat` : "Apps"}>
+        {unread > 0 ? <span className={styles.appLauncherDot} aria-hidden /> : null}
         <span className={styles.appLauncherGrid} aria-hidden>
           <span />
           <span />
@@ -72,6 +104,7 @@ export function AppSwitcher({ current, modules, reportViewer = false, farmWorker
           >
             <IllustratedIcon name={app.key} />
             <span>{app.label}</span>
+            {app.key === "chat" && unread > 0 ? <span className={styles.appLauncherBadge}>{unread} unread</span> : null}
           </Link>
         ))}
       </nav>

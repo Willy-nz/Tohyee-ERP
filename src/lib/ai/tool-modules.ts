@@ -28,9 +28,11 @@ export type ToolModules = {
   notForProfit: boolean;
   /** Analytics: its own module, apart from Accounting. */
   analytics: boolean;
+  /** Chat (TCH1): the team chat, its own module. Left out means off. */
+  chat?: boolean;
 };
 
-export type ToolGroupKey = "accounting" | "farming" | "livestock" | "tracking" | "analytics";
+export type ToolGroupKey = "accounting" | "farming" | "livestock" | "tracking" | "analytics" | "chat";
 
 type ToolGroup = {
   key: ToolGroupKey;
@@ -269,6 +271,12 @@ const GROUPS: readonly ToolGroup[] = [
     tools: ANALYTICS_TOOLS,
     hiddenBecause: (modules) => (modules.analytics ? null : "Analytics is turned off for this organisation (Settings › Modules)."),
   },
+  {
+    key: "chat",
+    label: "Chat (the team chat)",
+    tools: ["read_team_chat", "post_team_chat_message"],
+    hiddenBecause: (modules) => (modules.chat ? null : "Chat is turned off for this organisation (Settings › Modules)."),
+  },
 ];
 
 const ACCOUNTING_GROUP: ToolGroup = {
@@ -309,6 +317,7 @@ type ModuleRow = {
   advanced_features: boolean;
   not_for_profit_enabled: boolean;
   analytics_enabled: boolean;
+  chat_enabled?: boolean;
 };
 
 /** The switches from organisation_settings, as useModules (the menus) reads them: Farming and Livestock need Accounting. */
@@ -321,6 +330,7 @@ export function toolModulesFrom(row: ModuleRow): ToolModules {
     reporting: row.advanced_features === true,
     notForProfit: row.not_for_profit_enabled === true,
     analytics: row.analytics_enabled === true,
+    chat: row.chat_enabled === true,
   };
 }
 
@@ -328,7 +338,8 @@ export async function loadToolModules(tx: OrgTx): Promise<ToolModules> {
   const result = await tx.query<ModuleRow>(
     `select accounting_enabled, advanced_features, not_for_profit_enabled, analytics_enabled,
             coalesce((select enabled from livestock_settings where id = true), false) as livestock_enabled,
-            coalesce((select enabled from farming_settings where id = true), false) as farming_enabled
+            coalesce((select enabled from farming_settings where id = true), false) as farming_enabled,
+            coalesce((select enabled from team_chat_settings where id = true), false) as chat_enabled
        from organisation_settings where id = true`,
   );
   const row = result.rows[0];
