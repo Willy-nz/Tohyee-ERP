@@ -3,8 +3,9 @@ import { FARM_TABS, farmTabFor } from "@/lib/farming/farm-nav";
 
 /** The Farm tabs on every farm page: which tab each page marks. */
 describe("farm tabs", () => {
-  it("are Today, Map, Log, Safety and More", () => {
-    expect(FARM_TABS.map((tab) => tab.label)).toEqual(["Today", "Map", "Log", "Safety", "More"]);
+  it("are Today, Map, Log, Chat, Safety and More", () => {
+    expect(FARM_TABS.map((tab) => tab.label)).toEqual(["Today", "Map", "Log", "Chat", "Safety", "More"]);
+    expect(farmTabFor("/operations/farm/chat")).toBe("chat");
   });
 
   it("mark the page's own tab, however it was opened", () => {

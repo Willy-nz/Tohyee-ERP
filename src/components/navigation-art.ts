@@ -5,7 +5,7 @@ import type { IllustratedIconName } from "./illustrated-icon";
 const ROUTES: Array<[string, IllustratedIconName]> = [
   ["/operations/farm/effluent", "effluent"], ["/operations/farm/safety", "safety"],
   ["/operations/farm/map", "maps"], ["/operations/farm/tractor", "location"],
-  ["/operations/farm/offline", "offline"], ["/operations/farm/security", "camera"], ["/operations/farm/log", "photo"],
+  ["/operations/farm/offline", "offline"], ["/operations/farm/security", "camera"], ["/operations/farm/log", "photo"], ["/operations/farm/chat", "mail"],
   ["/operations/farm/mobs", "livestock"], ["/operations/farm/animals", "scales"], ["/operations/farm/timeline", "clock"],
   ["/operations/farming/safety", "safety"], ["/operations/farming/calendar", "calendar"], ["/operations/farming/tasks", "checklist"],
   ["/operations/farming/notebook", "documents"], ["/operations/farming/compare", "analytics"],

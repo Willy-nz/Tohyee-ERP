@@ -1,16 +1,17 @@
 /*
- * The Farm app's bottom tabs on a phone: Today · Map · Log · Safety · More, on every farm page (they
+ * The Farm app's bottom tabs on a phone: Today · Map · Log · Chat · Safety · More, on every farm page (they
  * come from the farm pages' shared layout, so a direct link, a reload or a
  * page opened offline has them too), with the page's own tab marked.
  * Pure; tested in tests/unit/farm-nav.test.ts.
  */
 
-export type FarmTab = "today" | "map" | "log" | "safety" | "more";
+export type FarmTab = "today" | "map" | "log" | "chat" | "safety" | "more";
 
 export const FARM_TABS: Array<{ key: FarmTab; label: string; href: string; icon: string }> = [
   { key: "today", label: "Today", href: "/operations/farm", icon: "◷" },
   { key: "map", label: "Map", href: "/operations/farm/map", icon: "▦" },
   { key: "log", label: "Log", href: "/operations/farm/log", icon: "+" },
+  { key: "chat", label: "Chat", href: "/operations/farm/chat", icon: "✉" },
   { key: "safety", label: "Safety", href: "/operations/farm/safety", icon: "⚠" },
   { key: "more", label: "More", href: "/operations/farm/more", icon: "≡" },
 ];
@@ -25,6 +26,7 @@ export function farmTabFor(pathname: string): FarmTab {
   if (path === "/operations/farm") return "today";
   if (under(path, "/operations/farm/map") || under(path, "/operations/farm/tractor")) return "map";
   if (under(path, "/operations/farm/log")) return "log";
+  if (under(path, "/operations/farm/chat")) return "chat";
   if (under(path, "/operations/farm/safety") || under(path, "/operations/farming/safety")) return "safety";
   return "more";
 }

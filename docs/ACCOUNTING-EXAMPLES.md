@@ -19672,6 +19672,35 @@ report" has two pages, Cover (no tiles) and Money (one Orders tile).
   body still wins. A light fill, a mostly see-through dark fill, or no fill
   keeps the theme's colours.
 
+## Farm chat (FCH1-FCH9; 19 Nov 2026; following common practice, not yet reviewed)
+
+Tested in `tests/integration/farm-chat.test.ts`, `tests/unit/farm-nav.test.ts`
+and `tests/unit/farm-workspace.test.ts`. Made-up farms Home farm and Runoff;
+a farm worker is on Home farm only.
+
+- **FCH1 One chat per farm.** Farm › Chat shows the farm's messages, newest
+  at the bottom, older ones on request. It's for everyone who can see the
+  farm: the worker opening Runoff's chat gets "Farm not found."
+- **FCH2 Photos.** A message can have up to 6 photos (JPG, PNG, WebP or HEIC,
+  10 MB each), checked from their contents. Only people who can see the
+  farm can open them.
+- **FCH3 What it's about.** A message can be about up to 10 paddocks, mobs or
+  tasks on the same farm. One on another farm is refused ("That paddock
+  isn't on this farm."). A message needs words or a photo.
+- **FCH4 Shows on what it's about.** A paddock's or mob's timeline shows the
+  chat messages about it.
+- **FCH5 Taking one down.** Whoever posted a message, or an owner or admin,
+  can take it down: its words and photos go, and "Taken down by" stays.
+- **FCH6 Unread.** The Chat tab shows how many messages others have posted
+  since you last read. Posting counts as reading up to there; reading never
+  moves backwards.
+- **FCH7 Who posts.** Farm staff, bookkeepers and up post; viewers read.
+- **FCH8 The AI.** A person's own AI can read a farm's chat
+  (read_farm_chat) and post in it when they ask (post_farm_chat_message).
+  Its messages say "via their AI". Tohyee holds no AI key, so the AI never
+  posts by itself.
+- **FCH9 Later.** Voice notes and phone notifications are the next stages.
+
 ## Employees from a file (EMI1-EMI8; 18 Nov 2026; following common practice, not yet reviewed)
 
 Tested in `tests/integration/payroll-employee-import.test.ts`. A made-up HR

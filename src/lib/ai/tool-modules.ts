@@ -90,6 +90,7 @@ export const FARMING_TOOLS: readonly string[] = [
   "suggest_bcs",
   // Field work recorded through the AI.
   "list_farm_tasks",
+  "read_farm_chat",
   "list_rain_gauges",
   "farm_home",
   "farm_calendar",
@@ -180,6 +181,7 @@ export const FARMING_TOOLS: readonly string[] = [
   "record_rainfall",
   "add_farm_task",
   "mark_farm_task_done",
+  "post_farm_chat_message",
   "record_animal_treatment",
   "record_bcs",
   "record_animal_weight",

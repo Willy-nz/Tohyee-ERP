@@ -362,11 +362,12 @@ describe("the Farm app", () => {
     expect(appForPath("crm", "/crm")).toBe("crm");
   });
 
-  it("has Today, Map, Log, Safety and Effluent on the top bar, and the rest under More", () => {
+  it("has Today, Map, Log, Chat, Safety and Effluent on the top bar, and the rest under More", () => {
     expect(FARM_MENUS.map((menu) => [menu.label, menu.href ?? null])).toEqual([
       ["Today", "/operations/farm"],
       ["Map", "/operations/farm/map"],
       ["Log", "/operations/farm/log"],
+      ["Chat", "/operations/farm/chat"],
       ["Safety", "/operations/farm/safety"],
       ["Effluent", "/operations/farm/effluent"],
       ["More", null],
@@ -379,7 +380,7 @@ describe("the Farm app", () => {
     expect(visibleMenus("accounting", owner(true)).map((menu) => menu.label)).not.toContain("Farm");
     expect(visibleMenus("farm", owner(false))).toEqual([]);
     expect(visibleMenus("farm", owner(true, false))).toEqual([]);
-    expect(visibleMenus("farm", owner(true)).length).toBe(6);
+    expect(visibleMenus("farm", owner(true)).length).toBe(7);
   });
 
   it("marks the right top-bar item on each farm page", () => {
@@ -403,7 +404,7 @@ describe("farm staff", () => {
   const access = { can: () => false, modules, farmWorker: true };
   it("have the field-work pages only, only the farm's quick records to make, and no settings", () => {
     const menus = visibleMenus("farm", access);
-    expect(menus.map((menu) => menu.label)).toEqual(["Today", "Map", "Log", "Safety", "Effluent", "More"]);
+    expect(menus.map((menu) => menu.label)).toEqual(["Today", "Map", "Log", "Chat", "Safety", "Effluent", "More"]);
     expect(menus.at(-1)!.groups.flatMap((group) => group.links.map((link) => link.href))).toEqual([
       "/operations/farming",
       "/operations/farm/mobs",
