@@ -1,9 +1,11 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
+import * as attachmentRoute from "@/app/api/farming/chat/attachments/[attachmentId]/route";
 import * as chatRoute from "@/app/api/farming/chat/route";
 import type { SessionUser } from "@/lib/auth/sessions";
 import { coreQuery } from "@/lib/db/transactions";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { setMemberFarmAccess } from "@/lib/farming/access";
+import { FARM_DETAIL_READ_TOOLS } from "@/lib/ai/farm-record-tools";
 import { chatAbout, chatUnread, listChat, markChatRead, postChatMessage, readChatAttachment, removeChatMessage } from "@/lib/farming/chat";
 import { addPaddock, saveFarm, setFarmingEnabled } from "@/lib/farming/paddocks";
 import { addTask } from "@/lib/farming/tasks";
@@ -12,7 +14,7 @@ import { apiRequest, createTestOrganisation, createTestUser, describeWithDatabas
 const ORG = "farm-chat-co";
 const PNG = "iVBORw0KGgoAAAANSUhEUgAAAAEAAAABCAYAAAAfFcSJAAAADUlEQVR42mNk+M9QDwADhgGAWjR9awAAAABJRU5ErkJggg==";
 
-/** Farm chat (FCH1-FCH9, following common practice, not yet reviewed). Made-up farms and people. */
+/** Farm chat (FCH1-FCH11, following common practice, not yet reviewed). Made-up farms and people. */
 describeWithDatabase("farm chat", () => {
   let server: TestServer;
   let owner: SessionUser;
@@ -70,7 +72,7 @@ describeWithDatabase("farm chat", () => {
     await expect(asOwner((tx) => postChatMessage(tx, { farmId: home, body: "Wrong farm", idempotencyKey: key("chat"), links: [{ kind: "paddock", id: runoffPaddock }] }))).rejects.toThrow(
       "That paddock isn't on this farm.",
     );
-    await expect(asOwner((tx) => postChatMessage(tx, { farmId: home, body: "  ", idempotencyKey: key("chat") }))).rejects.toThrow("Write something or add a photo.");
+    await expect(asOwner((tx) => postChatMessage(tx, { farmId: home, body: "  ", idempotencyKey: key("chat") }))).rejects.toThrow("Write something, add a photo or record a voice note.");
     await expect(
       asOwner((tx) => postChatMessage(tx, { farmId: home, body: "Not a photo", idempotencyKey: key("chat"), photos: [{ fileName: "notes.txt", contentBase64: Buffer.from("hello").toString("base64") }] })),
     ).rejects.toThrow();
@@ -120,5 +122,58 @@ describeWithDatabase("farm chat", () => {
   it("FCH8: a message an AI posts for someone is marked as from their AI", async () => {
     const message = await asOwner((tx) => postChatMessage(tx, { farmId: home, body: "Rain due Friday", idempotencyKey: key("chat") }, { viaAi: true }));
     expect(message).toMatchObject({ viaAi: true, mine: true });
+  });
+
+  // Made-up recordings: just the first bytes each format starts with.
+  const WEBM = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(60, 1)]).toString("base64");
+  const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypM4A "), Buffer.alloc(60, 2)]).toString("base64");
+
+  it("FCH9: a message can have one voice note, up to 3 minutes and 5 MB, checked from its contents", async () => {
+    const spoken = await asWorker((tx) => postChatMessage(tx, { farmId: home, idempotencyKey: key("chat"), voice: { seconds: 41.6, contentBase64: MP4 } }));
+    expect(spoken).toMatchObject({ body: "", attachments: [{ kind: "voice", contentType: "audio/mp4", fileName: "voice-note.m4a", seconds: 42 }] });
+    const both = await asOwner((tx) =>
+      postChatMessage(tx, { farmId: home, body: "Listen to this", idempotencyKey: key("chat"), photos: [{ fileName: "gate.png", contentBase64: PNG }], voice: { seconds: 5, contentBase64: WEBM } }),
+    );
+    expect(both.attachments.map((file) => [file.kind, file.contentType])).toEqual([
+      ["photo", "image/png"],
+      ["voice", "audio/webm"],
+    ]);
+
+    await expect(asOwner((tx) => postChatMessage(tx, { farmId: home, idempotencyKey: key("chat"), voice: { seconds: 181, contentBase64: MP4 } }))).rejects.toThrow(
+      "A voice note can be up to 3 minutes.",
+    );
+    await expect(asOwner((tx) => postChatMessage(tx, { farmId: home, idempotencyKey: key("chat"), voice: { contentBase64: MP4 } }))).rejects.toThrow("The voice note needs its length in seconds.");
+    await expect(asOwner((tx) => postChatMessage(tx, { farmId: home, idempotencyKey: key("chat"), voice: { seconds: 3, contentBase64: PNG } }))).rejects.toThrow(
+      "That recording isn't audio Tohyee can play back.",
+    );
+    const huge = Buffer.concat([Buffer.from([0x1a, 0x45, 0xdf, 0xa3]), Buffer.alloc(5 * 1024 * 1024)]).toString("base64");
+    await expect(asOwner((tx) => postChatMessage(tx, { farmId: home, idempotencyKey: key("chat"), voice: { seconds: 3, contentBase64: huge } }))).rejects.toThrow(
+      "The voice note is larger than 5 MB.",
+    );
+
+    // People on the farm can play it, a piece at a time as iPhones ask; others can't.
+    const voiceId = spoken.attachments[0].id;
+    const cookie = await sessionCookieFor(worker);
+    const whole = await attachmentRoute.GET(apiRequest(`/api/farming/chat/attachments/${voiceId}?organisationId=${ORG}`, { cookie }), { params: Promise.resolve({ attachmentId: voiceId }) });
+    expect(whole.status).toBe(200);
+    expect(whole.headers.get("content-type")).toBe("audio/mp4");
+    expect(whole.headers.get("accept-ranges")).toBe("bytes");
+    const ranged = apiRequest(`/api/farming/chat/attachments/${voiceId}?organisationId=${ORG}`, { cookie, headers: { range: "bytes=0-1" } });
+    const piece = await attachmentRoute.GET(ranged, { params: Promise.resolve({ attachmentId: voiceId }) });
+    expect(piece.status).toBe(206);
+    expect(piece.headers.get("content-range")).toBe("bytes 0-1/72");
+    expect(Buffer.from(await piece.arrayBuffer())).toEqual(Buffer.from([0, 0]));
+
+    // Taking the message down removes the voice note too.
+    const gone = await asWorker((tx) => removeChatMessage(tx, spoken.id));
+    expect(gone.attachments).toEqual([]);
+    await expect(asWorker((tx) => readChatAttachment(tx, voiceId))).rejects.toThrow();
+  });
+
+  it("FCH10: the AI sees that a message has a voice note and how long, but can't hear it", async () => {
+    const tool = FARM_DETAIL_READ_TOOLS.find((entry) => entry.name === "read_farm_chat")!;
+    const answer = (await asOwner((tx) => tool.run(tx, { farmId: home }, {} as never))) as { messages: Array<Record<string, unknown>> };
+    expect(answer.messages.find((message) => message.body === "Listen to this")).toMatchObject({ photos: 1, voiceNoteSeconds: 5 });
+    expect(JSON.stringify(answer)).not.toContain("contentBase64");
   });
 });

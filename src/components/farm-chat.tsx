@@ -9,6 +9,7 @@ import { Button, Notice } from "@/components/ui";
 import { api, errorMessage, newIdempotencyKey } from "@/lib/client/api";
 import type { ChatLink, ChatLinkKind, ChatMessage } from "@/lib/farming/chat";
 import type { Farm, Paddock } from "@/lib/farming/paddocks";
+import { useVoiceRecorder, voiceLength } from "@/components/voice-recorder";
 import styles from "./farm-chat.module.css";
 
 /** How often an open chat checks for new messages. */
@@ -46,7 +47,7 @@ export function ChatBubble({ message, organisationId, onRemove }: { message: Nam
       ) : (
         <>
           {message.body ? <p className={styles.body}>{message.body}</p> : null}
-          {message.attachments.length ? (
+          {message.attachments.some((file) => file.kind === "photo") ? (
             <div className={styles.photos}>
               {message.attachments
                 .filter((file) => file.kind === "photo")
@@ -61,6 +62,14 @@ export function ChatBubble({ message, organisationId, onRemove }: { message: Nam
                 })}
             </div>
           ) : null}
+          {message.attachments
+            .filter((file) => file.kind === "voice")
+            .map((file) => (
+              <div key={file.id} className={styles.voice}>
+                <audio controls preload="none" src={`/api/farming/chat/attachments/${file.id}?organisationId=${encodeURIComponent(organisationId)}`} aria-label="Voice note" />
+                {file.seconds ? <span>{voiceLength(file.seconds)}</span> : null}
+              </div>
+            ))}
           {message.links.length ? (
             <div className={styles.chips}>
               {message.links.map((link) => (
@@ -98,8 +107,21 @@ export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationI
   const [photos, setPhotos] = useState<File[]>([]);
   const [links, setLinks] = useState<LinkChoice[]>([]);
   const [busy, setBusy] = useState(false);
+  const voice = useVoiceRecorder();
   const [error, setError] = useState<string | null>(null);
   const endRef = useRef<HTMLDivElement>(null);
+  const chatRef = useRef<HTMLDivElement>(null);
+  const composeRef = useRef<HTMLFormElement>(null);
+
+  // On a phone the compose box floats over the list, so the list keeps that much room at the bottom.
+  useEffect(() => {
+    const form = composeRef.current;
+    const box = chatRef.current;
+    if (!form || !box || typeof ResizeObserver === "undefined") return;
+    const observer = new ResizeObserver(() => box.style.setProperty("--compose-height", `${Math.ceil(form.getBoundingClientRect().height)}px`));
+    observer.observe(form);
+    return () => observer.disconnect();
+  }, []);
   const reload = chat.reload;
 
   useEffect(() => {
@@ -134,18 +156,20 @@ export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationI
   }
 
   async function send() {
-    if (!body.trim() && photos.length === 0) return;
+    if (voice.recording || (!body.trim() && photos.length === 0 && !voice.note)) return;
     setBusy(true);
     setError(null);
     try {
       const encoded = await Promise.all(photos.map(async (file) => ({ fileName: file.name, contentBase64: await readFileAsBase64(file) })));
+      const recorded = voice.note ? { seconds: voice.note.seconds, contentBase64: await readFileAsBase64(voice.note.file) } : undefined;
       await api("/api/farming/chat", {
         method: "POST",
-        body: { organisationId, farmId: farm.id, body, photos: encoded, links: links.map(({ kind, id }) => ({ kind, id })), idempotencyKey: newIdempotencyKey("farm-chat") },
+        body: { organisationId, farmId: farm.id, body, photos: encoded, voice: recorded, links: links.map(({ kind, id }) => ({ kind, id })), idempotencyKey: newIdempotencyKey("farm-chat") },
       });
       setBody("");
       setPhotos([]);
       setLinks([]);
+      voice.clear();
       reload();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -155,7 +179,7 @@ export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationI
   }
 
   async function remove(message: Named) {
-    if (!(await confirm("Take this message down? Its words and photos go for everyone; a note that it was taken down stays."))) return;
+    if (!(await confirm("Take this message down? Its words, photos and voice note go for everyone; a note that it was taken down stays."))) return;
     try {
       await api(`/api/farming/chat/${message.id}?organisationId=${encodeURIComponent(organisationId)}`, { method: "DELETE" });
       setOlder((current) => current.filter((entry) => entry.id !== message.id));
@@ -167,7 +191,7 @@ export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationI
 
   const showOlder = olderMore ?? chat.data?.more ?? false;
   return (
-    <div className={styles.chat}>
+    <div className={styles.chat} ref={chatRef}>
       {error ? <Notice tone="error">{error}</Notice> : null}
       {chat.error ? <Notice tone="error">{chat.error}</Notice> : null}
       <div className={styles.list}>
@@ -184,12 +208,23 @@ export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationI
         </ol>
       </div>
       <form
+        ref={composeRef}
         className={styles.compose}
         onSubmit={(event) => {
           event.preventDefault();
           void send();
         }}
       >
+        {voice.problem ? <Notice tone="error">{voice.problem}</Notice> : null}
+        {voice.note ? (
+          <div className={styles.voice}>
+            <audio controls src={voice.note.url} aria-label="Your voice note" />
+            <span>{voiceLength(voice.note.seconds)}</span>
+            <button type="button" className={styles.chip} onClick={voice.clear}>
+              Remove voice note
+            </button>
+          </div>
+        ) : null}
         {links.length || photos.length ? (
           <div className={styles.chips}>
             {links.map((link) => (
@@ -233,6 +268,20 @@ export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationI
               }}
             />
           </label>
+          {voice.recording ? (
+            <button type="button" className={`${styles.tool} ${styles.recording}`} onClick={voice.stop} aria-label="Stop recording">
+              ■ Stop {voiceLength(voice.elapsed)}
+            </button>
+          ) : (
+            <button
+              type="button"
+              className={styles.tool}
+              onClick={() => void voice.start()}
+              aria-label={voice.note ? "Record the voice note again" : "Record a voice note"}
+            >
+              {voice.note ? "Redo" : "Voice"}
+            </button>
+          )}
           <select
             className={styles.about}
             value=""
@@ -256,12 +305,12 @@ export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationI
               ) : null;
             })}
           </select>
-          <Button type="submit" disabled={busy || (!body.trim() && photos.length === 0)}>
+          <Button type="submit" disabled={busy || voice.recording || (!body.trim() && photos.length === 0 && !voice.note)}>
             {busy ? "Sending…" : "Send"}
           </Button>
         </div>
       </form>
-      <div ref={endRef} />
+      <div ref={endRef} className={styles.end} />
     </div>
   );
 }

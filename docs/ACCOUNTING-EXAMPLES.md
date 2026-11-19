@@ -19672,7 +19672,7 @@ report" has two pages, Cover (no tiles) and Money (one Orders tile).
   body still wins. A light fill, a mostly see-through dark fill, or no fill
   keeps the theme's colours.
 
-## Farm chat (FCH1-FCH9; 19 Nov 2026; following common practice, not yet reviewed)
+## Farm chat (FCH1-FCH11; 19 Nov 2026; following common practice, not yet reviewed)
 
 Tested in `tests/integration/farm-chat.test.ts`, `tests/unit/farm-nav.test.ts`
 and `tests/unit/farm-workspace.test.ts`. Made-up farms Home farm and Runoff;
@@ -19699,7 +19699,15 @@ a farm worker is on Home farm only.
   (read_farm_chat) and post in it when they ask (post_farm_chat_message).
   Its messages say "via their AI". Tohyee holds no AI key, so the AI never
   posts by itself.
-- **FCH9 Later.** Voice notes and phone notifications are the next stages.
+- **FCH9 Voice notes.** A message can have one voice note, recorded on the
+  Chat screen: up to 3 minutes, and at most 5 MB. The recording is checked
+  from its contents (WebM, Ogg or MP4 audio); anything else is refused
+  ("That recording isn't audio Tohyee can play back."). A voice note on its
+  own is a message; it can also have words, photos and links. People who can
+  see the farm can play it, and taking the message down removes it too.
+- **FCH10 The AI and voice notes.** read_farm_chat says a message has a voice
+  note and how long it is, but the AI can't hear it, and it can't post one.
+- **FCH11 Later.** Phone notifications are the next stage.
 
 ## Employees from a file (EMI1-EMI8; 18 Nov 2026; following common practice, not yet reviewed)
 
