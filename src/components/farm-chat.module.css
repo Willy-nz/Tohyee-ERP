@@ -199,8 +199,16 @@
 
 /* On a phone the writing box stays just above the Farm tabs, and the messages leave room for it. */
 @media (max-width: 700px) {
-  .chat {
-    padding-bottom: 150px;
+  /*
+   * Room under the last message for the compose box, however tall it gets,
+   * so scrolling to the end shows the last message.
+   */
+  .end {
+    height: calc(var(--compose-height, 140px) + 16px);
+  }
+
+  .about {
+    min-width: 0;
   }
 
   .compose {
@@ -210,4 +218,33 @@
     left: 8px;
     z-index: 5;
   }
+}
+
+button.tool {
+  background: var(--surface);
+  color: inherit;
+  font: inherit;
+  font-size: var(--text-sm);
+}
+
+.recording {
+  border-color: var(--danger-text);
+  color: var(--danger-text);
+  font-variant-numeric: tabular-nums;
+}
+
+/* A voice note (FCH9): the phone's own player, and its length. */
+.voice {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: center;
+  margin: 6px 0;
+  font-size: var(--text-sm);
+  color: var(--muted);
+}
+
+.voice audio {
+  max-width: 100%;
+  height: 36px;
 }

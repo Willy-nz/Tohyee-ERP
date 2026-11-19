@@ -26,11 +26,25 @@ export const MAX_CHAT_PHOTOS = 6;
 export const MAX_CHAT_PHOTO_BYTES = 10 * 1024 * 1024;
 export const CHAT_PAGE = 50;
 const PHOTO_TYPES = new Set(["image/jpeg", "image/png", "image/webp", "image/heic"]);
+export const MAX_VOICE_SECONDS = 180;
+export const MAX_VOICE_BYTES = 5 * 1024 * 1024;
+
+/**
+ * What a phone's recorder makes (FCH9), told from the file's first bytes rather
+ * than what it's called: WebM (Chrome, Android), Ogg (Firefox) or MP4 (iPhone).
+ */
+export function voiceType(bytes: Uint8Array): { contentType: string; extension: string } | null {
+  const at = (offset: number, text: string) => [...text].every((char, index) => bytes[offset + index] === char.charCodeAt(0));
+  if (bytes.length >= 4 && bytes[0] === 0x1a && bytes[1] === 0x45 && bytes[2] === 0xdf && bytes[3] === 0xa3) return { contentType: "audio/webm", extension: "webm" };
+  if (bytes.length >= 4 && at(0, "OggS")) return { contentType: "audio/ogg", extension: "ogg" };
+  if (bytes.length >= 12 && at(4, "ftyp")) return { contentType: "audio/mp4", extension: "m4a" };
+  return null;
+}
 export const CHAT_LINK_KINDS = ["paddock", "mob", "task"] as const;
 export type ChatLinkKind = (typeof CHAT_LINK_KINDS)[number];
 
 export type ChatLink = { kind: ChatLinkKind; id: string; label: string };
-export type ChatAttachment = { id: string; kind: "photo" | "voice"; fileName: string; contentType: string; bytes: number };
+export type ChatAttachment = { id: string; kind: "photo" | "voice"; fileName: string; contentType: string; bytes: number; seconds: number | null };
 export type ChatMessage = {
   id: string;
   farmId: string;
@@ -67,8 +81,8 @@ const LINK_LABELS = `
 async function shape(tx: OrgTx, rows: MessageRow[]): Promise<ChatMessage[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => row.id);
-  const attachments = await tx.query<{ id: string; message_id: string; kind: "photo" | "voice"; file_name: string; content_type: string; bytes: number }>(
-    "select id::text, message_id::text, kind, file_name, content_type, bytes from farm_chat_attachments where message_id = any($1::bigint[]) order by farm_chat_attachments.id",
+  const attachments = await tx.query<{ id: string; message_id: string; kind: "photo" | "voice"; file_name: string; content_type: string; bytes: number; seconds: number | null }>(
+    "select id::text, message_id::text, kind, file_name, content_type, bytes, seconds from farm_chat_attachments where message_id = any($1::bigint[]) order by farm_chat_attachments.id",
     [ids],
   );
   const links = await tx.query<{ message_id: string; kind: ChatLinkKind; record_id: string; label: string | null }>(
@@ -88,7 +102,7 @@ async function shape(tx: OrgTx, rows: MessageRow[]): Promise<ChatMessage[]> {
     removedByEmail: row.removed_by_email,
     attachments: attachments.rows
       .filter((entry) => entry.message_id === row.id)
-      .map((entry) => ({ id: entry.id, kind: entry.kind, fileName: entry.file_name, contentType: entry.content_type, bytes: entry.bytes })),
+      .map((entry) => ({ id: entry.id, kind: entry.kind, fileName: entry.file_name, contentType: entry.content_type, bytes: entry.bytes, seconds: entry.seconds })),
     links: links.rows
       .filter((entry) => entry.message_id === row.id && entry.label !== null)
       .map((entry) => ({ kind: entry.kind, id: entry.record_id, label: entry.label! })),
@@ -167,7 +181,8 @@ export async function postChatMessage(tx: OrgTx, input: Record<string, unknown>,
     if (!PHOTO_TYPES.has(checked.contentType)) throw new ValidationError(`${checked.fileName} isn't a photo (JPG, PNG, WebP or HEIC).`);
     return { ...checked, content };
   });
-  if (!body && photos.length === 0) throw new ValidationError("Write something or add a photo.");
+  const voice = parseVoice(input.voice);
+  if (!body && photos.length === 0 && !voice) throw new ValidationError("Write something, add a photo or record a voice note.");
 
   const linksInput = input.links === undefined || input.links === null ? [] : input.links;
   if (!Array.isArray(linksInput)) throw new ValidationError("links must be a list.");
@@ -198,6 +213,16 @@ export async function postChatMessage(tx: OrgTx, input: Record<string, unknown>,
       photo.content,
     ]);
   }
+  if (voice) {
+    await tx.query("insert into farm_chat_attachments (message_id, kind, file_name, content_type, bytes, content, seconds) values ($1, 'voice', $2, $3, $4, $5, $6)", [
+      message.id,
+      voice.fileName,
+      voice.contentType,
+      voice.content.length,
+      voice.content,
+      voice.seconds,
+    ]);
+  }
   for (const link of links) {
     await tx.query("insert into farm_chat_links (message_id, kind, record_id) values ($1, $2, $3)", [message.id, link.kind, link.id]);
   }
@@ -207,9 +232,27 @@ export async function postChatMessage(tx: OrgTx, input: Record<string, unknown>,
     eventType: "farm_chat.posted",
     entityType: "farm_chat_message",
     entityId: message.id,
-    details: { farmId, photos: photos.length, links: links.length, ...(options.viaAi ? { viaAi: true } : {}) },
+    details: { farmId, photos: photos.length, voice: voice !== null, links: links.length, ...(options.viaAi ? { viaAi: true } : {}) },
   });
   return (await shape(tx, [message]))[0];
+}
+
+/** One voice note (FCH9): up to 3 minutes and 5 MB, and audio a phone can play back. */
+function parseVoice(input: unknown): { fileName: string; contentType: string; content: Buffer; seconds: number } | null {
+  if (input === undefined || input === null) return null;
+  if (typeof input !== "object" || Array.isArray(input)) throw new ValidationError("voice must be a recording.");
+  const record = input as Record<string, unknown>;
+  if (typeof record.contentBase64 !== "string" || record.contentBase64.length === 0) throw new ValidationError("The voice note is empty.");
+  if (record.contentBase64.length > Math.ceil((MAX_VOICE_BYTES * 4) / 3) + 4) throw new ValidationError("The voice note is larger than 5 MB.");
+  const seconds = typeof record.seconds === "number" && Number.isFinite(record.seconds) ? Math.max(1, Math.ceil(record.seconds)) : NaN;
+  if (Number.isNaN(seconds)) throw new ValidationError("The voice note needs its length in seconds.");
+  if (seconds > MAX_VOICE_SECONDS) throw new ValidationError("A voice note can be up to 3 minutes.");
+  const content = Buffer.from(record.contentBase64, "base64");
+  if (content.length === 0) throw new ValidationError("The voice note is empty.");
+  if (content.length > MAX_VOICE_BYTES) throw new ValidationError("The voice note is larger than 5 MB.");
+  const type = voiceType(new Uint8Array(content));
+  if (!type) throw new ValidationError("That recording isn't audio Tohyee can play back.");
+  return { fileName: `voice-note.${type.extension}`, contentType: type.contentType, content, seconds };
 }
 
 /** Takes a message down (FCH5): its author, or an owner or admin. Its words and photos go; that it was there stays. */
@@ -232,7 +275,7 @@ export async function removeChatMessage(tx: OrgTx, idInput: unknown): Promise<Ch
   return (await shape(tx, updated.rows))[0];
 }
 
-/** A photo on a message, for the farm's people only (FCH2). */
+/** A photo or voice note on a message, for the farm's people only (FCH2, FCH9). */
 export async function readChatAttachment(tx: OrgTx, idInput: unknown): Promise<{ fileName: string; contentType: string; content: Buffer }> {
   await requireFarming(tx);
   const id = requireId(idInput, "attachmentId");
