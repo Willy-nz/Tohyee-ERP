@@ -19705,6 +19705,8 @@ a farm worker is on Home farm only.
   ("That recording isn't audio Tohyee can play back."). A voice note on its
   own is a message; it can also have words, photos and links. People who can
   see the farm can play it, and taking the message down removes it too.
+  The Android app asks for the microphone the first time someone taps Voice;
+  in a browser, recording needs Tohyee opened over https.
 - **FCH10 The AI and voice notes.** read_farm_chat says a message has a voice
   note and how long it is, but the AI can't hear it, and it can't post one.
 - **FCH11 Later.** Phone notifications are the next stage.
