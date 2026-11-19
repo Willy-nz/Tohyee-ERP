@@ -6,11 +6,12 @@ import { COVER_AGE_BANDS, GRAZED_BANDS, paddockBand } from "@/lib/farming/map-co
 
 /** The farmer's workspace. */
 describe("farm workspace tabs", () => {
-  it("are Today, Map, Log, Safety and More, in that order", () => {
+  it("are Today, Map, Log, Chat, Safety and More, in that order", () => {
     expect(FARM_TABS.map((tab) => [tab.label, tab.href])).toEqual([
       ["Today", "/operations/farm"],
       ["Map", "/operations/farm/map"],
       ["Log", "/operations/farm/log"],
+      ["Chat", "/operations/farm/chat"],
       ["Safety", "/operations/farm/safety"],
       ["More", "/operations/farm/more"],
     ]);

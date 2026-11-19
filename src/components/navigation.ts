@@ -600,6 +600,7 @@ export const FARM_MENUS: Menu[] = [
   { label: "Today", href: "/operations/farm", module: "farming", groups: [], area: ["/operations/farm"] },
   { label: "Map", href: "/operations/farm/map", module: "farming", groups: [], area: ["/operations/farm/map", "/operations/farm/tractor"] },
   { label: "Log", href: "/operations/farm/log", module: "farming", groups: [], area: ["/operations/farm/log"] },
+  { label: "Chat", href: "/operations/farm/chat", module: "farming", groups: [], area: ["/operations/farm/chat"] },
   { label: "Safety", href: "/operations/farm/safety", module: "farming", groups: [], area: ["/operations/farm/safety", "/operations/farming/safety"] },
   { label: "Effluent", href: "/operations/farm/effluent", module: "farming", groups: [], area: ["/operations/farm/effluent"] },
   {

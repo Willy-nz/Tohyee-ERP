@@ -43,6 +43,7 @@ export const FARM_STAFF_READ_TOOLS: readonly string[] = [
   "rainfall",
   "list_rain_gauges",
   "list_farm_tasks",
+  "read_farm_chat",
   "farm_calendar",
   "farm_product_stock",
   "list_soil_tests",
@@ -106,6 +107,7 @@ export const FARM_STAFF_RECORD_TOOLS: readonly string[] = [
   "record_rainfall",
   "add_farm_task",
   "mark_farm_task_done",
+  "post_farm_chat_message",
   //: each is a screen farm staff already record on (Treatments, Body condition, an animal's quick entry, Soil samples).
   "record_animal_treatment",
   "record_bcs",
