@@ -49,21 +49,38 @@ export function FarmMedicines({ organisationId, farm, farms }: FarmContext) {
       {data.error ? <Notice tone="error">{data.error}</Notice> : null}
       <section className={styles.machine} aria-label={`${farm.name} medicine cabinet`}>
         <header className={styles.marquee}>
-          <span>{farm.name}</span>
-          <small>
-            {slots.length ? `${slots.length} medicine${slots.length === 1 ? "" : "s"}` : "Empty"}
-            {low ? ` · ${low} to reorder` : ""}
-            {expiring ? ` · ${expiring} expiring` : ""}
-          </small>
+          <div className={styles.marqueeIdentity}>
+            <span className={styles.cabinetEmblem} aria-hidden="true">+</span>
+            <div className={styles.marqueeText}>
+              <span className={styles.marqueeEyebrow}>Farm supplies / medicine cabinet</span>
+              <h2>{farm.name}</h2>
+            </div>
+          </div>
+          <div className={styles.machineStats} aria-label="Cabinet summary">
+            <span className={styles.totalStat}><strong>{slots.length}</strong> products</span>
+            {low ? <span className={styles.attentionStat}><strong>{low}</strong> low or out</span> : null}
+            {expiring ? <span className={styles.expiryStat}><strong>{expiring}</strong> expiry alerts</span> : null}
+          </div>
         </header>
         <div className={styles.glass}>
+          <div className={styles.glassTop} aria-hidden="true">
+            <span>Stock on hand</span>
+            <span>SELECT A PRODUCT TO UPDATE</span>
+          </div>
           {data.data && !slots.length ? (
             <p className={styles.empty}>Nothing in the cabinet yet.{canManage ? " Start from the common list below." : " Ask a bookkeeper or owner to set it up."}</p>
           ) : null}
           <ul className={styles.shelves}>
-            {slots.map((entry) => (
+            {slots.map((entry, index) => (
               <li key={entry.chemicalRecordId}>
-                <button type="button" className={`${styles.slot} ${chosen === entry.chemicalRecordId ? styles.chosen : ""} ${entry.badge === "out" ? styles.out : ""}`} onClick={() => setChosen(chosen === entry.chemicalRecordId ? null : entry.chemicalRecordId)} aria-pressed={chosen === entry.chemicalRecordId}>
+                <button
+                  type="button"
+                  className={`${styles.slot} ${chosen === entry.chemicalRecordId ? styles.chosen : ""} ${entry.badge === "out" ? styles.out : ""}`}
+                  onClick={() => setChosen(chosen === entry.chemicalRecordId ? null : entry.chemicalRecordId)}
+                  aria-pressed={chosen === entry.chemicalRecordId}
+                  aria-label={`${entry.name}, ${amount(entry)} on hand${entry.badge ? `, ${BADGE_LABELS[entry.badge]}` : ""}${entry.expiry === "expired" ? ", expired" : entry.expiry === "soon" ? ", expires soon" : ""}. ${chosen === entry.chemicalRecordId ? "Close details" : "Open details"}`}
+                >
+                  <span className={styles.slotNumber} aria-hidden="true">{String.fromCharCode(65 + Math.floor(index / 4))}{(index % 4) + 1}</span>
                   <span className={styles.picture}>
                     {entry.photoFileId ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -74,9 +91,8 @@ export function FarmMedicines({ organisationId, farm, farms }: FarmContext) {
                   </span>
                   <span className={styles.coil} aria-hidden="true" />
                   <span className={styles.name}>{entry.name}</span>
-                  <span className={styles.price}>
-                    {amount(entry)}
-                  </span>
+                  <span className={styles.stockLabel}>In stock</span>
+                  <span className={styles.price}>{amount(entry)}</span>
                   <span className={styles.badges}>
                     {entry.badge === "low" ? <Badge tone="amber">{BADGE_LABELS.low}</Badge> : null}
                     {entry.badge === "out" ? <Badge tone="red">{BADGE_LABELS.out}</Badge> : null}
@@ -89,7 +105,12 @@ export function FarmMedicines({ organisationId, farm, farms }: FarmContext) {
             ))}
           </ul>
         </div>
-        <div className={styles.tray} aria-hidden="true" />
+        <div className={styles.machineFooter} aria-hidden="true">
+          <span className={styles.machineLight} />
+          <span className={styles.machineFooterLabel}>STOCK CONTROL</span>
+          <span className={styles.tray} />
+          <span className={styles.machineFooterLabel}>TOHYEE · FARM</span>
+        </div>
       </section>
 
       {slot ? <SlotPanel key={slot.chemicalRecordId} organisationId={organisationId} farmId={farm.id} farms={farms} slot={slot} canManage={canManage} onDone={reload} onRemoved={() => (setChosen(null), reload())} /> : null}
