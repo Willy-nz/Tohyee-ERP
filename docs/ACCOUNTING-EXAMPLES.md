@@ -22803,6 +22803,87 @@ in `tests/integration/farm-treatments.test.ts` and
 - **TRT8 A count resets stock.** Counted 3 L on 4 Oct, then 500 mL used on
   5 Oct: **2.5 L**, counted 4 Oct.
 
+## Farming: the medicine cabinet (MED1-MED10; built by Claude 21 Nov 2026 when the owner asked for a picture of the medicines on hand on each farm; following common practice, not yet reviewed)
+
+Records only: nothing posts. It builds on product stock (TRT7-TRT8): the
+cabinet's products are the farm's chemical register entries, and the
+withholding periods stay what the person types from the label (Tohyee
+never supplies one). Tested in `tests/unit/farm-medicines.test.ts` and
+`tests/integration/farm-medicines.test.ts`.
+
+- **MED1 The cabinet.** Each farm has its own cabinet: the products in
+  that farm's chemical register that someone has put in it, each with a
+  kind (MED2). The shelf shows each one with its picture, the amount on
+  hand in its unit, and a badge (MED6, MED7). Products not in the cabinet
+  (sprays, fuel) stay in the chemical register and product stock as before.
+- **MED2 Kinds and the starter lists.** The kinds are generic, not brands:
+  - mastitis tubes, dry cow therapy, teat sealant;
+  - injectable antibiotic, anti-inflammatory;
+  - calcium and magnesium, energy drench for ketosis;
+  - oral drench, pour-on, injectable drench;
+  - lice and flystrike treatment, vaccine;
+  - vitamin and mineral injection, mineral bolus;
+  - bloat treatment, scour treatment and electrolytes;
+  - footrot and footbath, eye treatment, wound spray;
+  - reproduction products, teat spray;
+  - other.
+
+  "Start from the common list" offers the kinds usual for a dairy farm, or
+  for a sheep farm, all ticked. Each one kept becomes a product named after
+  its kind, for example "Dry cow therapy", with no withholding periods and
+  nothing in stock. The farmer renames it to the product they use.
+  - Dairy: mastitis tubes, dry cow therapy, teat sealant, injectable
+    antibiotic, anti-inflammatory, calcium and magnesium, energy drench,
+    oral drench, pour-on, vaccine, vitamin and mineral injection, mineral
+    bolus, bloat treatment, scour treatment and electrolytes, footrot and
+    footbath, eye treatment, wound spray, reproduction products, teat spray.
+  - Sheep: oral drench, injectable drench, lice and flystrike treatment,
+    vaccine, vitamin and mineral injection, mineral bolus, injectable
+    antibiotic, anti-inflammatory, footrot and footbath, eye treatment,
+    wound spray, scour treatment and electrolytes, calcium and magnesium,
+    energy drench.
+
+  A kind already in the farm's cabinet isn't added twice.
+- **MED3 Pictures.** Each kind has a drawing that Tohyee draws: a tube, a
+  vial, a bottle, a bag, a drench pack, a pour-on pack, a jerry can, a
+  bolus, a sachet, a spray can or a box. The farmer can take a photo of
+  their own product to use instead, and remove it to go back to the drawing.
+  Brand packaging photos aren't supplied.
+- **MED4 Taking it off.**
+  - A treatment takes off the quantity it used (TRT7).
+  - "Used" takes off what was used without a treatment record, such as teat
+    spray or the footbath: Teat spray, 20 L received on 1 Nov, 5 L used on
+    8 Nov: **15 L on hand**.
+  - Thrown out takes it off too (TRT7).
+- **MED5 Moving it between farms.** 2 L of Oral drench moved from Home to
+  Runoff on 10 Nov:
+  - Home goes down 2 L ("Moved to Runoff").
+  - Runoff's Oral drench goes up 2 L ("Moved from Home").
+  - If Runoff has no product with that name, it's added to Runoff's
+    chemical register and cabinet, with the same kind and unit.
+  - Moving more than is on hand is refused, and so is moving to the same
+    farm.
+- **MED6 Running low and out.** A reorder level is set in the product's
+  unit. On hand at or below it: "Running low". Nil or less: "Out". On hand
+  less than nil (more used than recorded) shows "Count it": treatments still
+  take it off.
+- **MED7 Expiry.** The soonest expiry date of stock received since the last
+  count, or the count's own expiry if typed, is shown. Before today:
+  "Expired". Within 30 days: "Expires soon". Received 1 Oct expiring
+  15 Dec, looked at on 21 Nov: "Expires soon (15 Dec)". Stock that's Out
+  shows no expiry.
+- **MED8 Units.** Tubes, boluses and packs are counted as "each"; doses as
+  "doses"; liquids and powders as L or kg (mL and g counted as L and kg).
+  A use in a unit that can't come off the product's unit is listed, not
+  taken off (TRT7).
+- **MED9 Taking a product out of the cabinet.** Only the cabinet entry
+  goes: its stock history and treatments stay, and it's still in the
+  chemical register.
+- **MED10 Who can do what.** Anyone who can see the farm sees its cabinet.
+  Recording stock is for people who record farm work. Adding products and
+  starter lists, photos, reorder levels and taking products out are for
+  people who record safety (the chemical register).
+
 ## Farming: breeding records and rotation planning (BR1-BR6; built by Claude 5 Nov 2026, common NZ practice, not yet reviewed)
 
 Records only: nothing posts or judges. Tested in

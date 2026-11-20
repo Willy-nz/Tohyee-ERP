@@ -97,6 +97,7 @@ export const FARMING_TOOLS: readonly string[] = [
   "farm_home",
   "farm_calendar",
   "farm_product_stock",
+  "farm_medicine_cabinet",
   // More of what the farm screens show.
   "farm_rotation_plan",
   "list_breeding_records",

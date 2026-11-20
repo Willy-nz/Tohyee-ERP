@@ -292,7 +292,10 @@ export async function getSprayWithholding(tx: OrgTx, jobIdInput: unknown): Promi
 
 // Product stock -----------------------------------------------------------------------------------
 
-export type ProductUse = { date: string; kind: "received" | "counted" | "disposed" | "treatment" | "spray"; quantity: string; unit: string; text: string };
+export type StockMoveKind = "received" | "counted" | "disposed" | "used" | "moved_out" | "moved_in";
+export type ProductUse = { date: string; kind: StockMoveKind | "treatment" | "spray"; quantity: string; unit: string; text: string; expiresOn?: string | null };
+
+const MOVE_WORDS: Record<StockMoveKind, string> = { received: "Received", counted: "Counted", disposed: "Thrown out", used: "Used", moved_out: "Moved to", moved_in: "Moved from" };
 
 export type ProductStock = {
   chemicalRecordId: string;
@@ -319,8 +322,9 @@ export async function productStock(tx: OrgTx, input: { farmId?: unknown } = {}):
   const chemicals = (await currentRecords<ChemicalData>(tx, "chemical", { farmId })).filter((record) => !record.data.removed);
   if (!chemicals.length) return [];
   const ids = chemicals.map((record) => record.recordId);
-  const moves = await tx.query<{ chemical_record_id: string; movement_type: "received" | "counted" | "disposed"; moved_on: string; quantity: string; unit: string; batch: string | null; note: string | null; id: string }>(
-    "select chemical_record_id::text, movement_type, moved_on::text, quantity::text, unit, batch, note, id::text from farm_product_stock s where s.chemical_record_id = any($1::uuid[]) order by s.moved_on, s.id",
+  const moves = await tx.query<{ chemical_record_id: string; movement_type: StockMoveKind; moved_on: string; quantity: string; unit: string; batch: string | null; note: string | null; id: string; expires_on: string | null; other_farm: string | null }>(
+    `select s.chemical_record_id::text, s.movement_type, s.moved_on::text, s.quantity::text, s.unit, s.batch, s.note, s.id::text, s.expires_on::text, f.name as other_farm
+       from farm_product_stock s left join farms f on f.id = s.moved_farm_id where s.chemical_record_id = any($1::uuid[]) order by s.moved_on, s.id`,
     [ids],
   );
   const treatments = await tx.query<{ chemical_record_id: string; treated_on: string; quantity: string; quantity_unit: string; product: string; head: number; mob: string | null }>(
@@ -338,7 +342,15 @@ export async function productStock(tx: OrgTx, input: { farmId?: unknown } = {}):
     const history: ProductUse[] = [
       ...moves.rows
         .filter((row) => row.chemical_record_id === record.recordId)
-        .map((row) => ({ date: row.moved_on, kind: row.movement_type, quantity: toPlainString(dec(row.quantity)), unit: row.unit, text: [row.movement_type === "counted" ? "Counted" : row.movement_type === "received" ? "Received" : "Thrown out", row.batch ? `batch ${row.batch}` : null, row.note].filter(Boolean).join(", "), order: Number(row.id) })),
+        .map((row) => ({
+          date: row.moved_on,
+          kind: row.movement_type,
+          quantity: toPlainString(dec(row.quantity)),
+          unit: row.unit,
+          text: [row.other_farm ? `${MOVE_WORDS[row.movement_type]} ${row.other_farm}` : MOVE_WORDS[row.movement_type], row.batch ? `batch ${row.batch}` : null, row.note].filter(Boolean).join(", "),
+          expiresOn: row.expires_on,
+          order: Number(row.id),
+        })),
       ...treatments.rows
         .filter((row) => row.chemical_record_id === record.recordId)
         .map((row) => ({ date: row.treated_on, kind: "treatment" as const, quantity: toPlainString(dec(row.quantity)), unit: row.quantity_unit, text: `Treated ${row.head} head${row.mob ? ` (${row.mob})` : ""}`, order: 0 })),
@@ -352,7 +364,7 @@ export async function productStock(tx: OrgTx, input: { farmId?: unknown } = {}):
         void _order;
         return rest;
       });
-    const stockMoves = history.filter((entry) => entry.kind === "received" || entry.kind === "counted" || entry.kind === "disposed");
+    const stockMoves = history.filter((entry) => entry.kind !== "treatment" && entry.kind !== "spray");
     const baseUnit = stockMoves.length ? toBase("1", stockMoves[stockMoves.length - 1].unit)?.unit ?? stockMoves[stockMoves.length - 1].unit : (record.data.unit ? (toBase("1", record.data.unit)?.unit ?? null) : null);
     let onHand: Decimal | null = null;
     let lastCountedOn: string | null = null;
@@ -367,7 +379,7 @@ export async function productStock(tx: OrgTx, input: { farmId?: unknown } = {}):
       if (entry.kind === "counted") {
         onHand = amount;
         lastCountedOn = entry.date;
-      } else if (entry.kind === "received") onHand = add(onHand ?? ZERO_DECIMAL, amount);
+      } else if (entry.kind === "received" || entry.kind === "moved_in") onHand = add(onHand ?? ZERO_DECIMAL, amount);
       else if (onHand !== null || stockMoves.length) onHand = sub(onHand ?? ZERO_DECIMAL, amount);
     }
     return {
@@ -383,12 +395,12 @@ export async function productStock(tx: OrgTx, input: { farmId?: unknown } = {}):
   });
 }
 
-/** Records product received, counted or thrown out (TRT7). Bookkeepers and farm staff. */
+/** Records product received, counted, thrown out (TRT7) or used without a treatment (MED4). Bookkeepers and farm staff. */
 export async function recordProductStock(tx: OrgTx, input: Record<string, unknown>): Promise<ProductStock[]> {
   await requireFarming(tx);
   if (typeof input.chemicalRecordId !== "string" || !UUID.test(input.chemicalRecordId)) throw new ValidationError("Choose a product from the chemical register.");
   const chemical = await currentRecord<ChemicalData>(tx, "chemical", input.chemicalRecordId);
-  const movementType = requireOneOf(input.movementType, "What happened", ["received", "counted", "disposed"] as const);
+  const movementType = requireOneOf(input.movementType, "What happened", ["received", "counted", "disposed", "used"] as const);
   const movedOn = input.movedOn ? parseIsoDate(input.movedOn, "Date") : todayIsoDate();
   const quantity = parseDecimalInput(input.quantity, "Quantity", { maxScale: 3, allowZero: movementType === "counted" });
   const unit = requireOneOf(input.unit, "Unit", STOCK_UNITS);

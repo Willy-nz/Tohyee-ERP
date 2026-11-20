@@ -46,6 +46,7 @@ export const FARM_STAFF_READ_TOOLS: readonly string[] = [
   "read_farm_chat",
   "farm_calendar",
   "farm_product_stock",
+  "farm_medicine_cabinet",
   "list_soil_tests",
   //: screens farm staff read on their own farms. Co-op shares and the year's figures are the business's, so not here.
   "farm_rotation_plan",
