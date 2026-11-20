@@ -55,6 +55,7 @@ export type TrustTax = {
   minorCorporateTax: string;
   /** Trustee net income, before losses brought forward (TRT10). */
   trusteeNetIncome: string;
+  lossesBroughtForward: string;
   lossesUsed: string;
   lossCarriedForward: string;
   trusteeIncome: string;
@@ -177,6 +178,7 @@ export function trustTax(input: {
     minorCorporateIncome: money(minorCorporate),
     minorCorporateTax: money(minorCorporateTax),
     trusteeNetIncome: money(trusteeNetIncome),
+    lossesBroughtForward: money(input.lossesBroughtForward),
     lossesUsed: money(lossesUsed),
     lossCarriedForward: money(carried),
     trusteeIncome: money(trusteeIncome),

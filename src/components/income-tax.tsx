@@ -59,7 +59,7 @@ function Report({ organisationId, report, reload, view, gst }: { organisationId:
       ) : null}
       {view === "calculation" ? (
         <>
-          {report.workpaper.trust ? <BeneficiaryIncomeCard organisationId={organisationId} incomeYear={report.incomeYear} trust={report.workpaper.trust} onSaved={reload} /> : null}
+          {report.workpaper.trust ? <BeneficiaryIncomeCard organisationId={organisationId} incomeYear={report.incomeYear} trust={report.workpaper.trust} ret={report.workpaper.trustReturn} trustClass={report.settings.trustClass} onSaved={reload} /> : null}
           <Workpaper organisationId={organisationId} report={report} onSaved={reload} />
           <TaxAssets organisationId={organisationId} assets={report.taxAssets} incomeYear={report.incomeYear} onSaved={reload} />
         </>

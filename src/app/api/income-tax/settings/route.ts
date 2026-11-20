@@ -11,6 +11,7 @@ export const PUT = route(async (request) => {
       version: body.version,
       trustKind: body.trustKind,
       dateOfDeath: body.dateOfDeath,
+      trustClass: body.trustClass,
     }),
   );
   return json({ settings });
