@@ -19711,6 +19711,50 @@ a farm worker is on Home farm only.
   note and how long it is, but the AI can't hear it, and it can't post one.
 - **FCH11 Later.** Phone notifications are the next stage.
 
+## Business structure (ENT1-ENT8; 20 Nov 2026; following common practice, not yet reviewed)
+
+Tested in `tests/integration/business-structure.test.ts` and
+`tests/unit/business-structure.test.ts`. Settings › Business structure holds
+what kind of entity the organisation is and its IRD number. Words and
+defaults only: nothing already posted changes.
+
+- **ENT1 The types.** Sole trader, partnership, company, look-through company,
+  trust, or incorporated society. Left blank until someone chooses; owners
+  and admins choose it.
+- **ENT2 IRD number.** 8 or 9 digits, kept as 9, and checked with Inland
+  Revenue's published check digit (a mistyped number is refused: "That IRD
+  number doesn't pass Inland Revenue's check. Check the digits."). It's
+  optional.
+- **ENT3 Income tax follows it.** A company's income tax workpaper is for a
+  company, a sole trader's for an individual, and Income tax's own choice
+  then follows Settings and can't be set against it. Tohyee doesn't work out
+  income tax for partnerships, look-through companies, trusts or societies:
+  the workpaper says so ("Tohyee's income tax is for companies and sole
+  traders. A partnership's partners are taxed on their shares."), as each of
+  those is taxed differently.
+- **ENT4 Year-end notes.** The draft notes for special purpose statements say
+  what the entity is (for example "a company registered under the Companies
+  Act 1993"), and keep only the wording for that type: a company's notes
+  keep the Tax Administration (Financial Statements) Order 2014 and
+  associated persons; a trust's the Domestic Trusts Order 2022; a sole
+  trader's, partnership's and look-through company's leave both out and ask
+  the preparer to name the framework. Saved notes don't change.
+- **ENT5 Equity note.** Named for the type: shareholders' equity and current
+  accounts (company, look-through company), trust capital and beneficiaries'
+  current accounts (trust), partners' capital and current accounts
+  (partnership), owner's equity (sole trader), accumulated funds
+  (incorporated society).
+- **ENT6 Income tax note.** A company: tax on the year's taxable income. A
+  look-through company: the company isn't taxed; its owners are taxed on
+  their shares. A partnership: likewise for the partners. A sole trader:
+  income tax is the owner's, not the business's, and paying it counts as
+  drawings. A trust or society: left for the preparer to describe.
+- **ENT7 Directory.** The printed directory page shows the entity type and
+  the IRD number, and Settings › Directory names its people for the type
+  (directors, trustees, partners, committee members).
+- **ENT8 Payroll.** Payday filing's employer IRD number starts from the
+  organisation's IRD number when it hasn't been set; it can still differ.
+
 ## Team chat (TCH1-TCH8; 19 Nov 2026; following common practice, not yet reviewed)
 
 Tested in `tests/integration/team-chat.test.ts`, `tests/unit/navigation.test.ts`

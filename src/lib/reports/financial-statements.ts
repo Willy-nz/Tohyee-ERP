@@ -5,6 +5,7 @@ import type { OrgTx } from "@/lib/db/org-transaction";
 import { ValidationError } from "@/lib/errors";
 import { addDays, financialYearEnd, financialYearStart } from "@/lib/financial-year";
 import { getLivestockSettings } from "@/lib/livestock/movements";
+import type { EntityType } from "@/lib/organisations/entity";
 import { getOrganisationSettings } from "@/lib/organisations/settings";
 import { type Column, CONTENT_WIDTH, PdfWriter } from "@/lib/pdf/writer";
 import { balanceSheet, financialYearEndMonth, profitAndLoss } from "@/lib/reports/financial";
@@ -48,17 +49,18 @@ export async function draftNotes(tx: OrgTx): Promise<StatementNote[]> {
   const livestock = await getLivestockSettings(tx).catch(() => null);
   const stock = await tx.query("select 1 from inventory_item_balances where on_hand_quantity <> 0 limit 1").catch(() => ({ rowCount: 0 }));
   const assets = await tx.query("select 1 from accounts where account_type = 'fixed_asset' and is_active limit 1");
+  const entity = organisation.entityType;
   const notes: StatementNote[] = [
     {
       title: "Reporting entity",
-      body: `${organisation.displayName} is [describe the entity: for example a company registered under the Companies Act 1993, a partnership, a trust or a sole trader]. Its main activity is [describe it].`,
+      body: `${organisation.displayName} is ${entity ? ENTITY_DESCRIPTIONS[entity] : "[describe the entity: for example a company registered under the Companies Act 1993, a partnership, a trust or a sole trader]"}. Its main activity is [describe it].`,
     },
     {
       title: "Basis of preparation",
       body:
         "These are special purpose financial statements, prepared for the owners and for income tax purposes. They aren't general purpose financial statements. " +
         "[Name the framework they follow: for example the Special Purpose Financial Reporting Framework for use by For-Profit Entities, issued by Chartered Accountants Australia and New Zealand.] " +
-        "[For a company: they meet the minimum requirements of the Tax Administration (Financial Statements) Order 2014, which a small company (not in a group, with income and expenditure each of $30,000 or less) doesn't have to. For a trust: the Tax Administration (Financial Statements—Domestic Trusts) Order 2022.] " +
+        taxOrderSentence(entity) +
         "They are prepared on the accrual basis using double-entry records, on the assumption that the business will carry on. " +
         `Amounts are in ${tx.baseCurrency} on the historical cost basis, except where a note says otherwise, and last year's figures are shown beside this year's.`,
     },
@@ -98,7 +100,7 @@ export async function draftNotes(tx: OrgTx): Promise<StatementNote[]> {
   notes.push(
     {
       title: "Income tax",
-      body: "[Say how income tax is accounted for: for example, income tax expense is the tax payable on the year's taxable income.]",
+      body: incomeTaxNote(entity),
     },
     {
       title: "Interest and dividends received",
@@ -108,16 +110,100 @@ export async function draftNotes(tx: OrgTx): Promise<StatementNote[]> {
       title: "Reconciliation to taxable income",
       body: "Net profit before tax: [amount]\n\nPlus expenses that aren't deductible: [list, for example entertainment not deductible and fines]\n\nLess income that isn't taxable: [list]\n\nTaxable income: [amount]",
     },
-    {
-      title: "Transactions with associated persons",
-      body: "[For a company: show amounts with associated persons that are individuals, trusts or non-resident companies: interest paid on their loans; loans or other advances made to them; payments for their services, such as wages, salaries and management fees; rent or lease payments for land or other assets; and payments for intangible property, such as royalties. Or say there were none.]",
-    },
-    {
-      title: "Shareholders' equity and current accounts",
-      body: "[For a company: reconcile the movements in shareholders' equity, and in any loans or current accounts with shareholders and associated persons, from the start of the year to the end: opening balance, money put in, money taken out, interest, the year's profit allocated, closing balance.]",
-    },
+    associatedPersonsNote(entity),
+    equityNote(entity),
   );
   return notes;
+}
+
+/** ENT4: what the entity is, for the reporting entity note. */
+const ENTITY_DESCRIPTIONS: Record<EntityType, string> = {
+  sole_trader: "the business of [the owner's name], a sole trader",
+  partnership: "a partnership of [the partners' names]",
+  company: "a company registered under the Companies Act 1993",
+  look_through_company: "a look-through company registered under the Companies Act 1993",
+  trust: "a trust settled by [deed, date]",
+  incorporated_society: "an incorporated society registered under the Incorporated Societies Act 2022",
+};
+
+/** ENT4: the Tax Administration order that sets the minimum, for the types it's about; the rest name it themselves. */
+function taxOrderSentence(entity: EntityType | null): string {
+  if (entity === "company") {
+    return "They meet the minimum requirements of the Tax Administration (Financial Statements) Order 2014. [A small company (not in a group, with income and expenditure each of $30,000 or less) doesn't have to; edit this if it doesn't.] ";
+  }
+  if (entity === "trust") return "They meet the minimum requirements of the Tax Administration (Financial Statements—Domestic Trusts) Order 2022. ";
+  if (entity === null) {
+    return "[For a company: they meet the minimum requirements of the Tax Administration (Financial Statements) Order 2014, which a small company (not in a group, with income and expenditure each of $30,000 or less) doesn't have to. For a trust: the Tax Administration (Financial Statements—Domestic Trusts) Order 2022.] ";
+  }
+  return "";
+}
+
+/** ENT6. */
+function incomeTaxNote(entity: EntityType | null): string {
+  switch (entity) {
+    case "company":
+      return "Income tax expense is the tax payable on the year's taxable income. [Edit this if deferred tax or tax losses are accounted for.]";
+    case "look_through_company":
+      return "As a look-through company, the company isn't taxed on its income. Its income and expenses pass to its owners in proportion to their shares, and they are taxed on them, so no income tax is shown in these statements.";
+    case "partnership":
+      return "The partnership isn't taxed on its income. Each partner is taxed on their share of it, so no income tax is shown in these statements.";
+    case "sole_trader":
+      return "Income tax is the owner's own liability, not the business's, so it isn't shown as an expense. Income tax paid from the business's accounts is shown as drawings.";
+    case "trust":
+      return "[Say how income tax is accounted for: for example, tax on trustee income is shown as an expense of the trust, and beneficiary income is taxed to the beneficiaries.]";
+    case "incorporated_society":
+      return "[Say whether the society is exempt from income tax or how its tax is accounted for.]";
+    default:
+      return "[Say how income tax is accounted for: for example, income tax expense is the tax payable on the year's taxable income.]";
+  }
+}
+
+/** ENT4: associated persons for a company; related parties for the rest. */
+function associatedPersonsNote(entity: EntityType | null): StatementNote {
+  if (entity === "company") {
+    return {
+      title: "Transactions with associated persons",
+      body: "[Show amounts with associated persons that are individuals, trusts or non-resident companies: interest paid on their loans; loans or other advances made to them; payments for their services, such as wages, salaries and management fees; rent or lease payments for land or other assets; and payments for intangible property, such as royalties. Or say there were none.]",
+    };
+  }
+  if (entity === null) {
+    return {
+      title: "Transactions with associated persons",
+      body: "[For a company: show amounts with associated persons that are individuals, trusts or non-resident companies: interest paid on their loans; loans or other advances made to them; payments for their services, such as wages, salaries and management fees; rent or lease payments for land or other assets; and payments for intangible property, such as royalties. Or say there were none.]",
+    };
+  }
+  return { title: "Related parties", body: "[Describe any transactions with related people or organisations, or say there were none.]" };
+}
+
+/** ENT5: the equity note, named for the type. */
+function equityNote(entity: EntityType | null): StatementNote {
+  switch (entity) {
+    case "company":
+    case "look_through_company":
+      return {
+        title: "Shareholders' equity and current accounts",
+        body: "[Reconcile the movements in shareholders' equity, and in any loans or current accounts with shareholders and associated persons, from the start of the year to the end: opening balance, money put in, money taken out, interest, the year's profit allocated, closing balance.]",
+      };
+    case "trust":
+      return {
+        title: "Trust capital and beneficiaries' current accounts",
+        body: "[Reconcile trust capital and each beneficiary's current account from the start of the year to the end: opening balance, settlements and gifts, the year's profit, distributions, closing balance.]",
+      };
+    case "partnership":
+      return {
+        title: "Partners' capital and current accounts",
+        body: "[Reconcile each partner's capital and current account from the start of the year to the end: opening balance, money put in, their share of the year's profit, drawings, closing balance.]",
+      };
+    case "sole_trader":
+      return { title: "Owner's equity", body: "[Reconcile the owner's equity from the start of the year to the end: opening balance, money put in, the year's profit, drawings, closing balance.]" };
+    case "incorporated_society":
+      return { title: "Accumulated funds", body: "[Reconcile the society's accumulated funds from the start of the year to the end: opening balance, the year's surplus or deficit, any transfers to or from reserves, closing balance.]" };
+    default:
+      return {
+        title: "Shareholders' equity and current accounts",
+        body: "[For a company: reconcile the movements in shareholders' equity, and in any loans or current accounts with shareholders and associated persons, from the start of the year to the end: opening balance, money put in, money taken out, interest, the year's profit allocated, closing balance.]",
+      };
+  }
 }
 
 /** Draft notes for a Tier 3 or Tier 4 performance report (NPR). */

@@ -9,6 +9,7 @@ import { type GstPeriodSetting, gstPeriodSetting } from "@/lib/reports/gst-boxes
 import { type AvailableOn, isAvailableOn, onlyWords } from "@/lib/tax/available-on";
 import { GST_BASES, type GstBasis } from "@/lib/tax/categories";
 import { parseIsoDate } from "@/lib/dates";
+import type { EntityType } from "@/lib/organisations/entity";
 import { optionalString, requireOneOf, requireString } from "@/lib/validation";
 
 /** A GST number as digits (8 or 9), the same check as contacts'. */
@@ -63,6 +64,9 @@ export type OrganisationSettings = {
   postalAddress: string | null;
   /** The organisation's GST number, as digits (PD1); shown on tax invoices. */
   gstNumber: string | null;
+  /** Settings › Business structure (ENT1, ENT2); saved there, not with the rest of the settings. */
+  entityType: EntityType | null;
+  irdNumber: string | null;
   /** Registered for GST (NR1-NR8); new organisations start registered, as a guess until confirmed. */
   gstRegistered: boolean;
   /** Registered from this date (NR5); null = from the start. */
@@ -104,6 +108,8 @@ export async function getOrganisationSettings(tx: OrgTx): Promise<OrganisationSe
     export_tax_code: string | null;
     postal_address: string | null;
     gst_number: string | null;
+    entity_type: EntityType | null;
+    ird_number: string | null;
     gst_registered: boolean;
     gst_registered_from: string | null;
     gst_registered_until: string | null;
@@ -114,7 +120,7 @@ export async function getOrganisationSettings(tx: OrgTx): Promise<OrganisationSe
   }>(
     `select organisation_id, display_name, base_currency, financial_year_end_month, gst_basis, gst_period_months, gst_period_end_month, advanced_features, accounting_enabled, payroll_enabled, crm_enabled, analytics_enabled, not_for_profit_enabled, allow_negative_stock,
             foreign_trade, (select t.code from tax_codes t where t.id = export_tax_code_id) as export_tax_code,
-            postal_address, gst_number, gst_registered, gst_registered_from::text, gst_registered_until::text, payment_details,
+            postal_address, gst_number, entity_type, ird_number, gst_registered, gst_registered_from::text, gst_registered_until::text, payment_details,
             to_char(gst_registration_confirmed_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as gst_registration_confirmed_at, gst_registration_confirmed_by,
             coalesce((select enabled from livestock_settings where id = true), false) as livestock_enabled,
             coalesce((select enabled from farming_settings where id = true), false) as farming_enabled,
@@ -147,6 +153,8 @@ export async function getOrganisationSettings(tx: OrgTx): Promise<OrganisationSe
     exportTaxCode: row.export_tax_code,
     postalAddress: row.postal_address,
     gstNumber: row.gst_number,
+    entityType: row.entity_type ?? null,
+    irdNumber: row.ird_number ?? null,
     gstRegistered: row.gst_registered,
     gstRegisteredFrom: row.gst_registered_from,
     gstRegisteredUntil: row.gst_registered_until,

@@ -1,5 +1,6 @@
 import { writeAuditEvent } from "@/lib/audit";
 import type { OrgTx } from "@/lib/db/org-transaction";
+import { ENTITY_TYPE_LABELS, type EntityType, formatIrdNumber } from "@/lib/organisations/entity-types";
 import { ValidationError } from "@/lib/errors";
 
 /*
@@ -83,14 +84,24 @@ export type DirectoryPage = { name: string; sections: Array<{ title: string; lin
 const MONTHS = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"];
 
 export function directoryPage(
-  organisation: { displayName: string; postalAddress: string | null; gstNumber: string | null; financialYearEndMonth: number },
+  organisation: {
+    displayName: string;
+    postalAddress: string | null;
+    gstNumber: string | null;
+    financialYearEndMonth: number;
+    entityType?: EntityType | null;
+    irdNumber?: string | null;
+  },
   directory: OrganisationDirectory,
 ): DirectoryPage {
   const lastDay = new Date(Date.UTC(2001, organisation.financialYearEndMonth, 0)).getUTCDate();
   const details: DirectoryLine[] = [
+    // ENT7: what it is, then its numbers.
+    ...(organisation.entityType ? [{ label: "Entity type", value: ENTITY_TYPE_LABELS[organisation.entityType] }] : []),
     ...(directory.registeredOffice ? [{ label: "Registered office", value: directory.registeredOffice }] : []),
     ...(organisation.postalAddress ? [{ label: "Postal address", value: organisation.postalAddress }] : []),
     ...directory.numbers,
+    ...(organisation.irdNumber ? [{ label: "IRD number", value: formatIrdNumber(organisation.irdNumber) }] : []),
     ...(organisation.gstNumber ? [{ label: "GST number", value: organisation.gstNumber }] : []),
     { label: "Balance date", value: `${lastDay} ${MONTHS[organisation.financialYearEndMonth - 1]}` },
   ];

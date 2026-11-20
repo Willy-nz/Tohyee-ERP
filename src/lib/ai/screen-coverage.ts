@@ -701,6 +701,7 @@ export const SCREEN_COVERAGE: Record<string, ScreenCoverage> = {
   "POST /api/organisations/[organisationId]/analytics/report-emails/folders": {"next": "accounting"},
   "POST /api/organisations/[organisationId]/analytics/report-emails": {"next": "accounting"},
   "PUT /api/organisations/[organisationId]/directory": {"next": "accounting"},
+  "PUT /api/organisations/[organisationId]/business-structure": {"next": "accounting"},
   "DELETE /api/organisations/[organisationId]/handover": {"person": "Who can use the organisation is for a person to decide."},
   "PUT /api/organisations/[organisationId]/logo": {"next": "accounting"},
   "DELETE /api/organisations/[organisationId]/logo": {"next": "accounting"},

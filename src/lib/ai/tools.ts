@@ -1,5 +1,6 @@
 import { STALE_TOOL_LIST_NOTE } from "@/lib/ai/mcp-tool-list";
 import { directoryPage, getOrganisationDirectory } from "@/lib/organisations/directory";
+import { ENTITY_TYPE_LABELS } from "@/lib/organisations/entity-types";
 import type { ToolGroupStatus } from "@/lib/ai/tool-modules";
 import { listGroups } from "@/lib/consolidation/groups";
 import { consolidatedBalanceSheet, consolidatedBudgetVsActual, consolidatedProfitAndLoss } from "@/lib/consolidation/report";
@@ -294,7 +295,7 @@ export const READ_TOOLS: readonly AiTool[] = (
     name: "get_organisation",
     title: "Organisation",
     description:
-      "The organisation these books are for: name, base currency, financial year end, GST registration (gstRegistration: status today, whether a person has confirmed it, and its dates; the GST number alone doesn't decide it), GST basis, GST filing period and GST number, your role, what this connection may do now (access: read, draft, post or full, capped by your role now), and today's date. Call this first.",
+      "The organisation these books are for: name, base currency, financial year end, GST registration (gstRegistration: status today, whether a person has confirmed it, and its dates; the GST number alone doesn't decide it), GST basis, GST filing period and GST number, the entity type (company, trust and so on, or null when not chosen), your role, what this connection may do now (access: read, draft, post or full, capped by your role now), and today's date. Call this first.",
     inputSchema: schema(),
     async run(tx, _args, context) {
       const settings = await getOrganisationSettings(tx);
@@ -311,6 +312,8 @@ export const READ_TOOLS: readonly AiTool[] = (
         gstRegisteredUntil: settings.gstRegisteredUntil,
         gstRegistration: gstRegistrationSummary(settings, todayIsoDate()),
         gstNumber: settings.gstNumber ? formatGstNumber(settings.gstNumber) : null,
+        // ENT1: null until someone chooses it in Settings › Business structure.
+        entityType: settings.entityType ? ENTITY_TYPE_LABELS[settings.entityType] : null,
         modules: {
           advancedReporting: settings.advancedFeatures,
           crm: settings.crmEnabled,
