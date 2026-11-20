@@ -80,7 +80,7 @@ export function FarmMedicines({ organisationId, farm, farms }: FarmContext) {
                   aria-pressed={chosen === entry.chemicalRecordId}
                   aria-label={`${entry.name}, ${amount(entry)} on hand${entry.badge ? `, ${BADGE_LABELS[entry.badge]}` : ""}${entry.expiry === "expired" ? ", expired" : entry.expiry === "soon" ? ", expires soon" : ""}. ${chosen === entry.chemicalRecordId ? "Close details" : "Open details"}`}
                 >
-                  <span className={styles.slotNumber} aria-hidden="true">{String.fromCharCode(65 + Math.floor(index / 4))}{(index % 4) + 1}</span>
+                  <span className={styles.slotNumber} aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
                   <span className={styles.picture}>
                     {entry.photoFileId ? (
                       // eslint-disable-next-line @next/next/no-img-element
@@ -91,7 +91,7 @@ export function FarmMedicines({ organisationId, farm, farms }: FarmContext) {
                   </span>
                   <span className={styles.coil} aria-hidden="true" />
                   <span className={styles.name}>{entry.name}</span>
-                  <span className={styles.stockLabel}>In stock</span>
+                  <span className={styles.stockLabel}>On hand</span>
                   <span className={styles.price}>{amount(entry)}</span>
                   <span className={styles.badges}>
                     {entry.badge === "low" ? <Badge tone="amber">{BADGE_LABELS.low}</Badge> : null}
