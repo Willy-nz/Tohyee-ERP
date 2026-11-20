@@ -159,7 +159,7 @@ describeWithDatabase("farm team tasks", () => {
     await run((tx) => setMemberFarmAccess(tx, { userId: starter.id, role: "farm_worker", access: "farms", farmIds: [w.home] }));
     await setWindow(starter.id, inHours(24), null);
     const team = async () => ((await call(owner, teamRoute.GET as Handler, `/api/farming/farms/${w.home}/team`, { farmId: w.home })).body.people as Array<{ name: string }>).map((person) => person.name).sort();
-    const add = (assignedToUserId: string, title: string) => call(owner, tasksRoute.POST as Handler, `/api/farming/farms/${w.home}/tasks`, { farmId: w.home }, "POST", { title, dueOn: "2026-11-20", assignedToUserId });
+    const add = (assignedToUserId: string, title: string) => call(owner, tasksRoute.POST as Handler, `/api/farming/farms/${w.home}/tasks`, { farmId: w.home }, "POST", { title, dueOn: "2030-06-03", assignedToUserId });
 
     // Current, with an end date: on the team, and can be given a task.
     expect(await team()).toEqual(["Aroha", "Hemi", "Tama"]);
@@ -190,7 +190,7 @@ describeWithDatabase("farm team tasks", () => {
     expect(open.filter((task) => task.needsReassigning).map((task) => task.id)).toEqual([calvesId]);
     const done = (await run((tx) => listTasks(tx, { farmId: w.home, view: "done" }))).find((task) => task.id === fence.id);
     expect([done?.assignedToUserId, done?.needsReassigning]).toEqual([temp.id, false]);
-    const due = await run((tx) => tasksDue(tx, { from: "2026-11-20", to: "2026-11-20", farmId: w.home }));
+    const due = await run((tx) => tasksDue(tx, { from: "2030-06-03", to: "2030-06-03", farmId: w.home }));
     expect(due.find((item) => item.taskId === calvesId)?.needsReassigning).toBe(true);
     // Changing something else keeps who it's for; nothing is deleted.
     const noted = await call(owner, taskRoute.PATCH as Handler, `/api/farming/tasks/${calvesId}`, { taskId: calvesId }, "PATCH", { note: "Two pens" });
