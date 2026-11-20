@@ -1120,3 +1120,19 @@ footer {
     animation: none !important;
   }
 }
+
+/* What's new: compact feature stories using the established website palette. */
+.recent-features { padding-top: 84px; }
+.feature-stories { display:grid; grid-template-columns:repeat(4,minmax(0,1fr)); border-top:1px solid var(--line);border-left:1px solid var(--line); }
+.feature-story { min-width:0; padding:25px 22px 29px; border-right:1px solid var(--line);border-bottom:1px solid var(--line); }
+.feature-symbol { display:grid;place-items:center;width:52px;height:52px;border-radius:14px;background:#e8efe0;color:#315e44;font-size:27px;margin-bottom:21px; }
+.feature-story:nth-child(2) .feature-symbol { background:#ece6f3; }
+.feature-story:nth-child(3) .feature-symbol { background:#f5ebd6; }
+.feature-story:nth-child(4) .feature-symbol { background:#dfeaf0; }
+.feature-story .eyebrow { margin-bottom:10px; }
+.feature-story h3 { font-size:21px; margin-bottom:13px; }
+.feature-story>p:last-child { font-size:13px;line-height:1.8; }
+.feature-caveat { margin-top:19px;font-size:12px; }
+.feature-caveat a { text-decoration:underline;text-underline-offset:3px; }
+@media(max-width:1000px){ .feature-stories { grid-template-columns:repeat(2,minmax(0,1fr)); } }
+@media(max-width:600px){ .feature-stories { grid-template-columns:1fr; } .recent-features { padding-top:55px; } }
