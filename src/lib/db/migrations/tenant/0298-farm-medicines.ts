@@ -18,7 +18,9 @@ create table farm_medicines (
   chemical_record_id uuid primary key,
   farm_id bigint not null references farms(id),
   kind text not null check (kind ~ '^[a-z_]{2,40}$'),
-  photo_file_id uuid references safety_files(id),
+  -- Checked against safety_files in code: a foreign key would stop that
+  -- append-only table's own truncate guard from being the one to refuse.
+  photo_file_id uuid,
   reorder_at numeric(18, 3) check (reorder_at >= 0),
   updated_by_email text not null,
   updated_at timestamptz not null default now()
