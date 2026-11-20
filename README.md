@@ -21,6 +21,7 @@
   <a href="https://willy-nz.github.io/Tohyee-ERP/"><strong>Website</strong></a> ·
   <a href="https://github.com/Willy-nz/Tohyee-ERP/releases/latest"><strong>Download</strong></a> ·
   <a href="docs/FEATURES.md">Features</a> ·
+  <a href="docs/SERVER-BUYING-GUIDE.md">Choose and set up a server</a> ·
   <a href="https://github.com/Willy-nz/Tohyee-ERP/issues">Report a problem</a>
 </p>
 
@@ -63,8 +64,8 @@ marked DEMO on every page. Nothing is emailed or connected from it; reset or
 delete it there whenever you like (see [the demo farm](docs/DEMO-FARM.md)).
 
 **Just want to use it?** Download `TohyeeSetup` from the
-[latest release](https://github.com/Willy-nz/Tohyee-ERP/releases/latest) and see
-[Running on a server](#running-on-a-server). The feature overview below covers
+[latest release](https://github.com/Willy-nz/Tohyee-ERP/releases/latest) and follow the [server buying and setup guide](docs/SERVER-BUYING-GUIDE.md)
+(or [Running on a server](#running-on-a-server) for technical details). The feature overview below covers
 what you can use; developer and server setup instructions follow it.
 
 <p align="center">
@@ -401,6 +402,8 @@ PostgreSQL database. CI runs all four checks on pull requests and pushes to
 `main`, on Node 22 and 24 with PostgreSQL 17.
 
 ## Running on a server
+
+**New to self-hosting?** Start with [how to choose a computer and install Tohyee](docs/SERVER-BUYING-GUIDE.md). It covers Windows 11 mini PCs, the installer, secure access, backups and a recovery drill. The [illustrated website tutorial](https://willy-nz.github.io/Tohyee-ERP/server-guide.html) walks through the same process.
 
 **Windows:** download `TohyeeSetup-<version>.exe` from the
 [latest release](https://github.com/Willy-nz/Tohyee-ERP/releases/latest) and run
