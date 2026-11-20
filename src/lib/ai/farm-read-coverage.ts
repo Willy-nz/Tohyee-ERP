@@ -89,6 +89,7 @@ export const FARM_READ_COVERAGE: Record<string, ScreenCoverage> = {
   "GET /api/farming/pasture-photos/[photoId]": {"tool": "get_pasture_photo"},
   "GET /api/farming/plans/[planId]": {"tool": "get_fertiliser_plan"},
   "GET /api/farming/product-stock": {"tool": "farm_product_stock"},
+  "GET /api/farming/medicines": {"tool": "farm_medicine_cabinet"},
   "GET /api/farming/products": {"tool": "list_fertiliser_products"},
   "GET /api/farming/rain-gauges/[gaugeId]/summary": {"tool": "rain_gauge_summary"},
   "GET /api/farming/safety": {"tool": "farm_safety"},

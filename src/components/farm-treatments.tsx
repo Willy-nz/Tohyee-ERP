@@ -358,7 +358,7 @@ export function ProductStockCard({ organisationId, farmId, version }: { organisa
                   <ul style={{ margin: 0, paddingLeft: 18 }}>
                     {product.history.slice(0, 8).map((entry, index) => (
                       <li key={index}>
-                        {formatDate(entry.date)}: {entry.text}, {entry.kind === "treatment" || entry.kind === "spray" || entry.kind === "disposed" ? "−" : ""}
+                        {formatDate(entry.date)}: {entry.text}, {["treatment", "spray", "disposed", "used", "moved_out"].includes(entry.kind) ? "−" : ""}
                         {entry.quantity} {entry.unit}
                       </li>
                     ))}

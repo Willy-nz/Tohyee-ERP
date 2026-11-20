@@ -27,6 +27,7 @@ import { farmHome } from "@/lib/farming/home";
 import { addSoilSample, listSoilSamples } from "@/lib/farming/soil-samples";
 import { STOCK_UNITS } from "@/lib/farming/treatment-rules";
 import { productStock, recordTreatment } from "@/lib/farming/treatments";
+import { cabinet } from "@/lib/farming/medicines";
 import { getMob } from "@/lib/farming/mobs";
 import { paddockStatuses } from "@/lib/farming/paddock-status";
 import { paddockHistory } from "@/lib/farming/soil";
@@ -123,6 +124,14 @@ export const FARM_OVERVIEW_TOOLS: AiTool[] = [
     level: "read",
     inputSchema: schema({ farmId: FARM_ID }),
     run: async (tx, args) => ({ products: await productStock(tx, { farmId: await farmFor(tx, args.farmId) }) }),
+  },
+  {
+    name: "farm_medicine_cabinet",
+    title: "Medicine cabinet",
+    description: "A farm's medicine cabinet as Medicines shows it: each animal medicine's kind, amount on hand and unit, reorder level, badge (low: at or below the reorder level; out: nil; count: below nil; none: nothing recorded), the soonest expiry of stock on hand, and its history (received, counted, used, moved between farms, treatments). Withholding periods aren't here: they're on each treatment, from the label.",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID }),
+    run: async (tx, args) => ({ slots: await cabinet(tx, { farmId: await farmFor(tx, args.farmId) }) }),
   },
 ];
 
