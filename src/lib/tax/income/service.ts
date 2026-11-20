@@ -1,4 +1,5 @@
 import { writeAuditEvent } from "@/lib/audit";
+import { ENTITY_TYPE_LABELS, type EntityType, incomeTaxTaxpayerFor } from "@/lib/organisations/entity";
 import { parseIsoDate, todayIsoDate } from "@/lib/dates";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
@@ -33,6 +34,7 @@ import {
   type Payment,
   standardSchedule,
   TAXPAYER_TYPES,
+  TAXPAYER_TYPE_LABELS,
   type TaxpayerType,
   TREATMENT_LABELS,
   TREATMENTS,
@@ -52,16 +54,37 @@ import { optionalBoolean, optionalString, requireBoolean, requireId, requireIdem
  * only (the API checks). Nothing here posts, files or pays.
  */
 
-export type IncomeTaxSettings = { taxpayerType: TaxpayerType | null; agentExtension: boolean; version: number; updatedByEmail: string | null; updatedAt: string };
+export type IncomeTaxSettings = {
+  taxpayerType: TaxpayerType | null;
+  agentExtension: boolean;
+  version: number;
+  updatedByEmail: string | null;
+  updatedAt: string;
+  /** Settings › Business structure (ENT3): when set, the taxpayer follows it. */
+  entityType: EntityType | null;
+  /** Why Tohyee doesn't work out this entity's income tax, for a partnership, look-through company, trust or society. */
+  unsupported: string | null;
+};
 
-type SettingsRow = { taxpayer_type: TaxpayerType | null; agent_extension: boolean; version: number; updated_by_email: string | null; updated_at: string };
+type SettingsRow = { taxpayer_type: TaxpayerType | null; agent_extension: boolean; version: number; updated_by_email: string | null; updated_at: string; entity_type: EntityType | null };
 
 function toSettings(row: SettingsRow): IncomeTaxSettings {
-  return { taxpayerType: row.taxpayer_type, agentExtension: row.agent_extension, version: row.version, updatedByEmail: row.updated_by_email, updatedAt: new Date(row.updated_at).toISOString() };
+  const follows = row.entity_type ? incomeTaxTaxpayerFor(row.entity_type) : null;
+  return {
+    taxpayerType: row.taxpayer_type,
+    agentExtension: row.agent_extension,
+    version: row.version,
+    updatedByEmail: row.updated_by_email,
+    updatedAt: new Date(row.updated_at).toISOString(),
+    entityType: row.entity_type,
+    unsupported: follows && "unsupported" in follows ? follows.unsupported : null,
+  };
 }
 
+const SETTINGS_COLUMNS = "taxpayer_type, agent_extension, version, updated_by_email, updated_at, (select entity_type from organisation_settings where id = true) as entity_type";
+
 export async function getIncomeTaxSettings(tx: OrgTx): Promise<IncomeTaxSettings> {
-  const result = await tx.query<SettingsRow>("select taxpayer_type, agent_extension, version, updated_by_email, updated_at from income_tax_settings where id");
+  const result = await tx.query<SettingsRow>(`select ${SETTINGS_COLUMNS} from income_tax_settings where id`);
   return toSettings(result.rows[0]);
 }
 
@@ -77,10 +100,18 @@ export async function updateIncomeTaxSettings(tx: OrgTx, input: { taxpayerType: 
   const agentExtension = requireBoolean(input.agentExtension, "agentExtension");
   const version = requireVersion(input.version);
   const before = await getIncomeTaxSettings(tx);
+  // ENT3: with a business structure set, the taxpayer follows it.
+  if (before.entityType) {
+    const follows = incomeTaxTaxpayerFor(before.entityType);
+    if ("unsupported" in follows) throw new ValidationError(follows.unsupported);
+    if (follows.taxpayerType !== taxpayerType) {
+      throw new ValidationError(`Settings › Business structure says this is a ${ENTITY_TYPE_LABELS[before.entityType].toLowerCase()}, so the taxpayer is ${TAXPAYER_TYPE_LABELS[follows.taxpayerType].toLowerCase()}. Change it there.`);
+    }
+  }
   const updated = await tx.query<SettingsRow>(
     `update income_tax_settings set taxpayer_type = $1, agent_extension = $2, version = version + 1, updated_by_email = $3, updated_at = now()
       where id and version = $4
-      returning taxpayer_type, agent_extension, version, updated_by_email, updated_at`,
+      returning ${SETTINGS_COLUMNS}`,
     [taxpayerType, agentExtension, tx.actor.email, version],
   );
   if (!updated.rows[0]) throw new ConflictError("Someone else changed the income tax settings. Reload and try again.");

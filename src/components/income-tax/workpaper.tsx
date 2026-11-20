@@ -2,7 +2,9 @@
 
 import { type FormEvent,useState } from "react";
 import { Money } from "@/components/books";
+import Link from "next/link";
 import { Badge,Button,Card,Empty,Field,Notice,ui } from "@/components/ui";
+import { ENTITY_TYPE_LABELS } from "@/lib/organisations/entity-types";
 import { api,errorMessage,newIdempotencyKey } from "@/lib/client/api";
 import { formatDate,formatMoney } from "@/lib/format";
 import { EXPENSE_TREATMENTS,INCOME_TREATMENTS,TAXPAYER_TYPE_LABELS,TREATMENT_LABELS,type TaxpayerType,type Treatment } from "@/lib/tax/income/rules";
@@ -25,7 +27,16 @@ export function Settings({ organisationId, settings, onSaved }: { organisationId
   }
   return (
     <Card title="Taxpayer" description="Who pays the tax, and whether a tax agent's extension of time moves end-of-year tax to 7 April.">
+      {settings.unsupported ? <Notice tone="warning">{settings.unsupported}</Notice> : null}
       <form className={ui.inlineForm} onSubmit={save}>
+        {settings.entityType ? (
+          // ENT3: Settings › Business structure decides it.
+          <p>
+            This organisation is a {ENTITY_TYPE_LABELS[settings.entityType].toLowerCase()}
+            {settings.taxpayerType && !settings.unsupported ? ` (${TAXPAYER_TYPE_LABELS[settings.taxpayerType].toLowerCase()})` : ""}.{" "}
+            <Link href="/operations/settings#business-structure">Change in Settings</Link>
+          </p>
+        ) : (
         <Field label="This organisation is">
           <select value={type} onChange={(event) => setType(event.target.value as TaxpayerType | "")} required>
             <option value="">Choose…</option>
@@ -36,10 +47,11 @@ export function Settings({ organisationId, settings, onSaved }: { organisationId
             ))}
           </select>
         </Field>
+        )}
         <label className={ui.checkbox}>
           <input type="checkbox" checked={extension} onChange={(event) => setExtension(event.target.checked)} /> A tax agent with an extension of time files the return
         </label>
-        <Button type="submit">Save</Button>
+        <Button type="submit" disabled={Boolean(settings.unsupported)}>Save</Button>
       </form>
       {status ? <Notice tone={status.tone}>{status.text}</Notice> : null}
     </Card>

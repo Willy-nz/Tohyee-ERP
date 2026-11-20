@@ -50,7 +50,8 @@ type SettingsRow = {
 
 async function readSettings(tx: OrgTx): Promise<PaydayFilingSettings> {
   const result = await tx.query<SettingsRow>(
-    `select payroll_employer_ird_number, payroll_contact_name, payroll_contact_phone, payroll_contact_email
+    // ENT8: the organisation's IRD number until payroll's own is set.
+    `select coalesce(payroll_employer_ird_number, ird_number) as payroll_employer_ird_number, payroll_contact_name, payroll_contact_phone, payroll_contact_email
        from organisation_settings where id = true`,
   );
   const row = result.rows[0];

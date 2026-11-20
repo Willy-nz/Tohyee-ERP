@@ -6,6 +6,16 @@ import { Button, Card, Field, Notice, ui } from "@/components/ui";
 import { api, errorMessage } from "@/lib/client/api";
 import styles from "./directory-card.module.css";
 import { DIRECTORY_LIMITS, type DirectoryLine, type OrganisationDirectory } from "@/lib/organisations/directory";
+import { ENTITY_OFFICER_ROLE, type EntityType } from "@/lib/organisations/entity-types";
+
+const OFFICER_TITLES: Record<EntityType, string> = {
+  sole_trader: "Owner",
+  partnership: "Partners",
+  company: "Directors",
+  look_through_company: "Directors",
+  trust: "Trustees",
+  incorporated_society: "Officers and committee",
+};
 
 type ListKey = "numbers" | "officers" | "advisers";
 
@@ -20,14 +30,14 @@ const LISTS: Array<{ key: ListKey; title: string; hint: string; label: string; v
  * directory page shows, kept once here. The name, postal address, GST number
  * and balance date come from the settings above.
  */
-export function DirectoryCard({ organisationId }: { organisationId: string }) {
+export function DirectoryCard({ organisationId, entityType = null }: { organisationId: string; entityType?: EntityType | null }) {
   const loaded = useApiData<{ directory: OrganisationDirectory }>(`/api/organisations/${organisationId}/directory`);
   // Kept here, not in the form: the form starts afresh from what was saved.
   const [saved, setSaved] = useState(false);
   return (
     <Card
       title="Directory"
-      description="For the directory page of printed reports (Analytics › a report › Add item › Directory). The name, postal address, GST number and balance date come from the settings above."
+      description="For the directory page of printed reports (Analytics › a report › Add item › Directory). The name, postal address, GST number, balance date, entity type and IRD number come from the settings above."
     >
       <div id="directory">
         {loaded.error ? <Notice tone="error">{loaded.error}</Notice> : null}
@@ -36,6 +46,7 @@ export function DirectoryCard({ organisationId }: { organisationId: string }) {
           <DirectoryForm
             key={JSON.stringify(loaded.data.directory)}
             organisationId={organisationId}
+            entityType={entityType}
             directory={loaded.data.directory}
             onChanged={() => setSaved(false)}
             onSaved={() => {
@@ -49,7 +60,23 @@ export function DirectoryCard({ organisationId }: { organisationId: string }) {
   );
 }
 
-function DirectoryForm({ organisationId, directory, onSaved, onChanged }: { organisationId: string; directory: OrganisationDirectory; onSaved: () => void; onChanged: () => void }) {
+function DirectoryForm({
+  organisationId,
+  entityType,
+  directory,
+  onSaved,
+  onChanged,
+}: {
+  organisationId: string;
+  entityType: EntityType | null;
+  directory: OrganisationDirectory;
+  onSaved: () => void;
+  onChanged: () => void;
+}) {
+  // ENT7: the people are named for the business structure.
+  const sections = LISTS.map((list) =>
+    list.key === "officers" && entityType ? { ...list, title: OFFICER_TITLES[entityType], labelHint: ENTITY_OFFICER_ROLE[entityType] } : list,
+  );
   const [office, setOffice] = useState(directory.registeredOffice ?? "");
   const [lists, setLists] = useState<Record<ListKey, DirectoryLine[]>>({ numbers: directory.numbers, officers: directory.officers, advisers: directory.advisers });
   const [saving, setSaving] = useState(false);
@@ -90,7 +117,7 @@ function DirectoryForm({ organisationId, directory, onSaved, onChanged }: { orga
           }}
         />
       </Field>
-      {LISTS.map((list) => (
+      {sections.map((list) => (
         <section key={list.key} aria-label={list.title} className={styles.list}>
           <h3>{list.title}</h3>
           <p className={ui.muted}>{list.hint}</p>
