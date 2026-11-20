@@ -9,16 +9,27 @@ import { api,errorMessage,newIdempotencyKey } from "@/lib/client/api";
 import { formatDate,formatMoney } from "@/lib/format";
 import { EXPENSE_TREATMENTS,INCOME_TREATMENTS,TAXPAYER_TYPE_LABELS,TREATMENT_LABELS,type TaxpayerType,type Treatment } from "@/lib/tax/income/rules";
 import type { IncomeTaxSettings,ReportAccount } from "@/lib/tax/income/service";
+import { TRUST_KIND_LABELS,TRUST_KINDS,type TrustKind } from "@/lib/tax/income/trusts";
 import { Status,Supported,negated } from "@/components/income-tax/shared";
 
 export function Settings({ organisationId, settings, onSaved }: { organisationId: string; settings: IncomeTaxSettings; onSaved: () => void }) {
   const [type, setType] = useState<TaxpayerType | "">(settings.taxpayerType ?? "");
   const [extension, setExtension] = useState(settings.agentExtension);
+  const [trustKind, setTrustKind] = useState<TrustKind>(settings.trustKind);
+  const [dateOfDeath, setDateOfDeath] = useState(settings.dateOfDeath ?? "");
   const [status, setStatus] = useState<Status>(null);
+  const isTrust = (settings.entityType ? settings.taxpayerType : type) === "trust";
   async function save(event: FormEvent) {
     event.preventDefault();
     try {
-      await api("/api/income-tax/settings", { method: "PUT", body: { organisationId, taxpayerType: type, agentExtension: extension, version: settings.version } });
+      await api("/api/income-tax/settings", { method: "PUT", body: {
+          organisationId,
+          taxpayerType: settings.entityType ? settings.taxpayerType : type,
+          agentExtension: extension,
+          version: settings.version,
+          ...(isTrust ? { trustKind, dateOfDeath: trustKind === "deceased_estate" ? dateOfDeath || null : null } : {}),
+        },
+      });
       setStatus({ tone: "success", text: "Saved." });
       onSaved();
     } catch (error) {
@@ -33,7 +44,10 @@ export function Settings({ organisationId, settings, onSaved }: { organisationId
           // ENT3: Settings › Business structure decides it.
           <p>
             This organisation is a {ENTITY_TYPE_LABELS[settings.entityType].toLowerCase()}
-            {settings.taxpayerType && !settings.unsupported ? ` (${TAXPAYER_TYPE_LABELS[settings.taxpayerType].toLowerCase()})` : ""}.{" "}
+            {settings.taxpayerType && !settings.unsupported && TAXPAYER_TYPE_LABELS[settings.taxpayerType] !== ENTITY_TYPE_LABELS[settings.entityType]
+              ? ` (${TAXPAYER_TYPE_LABELS[settings.taxpayerType].toLowerCase()})`
+              : ""}
+            .{" "}
             <Link href="/operations/settings#business-structure">Change in Settings</Link>
           </p>
         ) : (
@@ -48,6 +62,25 @@ export function Settings({ organisationId, settings, onSaved }: { organisationId
           </select>
         </Field>
         )}
+        {isTrust ? (
+          // TRT1, TRT5, TRT6: the kind of trust sets the trustee's rate.
+          <>
+            <Field label="Kind of trust">
+              <select value={trustKind} onChange={(event) => setTrustKind(event.target.value as TrustKind)}>
+                {TRUST_KINDS.map((kind) => (
+                  <option key={kind} value={kind}>
+                    {TRUST_KIND_LABELS[kind]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            {trustKind === "deceased_estate" ? (
+              <Field label="Date of death" hint="33% for the income year of the death and the three after it.">
+                <input type="date" value={dateOfDeath} onChange={(event) => setDateOfDeath(event.target.value)} />
+              </Field>
+            ) : null}
+          </>
+        ) : null}
         <label className={ui.checkbox}>
           <input type="checkbox" checked={extension} onChange={(event) => setExtension(event.target.checked)} /> A tax agent with an extension of time files the return
         </label>

@@ -28,18 +28,19 @@ export const ENTITY_OFFICER_ROLE: Record<EntityType, string> = {
 };
 
 /** The income tax workpaper's taxpayer for a type (ENT3), or why Tohyee doesn't work it out. */
-export function incomeTaxTaxpayerFor(type: EntityType): { taxpayerType: "company" | "individual" } | { unsupported: string } {
+export function incomeTaxTaxpayerFor(type: EntityType): { taxpayerType: "company" | "individual" | "trust" } | { unsupported: string } {
   switch (type) {
     case "company":
       return { taxpayerType: "company" };
     case "sole_trader":
       return { taxpayerType: "individual" };
     case "partnership":
-      return { unsupported: "Tohyee's income tax is for companies and sole traders. A partnership's partners are taxed on their shares." };
+      return { unsupported: "Tohyee's income tax is for companies, sole traders and trusts. A partnership's partners are taxed on their shares." };
     case "look_through_company":
-      return { unsupported: "Tohyee's income tax is for companies and sole traders. A look-through company's owners are taxed on their shares." };
+      return { unsupported: "Tohyee's income tax is for companies, sole traders and trusts. A look-through company's owners are taxed on their shares." };
     case "trust":
-      return { unsupported: "Tohyee's income tax is for companies and sole traders. A trust's income is taxed to the trustees or the beneficiaries." };
+      // TRT1: a trust's tax (the IR6).
+      return { taxpayerType: "trust" };
     case "incorporated_society":
       return { unsupported: "Tohyee's income tax is for companies and sole traders, not incorporated societies." };
   }

@@ -19726,12 +19726,12 @@ defaults only: nothing already posted changes.
   number doesn't pass Inland Revenue's check. Check the digits."). It's
   optional.
 - **ENT3 Income tax follows it.** A company's income tax workpaper is for a
-  company, a sole trader's for an individual, and Income tax's own choice
-  then follows Settings and can't be set against it. Tohyee doesn't work out
-  income tax for partnerships, look-through companies, trusts or societies:
-  the workpaper says so ("Tohyee's income tax is for companies and sole
-  traders. A partnership's partners are taxed on their shares."), as each of
-  those is taxed differently.
+  company, a sole trader's for an individual, a trust's for a trust (TRT1),
+  and Income tax's own choice then follows Settings and can't be set against
+  it. Tohyee doesn't work out income tax for partnerships, look-through
+  companies or societies: the workpaper says so ("Tohyee's income tax is for
+  companies, sole traders and trusts. A partnership's partners are taxed on
+  their shares."), as each of those is taxed differently.
 - **ENT4 Year-end notes.** The draft notes for special purpose statements say
   what the entity is (for example "a company registered under the Companies
   Act 1993"), and keep only the wording for that type: a company's notes
@@ -20745,6 +20745,83 @@ touching the accounting core. Nothing in it posts to the books. Tested in
   the soil sampling app in `examples/farm-apps/soil-sampling/`. A breaking
   change gets a new version (`v2`); `v1` keeps working until it's retired
   with notice.
+
+## Income tax for trusts (TRT1-TRT14; from IRD's trustee tax rate and beneficiary income pages, the IR6 and IRD's 2024 trust webinar, read by Claude 20 Nov 2026; following common practice, not yet reviewed)
+
+Tested in `tests/unit/trust-tax.test.ts` and `tests/integration/trust-tax.test.ts`.
+A made-up family trust, Tōtara Family Trust, with a 31 March balance date.
+Amounts are dollars. Tohyee works out the trustee's tax; each beneficiary's
+own tax on their beneficiary income is theirs, not the trust's.
+
+- **TRT1 Turning it on.** Settings › Business structure set to Trust makes the
+  income tax workpaper a trust's (the IR6). Income tax › Tax settings then
+  asks what kind of trust: a family trust (most trusts), a deceased estate
+  (with the date of death), or a disabled beneficiary trust.
+- **TRT2 Beneficiaries.** The trust keeps a list of beneficiaries: a person
+  (with a date of birth, if known) or a company. For a person: whether the
+  trust was settled by a relative or guardian of theirs (on unless changed),
+  and whether a disability allowance or child disability allowance is paid
+  for them. For a company: whether the corporate beneficiary rule applies to
+  it (a close company with a settlor, or someone a settlor has natural love
+  and affection for, as a shareholder; on unless changed). A beneficiary
+  with income allocated in any year can be archived but not deleted.
+- **TRT3 Beneficiary income.** For each income year the preparer types the
+  income allocated to each beneficiary (vested in them or paid to them, by
+  the trust's deadline). Net income is worked out as for any taxpayer;
+  beneficiary income comes off it and what's left is trustee income.
+- **TRT4 The trustee rate.** Trustee income is taxed at 39% (from the 2025
+  income year, which starts 1 April 2024). When the trustee's net income for
+  the year is $10,000 or less, all of it is taxed at 33% instead: it's a
+  cliff, not a band, so $10,001 is taxed at 39% on the whole $10,001.
+  - Trustee net income $9,800: tax $3,234.00 (33%).
+  - Trustee net income $10,001: tax $3,900.39 (39%).
+- **TRT5 Deceased estates.** An estate's trustee income is taxed at 33% in
+  the income year of the death and the next three income years; after that,
+  TRT4 applies. Death on 30 December 2023 (the 2024 income year): 33% for the
+  2025, 2026 and 2027 income years; the 2028 income year follows TRT4.
+- **TRT6 Disabled beneficiary trusts.** Trustee income is taxed at 33%,
+  whatever the amount.
+- **TRT7 The minor beneficiary rule.** Beneficiary income of a person under 16
+  at the end of the income year is taxed as if it were trustee income, at
+  39%, when the trust was settled by a relative or guardian of theirs. Not
+  when it's $1,000 or less for the year from this trust, when a disability
+  allowance is paid for them, or in a disabled beneficiary trust or a
+  deceased estate (whose property was settled on a death). Over $1,000, all
+  of it is taxed, not only what's over. A person with no date of birth is
+  treated as 16 or older, and the workpaper says so.
+- **TRT8 The corporate beneficiary rule.** Beneficiary income of a company the
+  rule applies to (TRT2) is taxed at 39% by the trustee too, from the 2025
+  income year.
+- **TRT9 Worked example.** Tōtara Family Trust, 2026 income year. Net income
+  $60,000. Beneficiary income: Aroha (adult) $20,000; Nikau (aged 9) $3,000;
+  Tama (aged 12) $800; Tōtara Holdings Ltd (corporate rule applies)
+  $10,000.
+  - Ordinary beneficiary income (IR6 box 21A): $20,800 (Aroha and Tama;
+    Tama's is $1,000 or less). Taxed to them, not the trust.
+  - Minor and corporate beneficiary income (box 21C): $13,000. Tax (box 28C):
+    $13,000 × 39% = $5,070.00.
+  - Trustee income: $60,000 − $20,800 − $13,000 = $26,200, over $10,000, so
+    39%: $10,218.00.
+  - The trust's tax: $15,288.00. Credits (RWT, imputation credits it keeps,
+    overseas tax) come off as for other taxpayers.
+- **TRT10 Losses.** A trust's losses stay in the trust: losses brought
+  forward come off trustee income only, never off beneficiary income, and a
+  trust loss can't be allocated to beneficiaries. The $10,000 test in TRT4
+  looks at the trustee's net income before losses brought forward.
+- **TRT11 Too much allocated.** Beneficiary income more than the year's net
+  income can't be right: the workpaper says so and treats trustee income as
+  nil. Tohyee doesn't change the allocations.
+- **TRT12 Provisional tax.** The trustee's residual income tax drives
+  provisional tax, as for other taxpayers.
+- **TRT13 What it doesn't do.** Imputation credits, RWT and other credits
+  passed to beneficiaries with their beneficiary income are left out of the
+  trust's credits by the preparer. Distributions of capital or corpus,
+  foreign and non-complying trusts, and the beneficiaries' own returns aren't
+  worked out.
+- **TRT14 The IR6 figures.** Once the year has ended: box 21A (beneficiary
+  income other than minor and corporate), box 21C (minor and corporate
+  beneficiary income), box 28C (its tax at 39%), the trustee's income, rate
+  and tax, and the total tax. Other boxes aren't filled in.
 
 ## Income tax: the extension-of-time condition (ITX67; from IRD's "Standard option" page, read 18 Oct 2026)
 

@@ -18,10 +18,11 @@ describe("business structure (ENT1-ENT8)", () => {
     expect(() => parseIrdNumber("12a-456-789")).toThrow("An IRD number has 8 or 9 digits");
   });
 
-  it("ENT3: income tax is worked out for companies and sole traders only", () => {
+  it("ENT3: income tax is worked out for companies, sole traders and trusts", () => {
     expect(incomeTaxTaxpayerFor("company")).toEqual({ taxpayerType: "company" });
     expect(incomeTaxTaxpayerFor("sole_trader")).toEqual({ taxpayerType: "individual" });
-    for (const type of ["partnership", "look_through_company", "trust", "incorporated_society"] as const) {
+    expect(incomeTaxTaxpayerFor("trust")).toEqual({ taxpayerType: "trust" });
+    for (const type of ["partnership", "look_through_company", "incorporated_society"] as const) {
       expect(incomeTaxTaxpayerFor(type)).toHaveProperty("unsupported");
     }
   });
