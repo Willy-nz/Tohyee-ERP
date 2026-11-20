@@ -11,12 +11,12 @@ import type { Ir6Box, Ir6Figures, TrustClass, TrustReturn } from "@/lib/tax/inco
 import type { TrustTax } from "@/lib/tax/income/trusts";
 
 /*
- * A trust's income tax screens (TRT1-TRT27): the beneficiary list, a year's
+ * A trust's income tax screens (TRU1-TRU27): the beneficiary list, a year's
  * beneficiary income, distributions and credits and what they mean for the
  * trust's tax, and the IR6 and IR6B figures.
  */
 
-/** The trust's beneficiaries (TRT2). */
+/** The trust's beneficiaries (TRU2). */
 export function BeneficiariesCard({ organisationId }: { organisationId: string }) {
   const loaded = useApiData<{ beneficiaries: BeneficiaryRecord[] }>("/api/income-tax/beneficiaries", { organisationId, includeArchived: "true" });
   const [editing, setEditing] = useState<BeneficiaryRecord | "new" | null>(null);
@@ -210,7 +210,7 @@ function BeneficiaryForm({ organisationId, beneficiary, onDone, onCancel }: { or
   );
 }
 
-/** A year's beneficiary income, distributions and credits, and the trust's tax they lead to (TRT3-TRT24). */
+/** A year's beneficiary income, distributions and credits, and the trust's tax they lead to (TRU3-TRU24). */
 export function BeneficiaryIncomeCard({
   organisationId,
   incomeYear,
@@ -450,7 +450,7 @@ function toDraft(line: BeneficiaryIncome | undefined): Draft {
   };
 }
 
-/** How the trust's credits are shared (TRT15). */
+/** How the trust's credits are shared (TRU15). */
 function CreditsTable({ ret }: { ret: TrustReturn }) {
   const rows: Array<[string, keyof TrustReturn["totalCredits"]]> = [
     ["Overseas tax paid", "overseas"],
@@ -488,7 +488,7 @@ function CreditsTable({ ret }: { ret: TrustReturn }) {
   );
 }
 
-/** The IR6 and IR6B boxes Tohyee works out (TRT14, TRT25, TRT26). */
+/** The IR6 and IR6B boxes Tohyee works out (TRU14, TRU25, TRU26). */
 export function Ir6Card({ incomeYear, ir6 }: { incomeYear: number; ir6: Ir6Figures }) {
   return (
     <Card title={`IR6 trust return (${incomeYear})`} description={`Box numbers from the ${ir6.form} IR6 and IR6B. Boxes Tohyee doesn't work out are left out.`}>

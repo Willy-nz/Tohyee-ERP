@@ -3,7 +3,7 @@ import { deleteBeneficiary, updateBeneficiary } from "@/lib/tax/income/beneficia
 
 type Context = { params: Promise<{ beneficiaryId: string }> };
 
-/** PATCH: changes a beneficiary, or archives or restores one with `archived` (TRT2). */
+/** PATCH: changes a beneficiary, or archives or restores one with `archived` (TRU2). */
 export const PATCH = route<Context>(async (request, context) => {
   const { beneficiaryId } = await context.params;
   const body = await readJson(request);
@@ -11,7 +11,7 @@ export const PATCH = route<Context>(async (request, context) => {
   return json({ beneficiary });
 });
 
-/** DELETE: a beneficiary that's never had income allocated (TRT2). */
+/** DELETE: a beneficiary that's never had income allocated (TRU2). */
 export const DELETE = route<Context>(async (request, context) => {
   const { beneficiaryId } = await context.params;
   await withOrganisation(request, searchParams(request).get("organisationId"), "admin", (tx) => deleteBeneficiary(tx, beneficiaryId));

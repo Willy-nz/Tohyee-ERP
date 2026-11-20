@@ -10,14 +10,14 @@ import { isSupportedIncomeYear } from "@/lib/tax/income/rules";
 import { optionalBoolean, requireId, requireOneOf, requireString } from "@/lib/validation";
 
 /*
- * A trust's beneficiaries (TRT2) and the beneficiary income typed for each
- * income year (TRT3). Nothing here posts to the ledger.
+ * A trust's beneficiaries (TRU2) and the beneficiary income typed for each
+ * income year (TRU3). Nothing here posts to the ledger.
  */
 
 export type BeneficiaryRecord = Beneficiary & {
-  /** Nine digits, for the IR6B (TRT25). */
+  /** Nine digits, for the IR6B (TRU25). */
   irdNumber: string | null;
-  /** Where they're resident for tax, when not New Zealand, and their tax number there (TRT25). */
+  /** Where they're resident for tax, when not New Zealand, and their tax number there (TRU25). */
   jurisdiction: string | null;
   tin: string | null;
   archived: boolean;
@@ -90,7 +90,7 @@ function parseBeneficiary(input: Record<string, unknown>, before?: BeneficiaryRe
   };
 }
 
-/** Adds a beneficiary (TRT2). */
+/** Adds a beneficiary (TRU2). */
 export async function addBeneficiary(tx: OrgTx, input: Record<string, unknown>): Promise<BeneficiaryRecord> {
   const value = parseBeneficiary(input);
   const created = await tx.query<{ id: string }>(
@@ -108,7 +108,7 @@ async function getBeneficiary(tx: OrgTx, id: string): Promise<BeneficiaryRecord>
   return toRecord(found.rows[0]);
 }
 
-/** Changes a beneficiary, or archives or restores one (`archived`) (TRT2). */
+/** Changes a beneficiary, or archives or restores one (`archived`) (TRU2). */
 export async function updateBeneficiary(tx: OrgTx, idInput: unknown, input: Record<string, unknown>): Promise<BeneficiaryRecord> {
   const id = requireId(idInput, "beneficiaryId");
   const before = await getBeneficiary(tx, id);
@@ -125,7 +125,7 @@ export async function updateBeneficiary(tx: OrgTx, idInput: unknown, input: Reco
   return getBeneficiary(tx, id);
 }
 
-/** Deletes a beneficiary that's never had income allocated; one that has is archived instead (TRT2). */
+/** Deletes a beneficiary that's never had income allocated; one that has is archived instead (TRU2). */
 export async function deleteBeneficiary(tx: OrgTx, idInput: unknown): Promise<void> {
   const id = requireId(idInput, "beneficiaryId");
   const before = await getBeneficiary(tx, id);
@@ -136,19 +136,19 @@ export async function deleteBeneficiary(tx: OrgTx, idInput: unknown): Promise<vo
 
 export type BeneficiaryIncome = {
   beneficiaryId: string;
-  /** Beneficiary income allocated (TRT3). */
+  /** Beneficiary income allocated (TRU3). */
   amount: string;
-  /** The trustee pays their tax on it (TRT18). */
+  /** The trustee pays their tax on it (TRU18). */
   trusteePaysTax: boolean;
-  /** Their other taxable income, for that tax (TRT18). */
+  /** Their other taxable income, for that tax (TRU18). */
   otherIncome: string;
-  /** Taxable distribution other than beneficiary income: foreign and non-complying trusts (TRT21-TRT23). */
+  /** Taxable distribution other than beneficiary income: foreign and non-complying trusts (TRU21-TRU23). */
   taxableDistribution: string;
-  /** Distributions that aren't taxable (TRT21). */
+  /** Distributions that aren't taxable (TRU21). */
   nonTaxableDistribution: string;
-  /** Taken out of their current account (TRT24). */
+  /** Taken out of their current account (TRU24). */
   withdrawn: string;
-  /** Typed opening balance; null is last year's closing balance (TRT24). */
+  /** Typed opening balance; null is last year's closing balance (TRU24). */
   openingBalance: string | null;
 };
 
@@ -185,7 +185,7 @@ export async function listBeneficiaryIncome(tx: OrgTx, year: number): Promise<Be
   return rows.rows.map(toIncome);
 }
 
-/** Each beneficiary's current account balance at the start of a year: the closing balance of the years before (TRT24). */
+/** Each beneficiary's current account balance at the start of a year: the closing balance of the years before (TRU24). */
 async function openingBalances(tx: OrgTx, year: number): Promise<Map<string, Decimal>> {
   const rows = await tx.query<IncomeRow>(`select ${INCOME_COLUMNS} from trust_beneficiary_income where income_year < $1 order by income_year, beneficiary_id`, [year]);
   const balances = new Map<string, Decimal>();
@@ -197,12 +197,12 @@ async function openingBalances(tx: OrgTx, year: number): Promise<Map<string, Dec
   return balances;
 }
 
-/** The beneficiaries and their income for a year, as the workpaper takes them (TRT3). */
+/** The beneficiaries and their income for a year, as the workpaper takes them (TRU3). */
 export async function beneficiaryAllocations(tx: OrgTx, year: number): Promise<Array<{ beneficiary: Beneficiary; amount: ReturnType<typeof dec> }>> {
   return (await beneficiaryYears(tx, year)).filter((entry) => isPositive(entry.amount)).map((entry) => ({ beneficiary: entry.beneficiary, amount: entry.amount }));
 }
 
-/** Every beneficiary's figures for a year (TRT15-TRT25), with opening balances carried from last year. */
+/** Every beneficiary's figures for a year (TRU15-TRU25), with opening balances carried from last year. */
 export async function beneficiaryYears(tx: OrgTx, year: number): Promise<BeneficiaryYear[]> {
   const everyone = new Map((await listBeneficiaries(tx, { includeArchived: true })).map((entry) => [entry.id, entry]));
   const carried = await openingBalances(tx, year);
@@ -226,8 +226,8 @@ export async function beneficiaryYears(tx: OrgTx, year: number): Promise<Benefic
 
 /**
  * Saves a year's beneficiary income and distributions: every beneficiary's
- * line, replacing what was there; a line with nothing in it is removed (TRT3,
- * TRT18, TRT21, TRT24).
+ * line, replacing what was there; a line with nothing in it is removed (TRU3,
+ * TRU18, TRU21, TRU24).
  */
 export async function saveBeneficiaryIncome(tx: OrgTx, input: { incomeYear: unknown; lines: unknown }): Promise<BeneficiaryIncome[]> {
   const year = Number(input.incomeYear);
@@ -256,7 +256,7 @@ export async function saveBeneficiaryIncome(tx: OrgTx, input: { incomeYear: unkn
     const otherIncome = amount(line.otherIncome, "other income");
     const taxable = amount(line.taxableDistribution, "taxable distribution");
     const nonTaxable = amount(line.nonTaxableDistribution, "distribution that isn't taxable");
-    // A negative withdrawal is money paid back (TRT24).
+    // A negative withdrawal is money paid back (TRU24).
     const withdrawn = amount(line.withdrawn, "withdrawals", true);
     const opening = line.openingBalance === null || line.openingBalance === undefined || line.openingBalance === "" ? null : amount(line.openingBalance, "opening balance", true);
     const trusteePaysTax = optionalBoolean(line.trusteePaysTax, `${who.name}'s trusteePaysTax`) ?? false;

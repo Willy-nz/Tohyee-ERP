@@ -104,7 +104,7 @@ const INDIVIDUAL_FROM_2026: TaxBand[] = [
 export function taxRates(type: TaxpayerType, year: number): TaxRates {
   if (!isSupportedIncomeYear(year)) throw new Error(`Income year ${year} isn't supported.`);
   if (type === "company") return { bands: [{ from: "0", to: null, rate: "0.28" }], source: "Company rate 28%." };
-  // A trust's tax is worked out by trustTax (TRT4-TRT9); this is the trustee rate before the $10,000 test.
+  // A trust's tax is worked out by trustTax (TRU4-TRU9); this is the trustee rate before the $10,000 test.
   if (type === "trust") return { bands: [{ from: "0", to: null, rate: year >= 2025 ? "0.39" : "0.33" }], source: "Trustee rate." };
   if (year === 2025) return { bands: INDIVIDUAL_2025, source: "IRD's individual rates for 1 April 2024 to 31 March 2025." };
   return { bands: INDIVIDUAL_FROM_2026, source: "IRD's individual rates from 1 April 2025." };
@@ -572,9 +572,9 @@ export type Workpaper = {
   imputationLoss: string;
   /** RWT, PAYE and other credits: refunded if more than the tax. */
   taxCredits: string;
-  /** A trust's trustee and beneficiary income (TRT3-TRT11); null for a company or individual. */
+  /** A trust's trustee and beneficiary income (TRU3-TRU11); null for a company or individual. */
   trust: TrustTax | null;
-  /** A trust's credits shared with beneficiaries, its IR6Bs and the tax it pays for them (TRT15-TRT25). */
+  /** A trust's credits shared with beneficiaries, its IR6Bs and the tax it pays for them (TRU15-TRU25). */
   trustReturn: TrustReturn | null;
   /** Tax less credits: negative is a refund. */
   taxToPay: string;
@@ -631,16 +631,16 @@ export function workpaper(input: {
   imputationCredits?: Decimal;
   /** Individuals only; ignored for a company. */
   imputationBroughtForward?: Decimal;
-  /** A trust's kind and beneficiary income (TRT1-TRT11). */
+  /** A trust's kind and beneficiary income (TRU1-TRU11). */
   trust?: {
     kind: TrustKind;
     dateOfDeath: string | null;
     endMonth: number;
     yearEnd: string;
     allocations: Array<{ beneficiary: Beneficiary; amount: Decimal }>;
-    /** Complying, foreign or non-complying (TRT20). */
+    /** Complying, foreign or non-complying (TRU20). */
     trustClass?: TrustClass;
-    /** Each beneficiary's figures for the year, beyond the allocation (TRT18, TRT21, TRT24). */
+    /** Each beneficiary's figures for the year, beyond the allocation (TRU18, TRU21, TRU24). */
     years?: BeneficiaryYear[];
   };
 }): Workpaper {
@@ -666,7 +666,7 @@ export function workpaper(input: {
   let trust: TrustTax | null = null;
   let tax: Decimal | undefined;
   if (input.type === "trust") {
-    // TRT3-TRT11: beneficiary income comes off net income; losses come off trustee income only.
+    // TRU3-TRU11: beneficiary income comes off net income; losses come off trustee income only.
     trust = trustTax({
       kind: input.trust?.kind ?? "family",
       dateOfDeath: input.trust?.dateOfDeath ?? null,
@@ -704,7 +704,7 @@ export function workpaper(input: {
   let shownCredits = input.taxCredits;
   let returned: TrustReturn | null = null;
   if (trust) {
-    // TRT15-TRT18: only the trustee's share of the credits comes off; the tax the trustee pays for beneficiaries goes on.
+    // TRU15-TRU18: only the trustee's share of the credits comes off; the tax the trustee pays for beneficiaries goes on.
     const year = input.year;
     const years: BeneficiaryYear[] =
       input.trust?.years ??
