@@ -1,5 +1,7 @@
 import { writeAuditEvent } from "@/lib/audit";
 import { ENTITY_TYPE_LABELS, type EntityType, incomeTaxTaxpayerFor } from "@/lib/organisations/entity";
+import { beneficiaryAllocations } from "@/lib/tax/income/beneficiaries";
+import { TRUST_KINDS, type TrustKind } from "@/lib/tax/income/trusts";
 import { parseIsoDate, todayIsoDate } from "@/lib/dates";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
@@ -62,11 +64,23 @@ export type IncomeTaxSettings = {
   updatedAt: string;
   /** Settings › Business structure (ENT3): when set, the taxpayer follows it. */
   entityType: EntityType | null;
-  /** Why Tohyee doesn't work out this entity's income tax, for a partnership, look-through company, trust or society. */
+  /** Why Tohyee doesn't work out this entity's income tax, for a partnership, look-through company or society. */
   unsupported: string | null;
+  /** A trust's kind and an estate's date of death (TRT1, TRT5). */
+  trustKind: TrustKind;
+  dateOfDeath: string | null;
 };
 
-type SettingsRow = { taxpayer_type: TaxpayerType | null; agent_extension: boolean; version: number; updated_by_email: string | null; updated_at: string; entity_type: EntityType | null };
+type SettingsRow = {
+  taxpayer_type: TaxpayerType | null;
+  agent_extension: boolean;
+  version: number;
+  updated_by_email: string | null;
+  updated_at: string;
+  entity_type: EntityType | null;
+  trust_kind: TrustKind;
+  date_of_death: string | null;
+};
 
 function toSettings(row: SettingsRow): IncomeTaxSettings {
   const follows = row.entity_type ? incomeTaxTaxpayerFor(row.entity_type) : null;
@@ -78,10 +92,13 @@ function toSettings(row: SettingsRow): IncomeTaxSettings {
     updatedAt: new Date(row.updated_at).toISOString(),
     entityType: row.entity_type,
     unsupported: follows && "unsupported" in follows ? follows.unsupported : null,
+    trustKind: row.trust_kind,
+    dateOfDeath: row.date_of_death,
   };
 }
 
-const SETTINGS_COLUMNS = "taxpayer_type, agent_extension, version, updated_by_email, updated_at, (select entity_type from organisation_settings where id = true) as entity_type";
+const SETTINGS_COLUMNS =
+  "taxpayer_type, agent_extension, version, updated_by_email, updated_at, (select entity_type from organisation_settings where id = true) as entity_type, trust_kind, to_char(date_of_death, 'YYYY-MM-DD') as date_of_death";
 
 export async function getIncomeTaxSettings(tx: OrgTx): Promise<IncomeTaxSettings> {
   const result = await tx.query<SettingsRow>(`select ${SETTINGS_COLUMNS} from income_tax_settings where id`);
@@ -95,11 +112,18 @@ function requireVersion(input: unknown): number {
 }
 
 /** Company or individual, and whether a tax agent's extension of time applies (ITX1, ITX10). */
-export async function updateIncomeTaxSettings(tx: OrgTx, input: { taxpayerType: unknown; agentExtension: unknown; version: unknown }): Promise<IncomeTaxSettings> {
+export async function updateIncomeTaxSettings(
+  tx: OrgTx,
+  input: { taxpayerType: unknown; agentExtension: unknown; version: unknown; trustKind?: unknown; dateOfDeath?: unknown },
+): Promise<IncomeTaxSettings> {
   const taxpayerType = requireOneOf(input.taxpayerType, "taxpayerType", TAXPAYER_TYPES);
   const agentExtension = requireBoolean(input.agentExtension, "agentExtension");
   const version = requireVersion(input.version);
   const before = await getIncomeTaxSettings(tx);
+  // TRT1, TRT5: a trust's kind, and an estate's date of death.
+  const trustKind = taxpayerType === "trust" && input.trustKind !== undefined ? requireOneOf(input.trustKind, "trustKind", TRUST_KINDS) : taxpayerType === "trust" ? before.trustKind : "family";
+  const dateOfDeath =
+    trustKind === "deceased_estate" ? (input.dateOfDeath === undefined ? before.dateOfDeath : input.dateOfDeath === null || input.dateOfDeath === "" ? null : parseIsoDate(input.dateOfDeath, "dateOfDeath")) : null;
   // ENT3: with a business structure set, the taxpayer follows it.
   if (before.entityType) {
     const follows = incomeTaxTaxpayerFor(before.entityType);
@@ -109,17 +133,20 @@ export async function updateIncomeTaxSettings(tx: OrgTx, input: { taxpayerType: 
     }
   }
   const updated = await tx.query<SettingsRow>(
-    `update income_tax_settings set taxpayer_type = $1, agent_extension = $2, version = version + 1, updated_by_email = $3, updated_at = now()
+    `update income_tax_settings set taxpayer_type = $1, agent_extension = $2, trust_kind = $5, date_of_death = $6, version = version + 1, updated_by_email = $3, updated_at = now()
       where id and version = $4
       returning ${SETTINGS_COLUMNS}`,
-    [taxpayerType, agentExtension, tx.actor.email, version],
+    [taxpayerType, agentExtension, tx.actor.email, version, trustKind, dateOfDeath],
   );
   if (!updated.rows[0]) throw new ConflictError("Someone else changed the income tax settings. Reload and try again.");
   await writeAuditEvent(tx, {
     eventType: "income_tax.settings_updated",
     entityType: "income_tax_settings",
     entityId: "settings",
-    details: { from: { taxpayerType: before.taxpayerType, agentExtension: before.agentExtension }, to: { taxpayerType, agentExtension } },
+    details: {
+      from: { taxpayerType: before.taxpayerType, agentExtension: before.agentExtension, trustKind: before.trustKind, dateOfDeath: before.dateOfDeath },
+      to: { taxpayerType, agentExtension, trustKind, dateOfDeath },
+    },
   });
   return toSettings(updated.rows[0]);
 }
@@ -504,6 +531,9 @@ export type ReportAccount = {
 
 export type DueDate = { key: string; label: string; dueDate: string; onTimeBy: OnTimeBy; amount: string | null; estimate: boolean };
 
+/** The IR6 boxes Tohyee works out for a trust (TRT14): 21A, 21C and 28C, and the trustee's income, rate and tax. */
+export type Ir6Figures = { "21A": string; "21C": string; "28C": string; trusteeIncome: string; trusteeRate: string; trusteeTax: string; totalTax: string };
+
 export type IncomeTaxReport =
   | { supported: false; reason: string; settings: IncomeTaxSettings; incomeYear: number; years: number[]; endMonth: number }
   | {
@@ -541,6 +571,8 @@ export type IncomeTaxReport =
       ir4: Ir4Return | null;
       /** A sole trader's IR3 income boxes and tax calculation, once the income year has ended (ITX54-ITX57). */
       ir3: Ir3Return | null;
+      /** A trust's IR6 figures, once the year has ended (TRT14). */
+      ir6: Ir6Figures | null;
       /** An individual's: the excess imputation credits Tohyee works out for last year, to check against IRD's letter (ITX65). */
       lastYearExcessImputation: string | null;
       adjustments: TaxAdjustment[];
@@ -640,8 +672,22 @@ async function pastWorkpaper(tx: OrgTx, type: TaxpayerType, year: number, today:
     imputationCredits: dec(typed.imputationCredits),
     overseasTaxPaid: dec(typed.overseasTaxPaid),
     imputationBroughtForward: dec(typed.imputationBroughtForward),
+    trust: type === "trust" ? await trustInput(tx, year) : undefined,
   });
   return result;
+}
+
+/** A trust's kind and beneficiary income for the workpaper (TRT1-TRT11). */
+async function trustInput(tx: OrgTx, year: number) {
+  const settings = await getIncomeTaxSettings(tx);
+  const endMonth = await financialYearEndMonth(tx);
+  return {
+    kind: settings.trustKind,
+    dateOfDeath: settings.dateOfDeath,
+    endMonth,
+    yearEnd: incomeYearDates(year, endMonth).end,
+    allocations: await beneficiaryAllocations(tx, year),
+  };
 }
 
 /** Tohyee's estimate of a past year's RIT from the books, or null when the books have nothing for it. */
@@ -665,7 +711,7 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
   for (let year = Math.max(current + 1, FIRST_SUPPORTED_INCOME_YEAR); year >= FIRST_SUPPORTED_INCOME_YEAR; year -= 1) years.push(year);
   const settings = await getIncomeTaxSettings(tx);
   if (!settings.taxpayerType) {
-    return { supported: false, reason: "Choose whether this organisation is a company or an individual (sole trader) to see its income tax.", settings, incomeYear, years, endMonth };
+    return { supported: false, reason: "Choose whether this organisation is a company, an individual (sole trader) or a trust to see its income tax.", settings, incomeYear, years, endMonth };
   }
   const type = settings.taxpayerType;
   const { start, end } = incomeYearDates(incomeYear, endMonth);
@@ -688,6 +734,7 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
     imputationCredits: dec(typed.imputationCredits),
     overseasTaxPaid: dec(typed.overseasTaxPaid),
     imputationBroughtForward: dec(typed.imputationBroughtForward),
+    trust: type === "trust" ? await trustInput(tx, incomeYear) : undefined,
   });
 
   // Last year's RIT: IRD's typed figure, or Tohyee's estimate from the books (ITX5, ITX6).
@@ -792,6 +839,19 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
   const ir10 = yearEnded ? await buildIr10(tx, { incomeYear, workpaper: paper, multipleActivity: typed.multipleActivity, treatments }) : null;
   const ir4 = yearEnded && type === "company" ? ir4Return({ incomeYear, workpaper: paper, paidTowardsYear: paid }) : null;
   const ir3 = yearEnded && type === "individual" ? ir3Return({ incomeYear, workpaper: paper, paidTowardsYear: paid }) : null;
+  // TRT14: the IR6 figures Tohyee works out, once the year has ended.
+  const ir6: Ir6Figures | null =
+    yearEnded && paper.trust
+      ? {
+          "21A": paper.trust.ordinaryBeneficiaryIncome,
+          "21C": paper.trust.minorCorporateIncome,
+          "28C": paper.trust.minorCorporateTax,
+          trusteeIncome: paper.trust.trusteeIncome,
+          trusteeRate: paper.trust.trusteeRate,
+          trusteeTax: paper.trust.trusteeTax,
+          totalTax: paper.trust.tax,
+        }
+      : null;
 
   const notes: string[] = [];
   if (endMonth !== 3) notes.push(`The ${incomeYear} income year runs ${shortDate(start)} to ${shortDate(end)} (IRD SPS 24/01). The provisional tax dates follow the balance date (Income Tax Act 2007 schedule 3).`);
@@ -825,6 +885,12 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
     notes.push(`The imputation credit account has ${money(dec(ica.ir4["42C"]))} of credits on dividends received this year, but ${money(dec(typed.imputationCredits))} is typed as imputation credits received. Check which is right.`);
   }
   if (cmp(dec(typed.overseasTaxPaid), dec(paper.tax)) > 0) notes.push("The overseas tax paid is more than the tax, so only part of it comes off. Tohyee doesn't carry the rest anywhere; check what IRD allows (the IR3 guide's \"Tax paid overseas\" section, for an individual).");
+  if (paper.trust) {
+    notes.push(...paper.trust.notes);
+    notes.push(
+      "Leave out of the trust's credits any RWT, imputation credits or other credits passed to beneficiaries with their beneficiary income. Distributions of capital or corpus, foreign and non-complying trusts, and the beneficiaries' own tax aren't worked out.",
+    );
+  }
   if (type === "individual") notes.push("The ACC earners' levy, independent earner tax credit, Working for Families and student loan repayments aren't worked out.");
   notes.push(
     cmp(dec(paper.rit), INTEREST_THRESHOLD) < 0
@@ -868,6 +934,7 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
     ir10,
     ir4,
     ir3,
+    ir6,
     lastYearExcessImputation,
     interest,
     ica,

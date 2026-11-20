@@ -62,7 +62,7 @@ describeWithDatabase("business structure", () => {
 
     await as((tx) => saveBusinessStructure(tx, { entityType: "partnership", irdNumber: "49-091-850" }));
     const partnership = await as((tx) => getIncomeTaxSettings(tx));
-    expect(partnership.unsupported).toBe("Tohyee's income tax is for companies and sole traders. A partnership's partners are taxed on their shares.");
+    expect(partnership.unsupported).toBe("Tohyee's income tax is for companies, sole traders and trusts. A partnership's partners are taxed on their shares.");
     await expect(as((tx) => updateIncomeTaxSettings(tx, { taxpayerType: "company", agentExtension: false, version: partnership.version }))).rejects.toThrow(
       "A partnership's partners are taxed on their shares.",
     );

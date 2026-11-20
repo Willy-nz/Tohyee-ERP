@@ -14,6 +14,7 @@ import { forecastIncomplete } from "@/lib/tax/income/workspace";
 import { useModules } from "@/components/modules";
 import { IrdImports } from "@/components/ird-imports";
 import { Supported,TAX_VIEWS,TaxView,viewHref } from "@/components/income-tax/shared";
+import { BeneficiariesCard, BeneficiaryIncomeCard, Ir6Card } from "@/components/income-tax/trust";
 import { Settings,Workpaper } from "@/components/income-tax/workpaper";
 import { YearFigures } from "@/components/income-tax/year-figures";
 import { BookPayments } from "@/components/income-tax/payments";
@@ -58,6 +59,7 @@ function Report({ organisationId, report, reload, view, gst }: { organisationId:
       ) : null}
       {view === "calculation" ? (
         <>
+          {report.workpaper.trust ? <BeneficiaryIncomeCard organisationId={organisationId} incomeYear={report.incomeYear} trust={report.workpaper.trust} onSaved={reload} /> : null}
           <Workpaper organisationId={organisationId} report={report} onSaved={reload} />
           <TaxAssets organisationId={organisationId} assets={report.taxAssets} incomeYear={report.incomeYear} onSaved={reload} />
         </>
@@ -76,6 +78,7 @@ function Report({ organisationId, report, reload, view, gst }: { organisationId:
       {view === "returns" ? (
         <>
           {report.ica ? <IcaCard organisationId={organisationId} ica={report.ica} onSaved={reload} /> : null}
+          {report.ir6 ? <Ir6Card incomeYear={report.incomeYear} ir6={report.ir6} /> : null}
           {report.ir4 ? (
             <TaxReturnCard title={`IR4 company return: income and tax (${report.incomeYear})`} source="IRD's 2026 IR4 form and guide" order={IR4_BOXES} labels={IR4_BOX_LABELS} result={report.ir4} residualBox="30J" outcomeBox="30L" provisionalBox="33" />
           ) : null}
@@ -155,7 +158,10 @@ export function IncomeTaxView({ organisationId }: { organisationId: string }) {
                 <p>These figures follow IRD&apos;s published rules as Tohyee reads them. They haven&apos;t been reviewed by an accountant yet, so check them before relying on them. Nothing here files a return or pays IRD.</p>
               </details>
               {view === "settings" ? (
-                <Settings key={`${report.settings.version}`} organisationId={organisationId} settings={report.settings} onSaved={loaded.reload} />
+                <>
+                  <Settings key={`${report.settings.version}`} organisationId={organisationId} settings={report.settings} onSaved={loaded.reload} />
+                  {report.settings.taxpayerType === "trust" ? <BeneficiariesCard organisationId={organisationId} /> : null}
+                </>
               ) : report.supported ? (
                 <Report organisationId={organisationId} report={report} reload={loaded.reload} view={view} gst={Boolean(modules?.gst)} />
               ) : (

@@ -2,6 +2,7 @@ import { addDays } from "@/lib/financial-year";
 import { incomeYearDates as rdIncomeYearDates, incomeYearOf as rdIncomeYearOf } from "@/lib/rd/amounts";
 import { add, cmp, dec, type Decimal, divide, isNegative, isPositive, isZero, mul, roundHalfUp, sub, toFixedString, truncate, toPlainString, ZERO_DECIMAL } from "@/lib/money/decimal";
 import { publicHolidayYear } from "@/lib/payroll/leave/public-holiday-dates";
+import { type Beneficiary, type TrustKind, type TrustTax, trustTax } from "@/lib/tax/income/trusts";
 
 /*
  * Income tax rules (examples ITX1-ITX10). Pure and
@@ -22,9 +23,9 @@ import { publicHolidayYear } from "@/lib/payroll/leave/public-holiday-dates";
  * Only a 31 March balance date and the 2025 income year onwards (ITX1).
  */
 
-export const TAXPAYER_TYPES = ["company", "individual"] as const;
+export const TAXPAYER_TYPES = ["company", "individual", "trust"] as const;
 export type TaxpayerType = (typeof TAXPAYER_TYPES)[number];
-export const TAXPAYER_TYPE_LABELS: Record<TaxpayerType, string> = { company: "Company", individual: "Individual (sole trader)" };
+export const TAXPAYER_TYPE_LABELS: Record<TaxpayerType, string> = { company: "Company", individual: "Individual (sole trader)", trust: "Trust" };
 
 export const FIRST_SUPPORTED_INCOME_YEAR = 2025;
 /** "More than $5,000" of RIT last year makes someone a provisional taxpayer (IR289). */
@@ -102,6 +103,8 @@ const INDIVIDUAL_FROM_2026: TaxBand[] = [
 export function taxRates(type: TaxpayerType, year: number): TaxRates {
   if (!isSupportedIncomeYear(year)) throw new Error(`Income year ${year} isn't supported.`);
   if (type === "company") return { bands: [{ from: "0", to: null, rate: "0.28" }], source: "Company rate 28%." };
+  // A trust's tax is worked out by trustTax (TRT4-TRT9); this is the trustee rate before the $10,000 test.
+  if (type === "trust") return { bands: [{ from: "0", to: null, rate: year >= 2025 ? "0.39" : "0.33" }], source: "Trustee rate." };
   if (year === 2025) return { bands: INDIVIDUAL_2025, source: "IRD's individual rates for 1 April 2024 to 31 March 2025." };
   return { bands: INDIVIDUAL_FROM_2026, source: "IRD's individual rates from 1 April 2025." };
 }
@@ -568,6 +571,8 @@ export type Workpaper = {
   imputationLoss: string;
   /** RWT, PAYE and other credits: refunded if more than the tax. */
   taxCredits: string;
+  /** A trust's trustee and beneficiary income (TRT3-TRT11); null for a company or individual. */
+  trust: TrustTax | null;
   /** Tax less credits: negative is a refund. */
   taxToPay: string;
   /** Residual income tax: tax to pay, but never below nil. */
@@ -623,6 +628,8 @@ export function workpaper(input: {
   imputationCredits?: Decimal;
   /** Individuals only; ignored for a company. */
   imputationBroughtForward?: Decimal;
+  /** A trust's kind and beneficiary income (TRT1-TRT11). */
+  trust?: { kind: TrustKind; dateOfDeath: string | null; endMonth: number; yearEnd: string; allocations: Array<{ beneficiary: Beneficiary; amount: Decimal }> };
 }): Workpaper {
   let netProfit = ZERO_DECIMAL;
   const adjustments: Adjustment[] = [];
@@ -643,7 +650,25 @@ export function workpaper(input: {
   let lossesUsed = ZERO_DECIMAL;
   let taxable = beforeLosses;
   let carried = input.lossesBroughtForward;
-  if (isPositive(beforeLosses)) {
+  let trust: TrustTax | null = null;
+  let tax: Decimal | undefined;
+  if (input.type === "trust") {
+    // TRT3-TRT11: beneficiary income comes off net income; losses come off trustee income only.
+    trust = trustTax({
+      kind: input.trust?.kind ?? "family",
+      dateOfDeath: input.trust?.dateOfDeath ?? null,
+      year: input.year,
+      endMonth: input.trust?.endMonth ?? 3,
+      yearEnd: input.trust?.yearEnd ?? `${input.year}-03-31`,
+      netIncome: beforeLosses,
+      lossesBroughtForward: input.lossesBroughtForward,
+      allocations: input.trust?.allocations ?? [],
+    });
+    lossesUsed = dec(trust.lossesUsed);
+    taxable = dec(trust.trusteeIncome);
+    carried = dec(trust.lossCarriedForward);
+    tax = dec(trust.tax);
+  } else if (isPositive(beforeLosses)) {
     lossesUsed = cmp(input.lossesBroughtForward, beforeLosses) < 0 ? input.lossesBroughtForward : beforeLosses;
     taxable = sub(beforeLosses, lossesUsed);
     carried = sub(input.lossesBroughtForward, lossesUsed);
@@ -651,7 +676,7 @@ export function workpaper(input: {
     carried = sub(input.lossesBroughtForward, beforeLosses);
   }
   // Tax is worked out on whole dollars of taxable income: the returns' box (IR4 30A, IR3 worksheet 1) drops the cents.
-  const tax = taxOn(truncate(taxable, 0), input.type, input.year);
+  tax ??= taxOn(truncate(taxable, 0), input.type, input.year);
   // The IR4's box 30 and the IR3 guide's Question 36 worksheet (ITX58-ITX61).
   const overseas = input.overseasTaxPaid ?? ZERO_DECIMAL;
   const broughtForward = input.type === "individual" ? (input.imputationBroughtForward ?? ZERO_DECIMAL) : ZERO_DECIMAL;
@@ -678,6 +703,7 @@ export function workpaper(input: {
     excessImputationCredits: money(excessImputation),
     imputationLoss: money(imputationLoss),
     taxCredits: money(input.taxCredits),
+    trust,
     taxToPay: money(taxToPay),
     rit: money(isNegative(taxToPay) ? ZERO_DECIMAL : taxToPay),
   };

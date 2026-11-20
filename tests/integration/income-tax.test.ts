@@ -58,7 +58,7 @@ describeWithDatabase("income tax: taxable income, provisional and end-of-year ta
   it("ITX1 says what it needs before it works anything out", async () => {
     const report = await as((tx) => buildIncomeTax(tx, { incomeYear: 2026, today: "2026-10-16" }));
     expect(report.supported).toBe(false);
-    if (!report.supported) expect(report.reason).toContain("company or an individual");
+    if (!report.supported) expect(report.reason).toContain("a company, an individual (sole trader) or a trust");
     const settings = await as((tx) => getIncomeTaxSettings(tx));
     await as((tx) => updateIncomeTaxSettings(tx, { taxpayerType: "company", agentExtension: false, version: settings.version }));
     await expect(as((tx) => updateIncomeTaxSettings(tx, { taxpayerType: "company", agentExtension: true, version: settings.version }))).rejects.toThrow("Someone else changed");
