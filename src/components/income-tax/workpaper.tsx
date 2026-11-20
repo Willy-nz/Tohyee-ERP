@@ -9,7 +9,8 @@ import { api,errorMessage,newIdempotencyKey } from "@/lib/client/api";
 import { formatDate,formatMoney } from "@/lib/format";
 import { EXPENSE_TREATMENTS,INCOME_TREATMENTS,TAXPAYER_TYPE_LABELS,TREATMENT_LABELS,type TaxpayerType,type Treatment } from "@/lib/tax/income/rules";
 import type { IncomeTaxSettings,ReportAccount } from "@/lib/tax/income/service";
-import { TRUST_KIND_LABELS,TRUST_KINDS,type TrustKind } from "@/lib/tax/income/trusts";
+import { TRUST_CLASS_LABELS, TRUST_CLASSES, type TrustClass } from "@/lib/tax/income/trust-return";
+import { TRUST_KIND_LABELS, TRUST_KINDS, type TrustKind } from "@/lib/tax/income/trusts";
 import { Status,Supported,negated } from "@/components/income-tax/shared";
 
 export function Settings({ organisationId, settings, onSaved }: { organisationId: string; settings: IncomeTaxSettings; onSaved: () => void }) {
@@ -17,6 +18,7 @@ export function Settings({ organisationId, settings, onSaved }: { organisationId
   const [extension, setExtension] = useState(settings.agentExtension);
   const [trustKind, setTrustKind] = useState<TrustKind>(settings.trustKind);
   const [dateOfDeath, setDateOfDeath] = useState(settings.dateOfDeath ?? "");
+  const [trustClass, setTrustClass] = useState<TrustClass>(settings.trustClass);
   const [status, setStatus] = useState<Status>(null);
   const isTrust = (settings.entityType ? settings.taxpayerType : type) === "trust";
   async function save(event: FormEvent) {
@@ -27,7 +29,7 @@ export function Settings({ organisationId, settings, onSaved }: { organisationId
           taxpayerType: settings.entityType ? settings.taxpayerType : type,
           agentExtension: extension,
           version: settings.version,
-          ...(isTrust ? { trustKind, dateOfDeath: trustKind === "deceased_estate" ? dateOfDeath || null : null } : {}),
+          ...(isTrust ? { trustKind, dateOfDeath: trustKind === "deceased_estate" ? dateOfDeath || null : null, trustClass } : {}),
         },
       });
       setStatus({ tone: "success", text: "Saved." });
@@ -70,6 +72,15 @@ export function Settings({ organisationId, settings, onSaved }: { organisationId
                 {TRUST_KINDS.map((kind) => (
                   <option key={kind} value={kind}>
                     {TRUST_KIND_LABELS[kind]}
+                  </option>
+                ))}
+              </select>
+            </Field>
+            <Field label="Complying, foreign or non-complying" hint="Sets whether distributions other than beneficiary income are taxable.">
+              <select value={trustClass} onChange={(event) => setTrustClass(event.target.value as TrustClass)}>
+                {TRUST_CLASSES.map((value) => (
+                  <option key={value} value={value}>
+                    {TRUST_CLASS_LABELS[value]}
                   </option>
                 ))}
               </select>

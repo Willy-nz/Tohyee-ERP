@@ -3,6 +3,7 @@ import { incomeYearDates as rdIncomeYearDates, incomeYearOf as rdIncomeYearOf } 
 import { add, cmp, dec, type Decimal, divide, isNegative, isPositive, isZero, mul, roundHalfUp, sub, toFixedString, truncate, toPlainString, ZERO_DECIMAL } from "@/lib/money/decimal";
 import { publicHolidayYear } from "@/lib/payroll/leave/public-holiday-dates";
 import { type Beneficiary, type TrustKind, type TrustTax, trustTax } from "@/lib/tax/income/trusts";
+import { type BeneficiaryYear, type TrustClass, type TrustReturn, trusteeAfterCredits, trustReturn } from "@/lib/tax/income/trust-return";
 
 /*
  * Income tax rules (examples ITX1-ITX10). Pure and
@@ -573,6 +574,8 @@ export type Workpaper = {
   taxCredits: string;
   /** A trust's trustee and beneficiary income (TRT3-TRT11); null for a company or individual. */
   trust: TrustTax | null;
+  /** A trust's credits shared with beneficiaries, its IR6Bs and the tax it pays for them (TRT15-TRT25). */
+  trustReturn: TrustReturn | null;
   /** Tax less credits: negative is a refund. */
   taxToPay: string;
   /** Residual income tax: tax to pay, but never below nil. */
@@ -629,7 +632,17 @@ export function workpaper(input: {
   /** Individuals only; ignored for a company. */
   imputationBroughtForward?: Decimal;
   /** A trust's kind and beneficiary income (TRT1-TRT11). */
-  trust?: { kind: TrustKind; dateOfDeath: string | null; endMonth: number; yearEnd: string; allocations: Array<{ beneficiary: Beneficiary; amount: Decimal }> };
+  trust?: {
+    kind: TrustKind;
+    dateOfDeath: string | null;
+    endMonth: number;
+    yearEnd: string;
+    allocations: Array<{ beneficiary: Beneficiary; amount: Decimal }>;
+    /** Complying, foreign or non-complying (TRT20). */
+    trustClass?: TrustClass;
+    /** Each beneficiary's figures for the year, beyond the allocation (TRT18, TRT21, TRT24). */
+    years?: BeneficiaryYear[];
+  };
 }): Workpaper {
   let netProfit = ZERO_DECIMAL;
   const adjustments: Adjustment[] = [];
@@ -682,11 +695,47 @@ export function workpaper(input: {
   const broughtForward = input.type === "individual" ? (input.imputationBroughtForward ?? ZERO_DECIMAL) : ZERO_DECIMAL;
   const imputation = add(input.imputationCredits ?? ZERO_DECIMAL, broughtForward);
   const afterOverseas = cmp(overseas, tax) > 0 ? ZERO_DECIMAL : sub(tax, overseas);
-  const afterImputation = cmp(imputation, afterOverseas) > 0 ? ZERO_DECIMAL : sub(afterOverseas, imputation);
-  const excessImputation = cmp(imputation, afterOverseas) > 0 ? sub(imputation, afterOverseas) : ZERO_DECIMAL;
-  const imputationLoss = input.type === "company" ? roundHalfUp(divide(excessImputation, COMPANY_RATE, 6), 2) : ZERO_DECIMAL;
+  let afterImputation = cmp(imputation, afterOverseas) > 0 ? ZERO_DECIMAL : sub(afterOverseas, imputation);
+  let excessImputation = cmp(imputation, afterOverseas) > 0 ? sub(imputation, afterOverseas) : ZERO_DECIMAL;
+  let imputationLoss = input.type === "company" ? roundHalfUp(divide(excessImputation, COMPANY_RATE, 6), 2) : ZERO_DECIMAL;
+  let taxToPay = sub(afterImputation, input.taxCredits);
+  let shownOverseas = overseas;
+  let shownImputation = sub(imputation, broughtForward);
+  let shownCredits = input.taxCredits;
+  let returned: TrustReturn | null = null;
+  if (trust) {
+    // TRT15-TRT18: only the trustee's share of the credits comes off; the tax the trustee pays for beneficiaries goes on.
+    const year = input.year;
+    const years: BeneficiaryYear[] =
+      input.trust?.years ??
+      (input.trust?.allocations ?? []).map(({ beneficiary, amount }) => ({
+        beneficiary: { ...beneficiary, irdNumber: null, jurisdiction: null, tin: null },
+        amount,
+        trusteePaysTax: false,
+        otherIncome: ZERO_DECIMAL,
+        taxableDistribution: ZERO_DECIMAL,
+        nonTaxableDistribution: ZERO_DECIMAL,
+        withdrawn: ZERO_DECIMAL,
+        openingBalance: ZERO_DECIMAL,
+      }));
+    returned = trustReturn({
+      trustClass: input.trust?.trustClass ?? "complying",
+      trust,
+      credits: { overseas, imputation: input.imputationCredits ?? ZERO_DECIMAL, other: input.taxCredits },
+      years,
+      taxOn: (income, kind) => taxOn(truncate(income, 0), kind === "company" ? "company" : "individual", year),
+    });
+    const credits = { overseas: dec(returned.trusteeCredits.overseas), imputation: dec(returned.trusteeCredits.imputation), other: dec(returned.trusteeCredits.other) };
+    const after = trusteeAfterCredits({ tax, trusteeRate: dec(trust.trusteeRate), credits });
+    afterImputation = after.afterImputation;
+    excessImputation = after.excessImputation;
+    imputationLoss = after.imputationLoss;
+    taxToPay = add(after.result, dec(returned.beneficiaryTax));
+    shownOverseas = credits.overseas;
+    shownImputation = credits.imputation;
+    shownCredits = credits.other;
+  }
   carried = add(carried, imputationLoss);
-  const taxToPay = sub(afterImputation, input.taxCredits);
   return {
     netProfit: money(netProfit),
     adjustments,
@@ -697,13 +746,14 @@ export function workpaper(input: {
     taxableIncome: money(taxable),
     lossCarriedForward: money(carried),
     tax: money(tax),
-    overseasTaxPaid: money(overseas),
-    imputationCredits: money(sub(imputation, broughtForward)),
+    overseasTaxPaid: money(shownOverseas),
+    imputationCredits: money(shownImputation),
     imputationBroughtForward: money(broughtForward),
     excessImputationCredits: money(excessImputation),
     imputationLoss: money(imputationLoss),
-    taxCredits: money(input.taxCredits),
+    taxCredits: money(shownCredits),
     trust,
+    trustReturn: returned,
     taxToPay: money(taxToPay),
     rit: money(isNegative(taxToPay) ? ZERO_DECIMAL : taxToPay),
   };
