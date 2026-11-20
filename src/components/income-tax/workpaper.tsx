@@ -65,7 +65,7 @@ export function Settings({ organisationId, settings, onSaved }: { organisationId
         </Field>
         )}
         {isTrust ? (
-          // TRT1, TRT5, TRT6: the kind of trust sets the trustee's rate.
+          // TRU1, TRU5, TRU6: the kind of trust sets the trustee's rate.
           <>
             <Field label="Kind of trust">
               <select value={trustKind} onChange={(event) => setTrustKind(event.target.value as TrustKind)}>

@@ -77,8 +77,8 @@ function boxes(result: ReturnType<typeof paper>, yearNumber = 2026) {
   return { figures, map: Object.fromEntries(figures.boxes.map((box) => [box.box, box.amount])) };
 }
 
-describe("a trust's return (TRT15-TRT27)", () => {
-  it("TRT15: credits are shared in proportion to the income; the minor and corporate shares stay with the trustee", () => {
+describe("a trust's return (TRU15-TRU27)", () => {
+  it("TRU15: credits are shared in proportion to the income; the minor and corporate shares stay with the trustee", () => {
     const result = paper({ netIncome: "60000", years: totara, credits });
     expect(result.trustReturn!.passedOn).toEqual({ overseas: "104.00", imputation: "416.00", other: "208.00" });
     expect(result.trustReturn!.trusteeCredits).toEqual({ overseas: "196.00", imputation: "784.00", other: "392.00" });
@@ -88,7 +88,7 @@ describe("a trust's return (TRT15-TRT27)", () => {
     expect(result.rit).toBe("13916.00");
   });
 
-  it("TRT15, TRT26: the 2026 IR6 boxes", () => {
+  it("TRU15, TRU26: the 2026 IR6 boxes", () => {
     const { map } = boxes(paper({ netIncome: "60000", years: totara, credits }));
     expect(map).toMatchObject({
       "20A": "20800.00",
@@ -112,14 +112,14 @@ describe("a trust's return (TRT15-TRT27)", () => {
     expect(map["23"]).toBeUndefined();
   });
 
-  it("TRT26: the 2025 IR6's boxes are one question higher", () => {
+  it("TRU26: the 2025 IR6's boxes are one question higher", () => {
     const { figures, map } = boxes(paper({ netIncome: "60000", years: totara, credits, yearNumber: 2025 }), 2025);
     expect(figures.form).toBe(2025);
     expect(map).toMatchObject({ "21A": "20800.00", "21C": "13000.00", "27Z": "0.00", "28C": "5070.00", "28J": "13916.00", "29C": "13916.00" });
     expect(figures.beneficiaries[0].boxes[0]).toEqual({ box: "27I", label: "Taxable income", amount: "20000.00" });
   });
 
-  it("TRT16: the trustee's excess imputation credits become a loss, excess ÷ the trustee rate", () => {
+  it("TRU16: the trustee's excess imputation credits become a loss, excess ÷ the trustee rate", () => {
     const result = paper({ netIncome: "2000", years: [], credits: { overseas: "0", imputation: "900", other: "0" } });
     expect(result.trust!.trusteeTax).toBe("660.00");
     expect(result.excessImputationCredits).toBe("240.00");
@@ -128,7 +128,7 @@ describe("a trust's return (TRT15-TRT27)", () => {
     expect(result.taxToPay).toBe("0.00");
   });
 
-  it("TRT17: the trustee's RWT and other credits beyond its tax are refunded", () => {
+  it("TRU17: the trustee's RWT and other credits beyond its tax are refunded", () => {
     const result = paper({ netIncome: "2000", years: [], credits: { overseas: "0", imputation: "0", other: "900" } });
     expect(result.taxToPay).toBe("-240.00");
     const { map } = boxes(result);
@@ -137,7 +137,7 @@ describe("a trust's return (TRT15-TRT27)", () => {
     expect(j?.side).toBe("credit");
   });
 
-  it("TRT18: the trust pays a beneficiary's tax: their share of tax on all their income, less their credits", () => {
+  it("TRU18: the trust pays a beneficiary's tax: their share of tax on all their income, less their credits", () => {
     const years = [year(aroha, "20000", { trusteePaysTax: true, otherIncome: dec("50000") }), year(nikau, "3000"), year(tama, "800"), year(holdings, "10000")];
     const result = paper({ netIncome: "60000", years, credits });
     const aro = result.trustReturn!.statements[0];
@@ -150,19 +150,19 @@ describe("a trust's return (TRT15-TRT27)", () => {
     expect(figures.beneficiaries[0].boxes.map((box) => box.box)).toEqual(["26I", "26L", "26M", "26N", "26O", "26P", "26Q", "26R", "26S", "26T", "26U", "26V", "26W", "26X", "26Y"]);
   });
 
-  it("TRT18: the trustee doesn't pay tax for a minor beneficiary taxed under the rule", () => {
+  it("TRU18: the trustee doesn't pay tax for a minor beneficiary taxed under the rule", () => {
     const result = paper({ netIncome: "60000", years: [year(nikau, "3000", { trusteePaysTax: true })] });
     expect(result.trustReturn!.statements[0]).toMatchObject({ tax: null, taxPayable: "0.00" });
     expect(result.trustReturn!.notes.join(" ")).toContain("doesn't pay tax for them as well");
   });
 
-  it("TRT21: a complying trust's taxable distribution is left out", () => {
+  it("TRU21: a complying trust's taxable distribution is left out", () => {
     const result = paper({ netIncome: "60000", years: [year(aroha, "20000", { taxableDistribution: dec("5000") })] });
     expect(result.trustReturn!.taxableDistributions).toBe("0.00");
     expect(result.trustReturn!.notes.join(" ")).toContain("aren't taxable");
   });
 
-  it("TRT22: a non-complying trust's taxable distribution is taxed at 45%, paid by the trustee", () => {
+  it("TRU22: a non-complying trust's taxable distribution is taxed at 45%, paid by the trustee", () => {
     const result = paper({ netIncome: "60000", years: [year(aroha, "0", { taxableDistribution: dec("10000"), nonTaxableDistribution: dec("4000") })], trustClass: "non_complying" });
     const aro = result.trustReturn!.statements[0];
     expect(aro).toMatchObject({ nonComplyingDistribution: "10000.00", nonComplyingTax: "4500.00", taxPayable: "4500.00", taxableIncome: "0.00" });
@@ -171,19 +171,19 @@ describe("a trust's return (TRT15-TRT27)", () => {
     expect(figures.beneficiaries[0].boxes.find((box) => box.box === "26K")?.amount).toBe("10000.00");
   });
 
-  it("TRT23: a foreign trust's taxable distribution is the beneficiary's other income", () => {
+  it("TRU23: a foreign trust's taxable distribution is the beneficiary's other income", () => {
     const result = paper({ netIncome: "60000", years: [year(aroha, "0", { taxableDistribution: dec("8000") })], trustClass: "foreign" });
     const aro = result.trustReturn!.statements[0];
     expect(aro).toMatchObject({ foreignTaxableDistribution: "8000.00", taxableIncome: "8000.00", nonComplyingTax: "0.00", taxPayable: "0.00" });
     expect(boxes(result).figures.beneficiaries[0].boxes.find((box) => box.box === "26H")?.amount).toBe("8000.00");
   });
 
-  it("TRT24: the current account", () => {
+  it("TRU24: the current account", () => {
     const result = paper({ netIncome: "60000", years: [year(aroha, "20000", { openingBalance: dec("1500"), nonTaxableDistribution: dec("2500"), withdrawn: dec("18000") })] });
     expect(result.trustReturn!.statements[0].account).toEqual({ opening: "1500.00", taxable: "20000.00", nonTaxable: "2500.00", withdrawn: "18000.00", closing: "6000.00" });
   });
 
-  it("TRT25: a beneficiary with a distribution and no IRD number is flagged", () => {
+  it("TRU25: a beneficiary with a distribution and no IRD number is flagged", () => {
     const entry = year(aroha, "20000");
     entry.beneficiary.irdNumber = null;
     expect(paper({ netIncome: "60000", years: [entry] }).trustReturn!.notes.join(" ")).toContain("Aroha has no IRD number");

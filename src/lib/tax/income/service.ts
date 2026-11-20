@@ -67,10 +67,10 @@ export type IncomeTaxSettings = {
   entityType: EntityType | null;
   /** Why Tohyee doesn't work out this entity's income tax, for a partnership, look-through company or society. */
   unsupported: string | null;
-  /** A trust's kind and an estate's date of death (TRT1, TRT5). */
+  /** A trust's kind and an estate's date of death (TRU1, TRU5). */
   trustKind: TrustKind;
   dateOfDeath: string | null;
-  /** Complying, foreign or non-complying (TRT20). */
+  /** Complying, foreign or non-complying (TRU20). */
   trustClass: TrustClass;
 };
 
@@ -125,11 +125,11 @@ export async function updateIncomeTaxSettings(
   const agentExtension = requireBoolean(input.agentExtension, "agentExtension");
   const version = requireVersion(input.version);
   const before = await getIncomeTaxSettings(tx);
-  // TRT1, TRT5: a trust's kind, and an estate's date of death.
+  // TRU1, TRU5: a trust's kind, and an estate's date of death.
   const trustKind = taxpayerType === "trust" && input.trustKind !== undefined ? requireOneOf(input.trustKind, "trustKind", TRUST_KINDS) : taxpayerType === "trust" ? before.trustKind : "family";
   const dateOfDeath =
     trustKind === "deceased_estate" ? (input.dateOfDeath === undefined ? before.dateOfDeath : input.dateOfDeath === null || input.dateOfDeath === "" ? null : parseIsoDate(input.dateOfDeath, "dateOfDeath")) : null;
-  // TRT20: complying, foreign or non-complying.
+  // TRU20: complying, foreign or non-complying.
   const trustClass = taxpayerType === "trust" && input.trustClass !== undefined ? requireOneOf(input.trustClass, "trustClass", TRUST_CLASSES) : taxpayerType === "trust" ? before.trustClass : "complying";
   // ENT3: with a business structure set, the taxpayer follows it.
   if (before.entityType) {
@@ -575,7 +575,7 @@ export type IncomeTaxReport =
       ir4: Ir4Return | null;
       /** A sole trader's IR3 income boxes and tax calculation, once the income year has ended (ITX54-ITX57). */
       ir3: Ir3Return | null;
-      /** A trust's IR6 and IR6B boxes, once the year has ended (TRT14, TRT25, TRT26). */
+      /** A trust's IR6 and IR6B boxes, once the year has ended (TRU14, TRU25, TRU26). */
       ir6: Ir6Figures | null;
       /** An individual's: the excess imputation credits Tohyee works out for last year, to check against IRD's letter (ITX65). */
       lastYearExcessImputation: string | null;
@@ -681,7 +681,7 @@ async function pastWorkpaper(tx: OrgTx, type: TaxpayerType, year: number, today:
   return result;
 }
 
-/** A trust's kind and beneficiary income for the workpaper (TRT1-TRT11). */
+/** A trust's kind and beneficiary income for the workpaper (TRU1-TRU11). */
 async function trustInput(tx: OrgTx, year: number) {
   const settings = await getIncomeTaxSettings(tx);
   const years = await beneficiaryYears(tx, year);
@@ -846,7 +846,7 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
   const ir10 = yearEnded ? await buildIr10(tx, { incomeYear, workpaper: paper, multipleActivity: typed.multipleActivity, treatments }) : null;
   const ir4 = yearEnded && type === "company" ? ir4Return({ incomeYear, workpaper: paper, paidTowardsYear: paid }) : null;
   const ir3 = yearEnded && type === "individual" ? ir3Return({ incomeYear, workpaper: paper, paidTowardsYear: paid }) : null;
-  // TRT14, TRT25, TRT26: the IR6 and IR6B boxes, once the year has ended.
+  // TRU14, TRU25, TRU26: the IR6 and IR6B boxes, once the year has ended.
   const ir6: Ir6Figures | null =
     yearEnded && paper.trust && paper.trustReturn
       ? ir6Figures({

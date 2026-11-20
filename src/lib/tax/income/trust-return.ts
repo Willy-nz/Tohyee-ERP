@@ -2,7 +2,7 @@ import { add, cmp, dec, type Decimal, divide, isNegative, isPositive, isZero, mu
 import type { Beneficiary, TrustTax } from "@/lib/tax/income/trusts";
 
 /*
- * The rest of a trust's return (examples TRT15-TRT27; from IRD's IR6 and IR6B
+ * The rest of a trust's return (examples TRU15-TRU27; from IRD's IR6 and IR6B
  * forms for 2025 and 2026, the 2026 IR6 guide (IR6G) and IRD's beneficiary
  * pages; following common practice, not yet reviewed): credits shared with
  * beneficiaries, tax the trustee pays for a beneficiary, distributions and the
@@ -18,31 +18,31 @@ export const TRUST_CLASS_LABELS: Record<TrustClass, string> = {
   non_complying: "Non-complying trust",
 };
 
-/** Tax on a non-complying trust's taxable distributions (TRT22). */
+/** Tax on a non-complying trust's taxable distributions (TRU22). */
 const NON_COMPLYING_RATE = dec("0.45");
 
 export type Credits = { overseas: Decimal; imputation: Decimal; other: Decimal };
 
-/** A beneficiary's figures for the year (TRT3, TRT18, TRT21, TRT24). */
+/** A beneficiary's figures for the year (TRU3, TRU18, TRU21, TRU24). */
 export type BeneficiaryYear = {
   beneficiary: Beneficiary & { irdNumber: string | null; jurisdiction: string | null; tin: string | null };
-  /** Beneficiary income allocated (TRT3); nil when only a distribution was made. */
+  /** Beneficiary income allocated (TRU3); nil when only a distribution was made. */
   amount: Decimal;
-  /** The trustee pays the beneficiary's tax on it (IR6B "estate or trust paying tax", TRT18). */
+  /** The trustee pays the beneficiary's tax on it (IR6B "estate or trust paying tax", TRU18). */
   trusteePaysTax: boolean;
-  /** The beneficiary's other taxable income, for working out that tax (TRT18). */
+  /** The beneficiary's other taxable income, for working out that tax (TRU18). */
   otherIncome: Decimal;
-  /** A foreign or non-complying trust's distribution that's taxable, other than beneficiary income (TRT21-TRT23). */
+  /** A foreign or non-complying trust's distribution that's taxable, other than beneficiary income (TRU21-TRU23). */
   taxableDistribution: Decimal;
-  /** Distributions that aren't taxable: corpus, a complying trust's capital gains and the like (TRT21). */
+  /** Distributions that aren't taxable: corpus, a complying trust's capital gains and the like (TRU21). */
   nonTaxableDistribution: Decimal;
-  /** Taken out of their current account during the year (TRT24). */
+  /** Taken out of their current account during the year (TRU24). */
   withdrawn: Decimal;
-  /** Owed to them at the start of the year (TRT24). */
+  /** Owed to them at the start of the year (TRU24). */
   openingBalance: Decimal;
 };
 
-/** One beneficiary's IR6B (TRT25), by meaning; boxes() gives the numbers. */
+/** One beneficiary's IR6B (TRU25), by meaning; boxes() gives the numbers. */
 export type BeneficiaryStatement = {
   beneficiaryId: string;
   name: string;
@@ -50,20 +50,20 @@ export type BeneficiaryStatement = {
   irdNumber: string | null;
   jurisdiction: string | null;
   tin: string | null;
-  /** The minor or corporate beneficiary rule applies to this income (TRT7, TRT8). */
+  /** The minor or corporate beneficiary rule applies to this income (TRU7, TRU8). */
   taxedByTrustee: boolean;
   trusteePaysTax: boolean;
   beneficiaryIncome: string;
-  /** A foreign trust's taxable distribution, in other income (TRT23). */
+  /** A foreign trust's taxable distribution, in other income (TRU23). */
   foreignTaxableDistribution: string;
   /** Taxable income: beneficiary income plus a foreign trust's taxable distribution (IR6B 26I). */
   taxableIncome: string;
-  /** A non-complying trust's taxable distribution (IR6B 26K, TRT22). */
+  /** A non-complying trust's taxable distribution (IR6B 26K, TRU22). */
   nonComplyingDistribution: string;
   overseasTax: string;
   imputationCredits: string;
   otherCredits: string;
-  /** Filled in when the trustee pays their tax (TRT18). */
+  /** Filled in when the trustee pays their tax (TRU18). */
   tax: { taxOnIncome: string; afterOverseas: string; afterImputation: string; afterOther: string } | null;
   /** 45% of a non-complying trust's taxable distribution (IR6B 26S). */
   nonComplyingTax: string;
@@ -74,14 +74,14 @@ export type BeneficiaryStatement = {
 
 export type TrustReturn = {
   trustClass: TrustClass;
-  /** Credits on the trust's income, before sharing (TRT15). */
+  /** Credits on the trust's income, before sharing (TRU15). */
   totalCredits: { overseas: string; imputation: string; other: string };
-  /** Passed to beneficiaries taxed as their own: theirs, not the trustee's (TRT15). */
+  /** Passed to beneficiaries taxed as their own: theirs, not the trustee's (TRU15). */
   passedOn: { overseas: string; imputation: string; other: string };
-  /** The trustee's share, including credits on minor and corporate beneficiary income (TRT15). */
+  /** The trustee's share, including credits on minor and corporate beneficiary income (TRU15). */
   trusteeCredits: { overseas: string; imputation: string; other: string };
   statements: BeneficiaryStatement[];
-  /** Tax the trustee pays for beneficiaries (IR6 26Z / 27Z, TRT18, TRT22). */
+  /** Tax the trustee pays for beneficiaries (IR6 26Z / 27Z, TRU18, TRU22). */
   beneficiaryTax: string;
   totalDistributions: string;
   taxableDistributions: string;
@@ -90,7 +90,7 @@ export type TrustReturn = {
 
 /**
  * Shares the credits, works out each beneficiary's IR6B and the tax the trustee
- * pays for them (TRT15-TRT25). `taxOn` is the individual or company tax for the
+ * pays for them (TRU15-TRU25). `taxOn` is the individual or company tax for the
  * year on whole dollars.
  */
 export function trustReturn(input: {
@@ -103,7 +103,7 @@ export function trustReturn(input: {
   const notes: string[] = [];
   const net = dec(input.trust.netIncome);
   const allocated = dec(input.trust.beneficiaryIncome);
-  // TRT15: the same share of each credit as of the income. When more is allocated than the net income (TRT11), share by what's allocated.
+  // TRU15: the same share of each credit as of the income. When more is allocated than the net income (TRU11), share by what's allocated.
   const base = cmp(allocated, net) > 0 ? allocated : net;
   const taxedByTrustee = new Map(input.trust.lines.map((line) => [line.beneficiaryId, line.taxedByTrustee]));
   let passedOverseas = ZERO_DECIMAL;
@@ -126,7 +126,7 @@ export function trustReturn(input: {
       passedImputation = add(passedImputation, imputation);
       passedOther = add(passedOther, other);
     }
-    // TRT21-TRT23: a taxable distribution only comes from a foreign or non-complying trust.
+    // TRU21-TRU23: a taxable distribution only comes from a foreign or non-complying trust.
     let distribution = isPositive(year.taxableDistribution) ? year.taxableDistribution : ZERO_DECIMAL;
     if (isPositive(distribution) && input.trustClass === "complying") {
       notes.push(`${beneficiary.name} has a taxable distribution typed, but a complying trust's distributions other than beneficiary income aren't taxable. It's left out; type it as not taxable.`);
@@ -135,7 +135,7 @@ export function trustReturn(input: {
     const foreignDistribution = input.trustClass === "foreign" ? distribution : ZERO_DECIMAL;
     const nonComplyingDistribution = input.trustClass === "non_complying" ? distribution : ZERO_DECIMAL;
     const taxableIncome = add(income, foreignDistribution);
-    // TRT18: the trustee pays their tax: the share of tax on all their income that the trust income makes up.
+    // TRU18: the trustee pays their tax: the share of tax on all their income that the trust income makes up.
     let tax: BeneficiaryStatement["tax"] = null;
     let afterOther = ZERO_DECIMAL;
     if (year.trusteePaysTax && !byTrustee && isPositive(taxableIncome)) {
@@ -154,7 +154,7 @@ export function trustReturn(input: {
     const sumTax = add(tax ? afterOther : ZERO_DECIMAL, nonComplyingTax);
     const taxPayable = isNegative(sumTax) ? ZERO_DECIMAL : sumTax;
     beneficiaryTax = add(beneficiaryTax, taxPayable);
-    // TRT24: the current account.
+    // TRU24: the current account.
     const nonTaxable = isPositive(year.nonTaxableDistribution) ? year.nonTaxableDistribution : ZERO_DECIMAL;
     const taxableAccount = add(income, distribution);
     const closing = sub(add(add(year.openingBalance, taxableAccount), nonTaxable), year.withdrawn);
@@ -215,7 +215,7 @@ export function trustReturn(input: {
 }
 
 /**
- * The trustee's tax after its credits (TRT16, TRT17): overseas tax, then
+ * The trustee's tax after its credits (TRU16, TRU17): overseas tax, then
  * imputation credits (an excess becomes a loss, excess ÷ the trustee rate),
  * then RWT and other credits (an excess is refunded).
  */
@@ -229,14 +229,14 @@ export function trusteeAfterCredits(input: { tax: Decimal; trusteeRate: Decimal;
 
 export type Ir6Box = { box: string; label: string; amount: string; side?: "credit" | "debit" };
 export type Ir6Figures = {
-  /** The form the box numbers come from (TRT26). */
+  /** The form the box numbers come from (TRU26). */
   form: 2025 | 2026;
   boxes: Ir6Box[];
   beneficiaries: Array<{ beneficiaryId: string; name: string; dateOfBirth: string | null; irdNumber: string | null; tin: string | null; jurisdiction: string | null; ruleApplies: boolean; boxes: Ir6Box[] }>;
   notes: string[];
 };
 
-/** The IR6 and IR6B boxes (TRT25, TRT26): the 2026 form's numbers, or the 2025 form's (each question one higher) before that. */
+/** The IR6 and IR6B boxes (TRU25, TRU26): the 2026 form's numbers, or the 2025 form's (each question one higher) before that. */
 export function ir6Figures(input: {
   year: number;
   trust: TrustTax;

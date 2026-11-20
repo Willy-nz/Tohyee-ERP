@@ -1,7 +1,7 @@
 import { add, cmp, dec, type Decimal, isPositive, isZero, mul, roundHalfUp, sub, toFixedString, toPlainString, truncate, ZERO_DECIMAL } from "@/lib/money/decimal";
 
 /*
- * Income tax for trusts (examples TRT1-TRT14; from IRD's trustee tax rate and
+ * Income tax for trusts (examples TRU1-TRU14; from IRD's trustee tax rate and
  * beneficiary income pages, the IR6 and IRD's 2024 trust webinar; following
  * common practice, not yet reviewed). Pure: the service loads the figures.
  */
@@ -19,11 +19,11 @@ export type Beneficiary = {
   name: string;
   kind: "person" | "company";
   dateOfBirth: string | null;
-  /** The trust was settled by a relative or guardian of theirs (TRT2, TRT7). */
+  /** The trust was settled by a relative or guardian of theirs (TRU2, TRU7). */
   settledByRelative: boolean;
-  /** A disability allowance or child disability allowance is paid for them (TRT7). */
+  /** A disability allowance or child disability allowance is paid for them (TRU7). */
   disabilityAllowance: boolean;
-  /** For a company: the corporate beneficiary rule applies to it (TRT8). */
+  /** For a company: the corporate beneficiary rule applies to it (TRU8). */
   corporateRule: boolean;
 };
 
@@ -53,7 +53,7 @@ export type TrustTax = {
   minorCorporateIncome: string;
   /** IR6 box 28C. */
   minorCorporateTax: string;
-  /** Trustee net income, before losses brought forward (TRT10). */
+  /** Trustee net income, before losses brought forward (TRU10). */
   trusteeNetIncome: string;
   lossesBroughtForward: string;
   lossesUsed: string;
@@ -80,7 +80,7 @@ function incomeYearOfDate(date: string, endMonth: number): number {
   return m > endMonth ? y + 1 : y;
 }
 
-/** The trustee's rate and why (TRT4-TRT6). */
+/** The trustee's rate and why (TRU4-TRU6). */
 export function trusteeRate(input: { kind: TrustKind; year: number; endMonth: number; dateOfDeath: string | null; trusteeNetIncome: Decimal }): { rate: Decimal; reason: string } {
   if (input.year < TRUSTEE_RATE_FROM) return { rate: LOWER_RATE, reason: "33%: the trustee rate before the 2025 income year." };
   if (input.kind === "disabled_beneficiary") return { rate: LOWER_RATE, reason: "33%: a disabled beneficiary trust." };
@@ -93,7 +93,7 @@ export function trusteeRate(input: { kind: TrustKind; year: number; endMonth: nu
 }
 
 /**
- * The trust's tax for an income year (TRT3-TRT11): beneficiary income comes off
+ * The trust's tax for an income year (TRU3-TRU11): beneficiary income comes off
  * net income; the minor and corporate beneficiary rules tax some of it at 39%
  * by the trustee; losses come off trustee income only.
  */
@@ -102,7 +102,7 @@ export function trustTax(input: {
   dateOfDeath: string | null;
   year: number;
   endMonth: number;
-  /** The end of the income year, for ages (TRT7). */
+  /** The end of the income year, for ages (TRU7). */
   yearEnd: string;
   /** Net income before losses brought forward. */
   netIncome: Decimal;
@@ -150,7 +150,7 @@ export function trustTax(input: {
     );
     trusteeNetIncome = ZERO_DECIMAL;
   }
-  // TRT10: losses come off trustee income only.
+  // TRU10: losses come off trustee income only.
   let lossesUsed = ZERO_DECIMAL;
   let carried = input.lossesBroughtForward;
   let trusteeIncome = trusteeNetIncome;

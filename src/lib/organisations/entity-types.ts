@@ -39,7 +39,7 @@ export function incomeTaxTaxpayerFor(type: EntityType): { taxpayerType: "company
     case "look_through_company":
       return { unsupported: "Tohyee's income tax is for companies, sole traders and trusts. A look-through company's owners are taxed on their shares." };
     case "trust":
-      // TRT1: a trust's tax (the IR6).
+      // TRU1: a trust's tax (the IR6).
       return { taxpayerType: "trust" };
     case "incorporated_society":
       return { unsupported: "Tohyee's income tax is for companies and sole traders, not incorporated societies." };
