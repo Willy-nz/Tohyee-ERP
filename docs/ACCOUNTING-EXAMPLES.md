@@ -22803,6 +22803,85 @@ in `tests/integration/farm-treatments.test.ts` and
 - **TRT8 A count resets stock.** Counted 3 L on 4 Oct, then 500 mL used on
   5 Oct: **2.5 L**, counted 4 Oct.
 
+## Farming: the fuel excise refund (FUEL1-FUEL12; from NZTA's fuel excise duty refunds page, the Land Transport Management (Apportionment and Refund of Excise Duty and Excise-Equivalent Duty) Regulations 2004 and MBIE's table of fuel duties, read by Claude 21 Nov 2026; following common practice, not yet reviewed)
+
+Works out the refund of excise duty and GST on petrol used off the road, for
+NZTA's quarterly MR70 claim. It doesn't post anything or send the claim.
+Tested in `tests/unit/fuel-refund.test.ts` and
+`tests/integration/fuel-refund.test.ts`.
+
+- **FUEL1 What's refunded.** Petrol used off the road, or in an exempted
+  vehicle (the regulations' farm vehicles: those used on a road only for, or
+  only between parts of, the owner's farming), is refunded at the rate in
+  the regulations: **80.5276 cents a litre**. That's petrol excise duty of
+  70.024 cents plus GST on it. Diesel carries no excise duty, so it's never
+  refunded. LPG and CNG aren't covered here.
+- **FUEL2 Petrol and diesel from the books.** For a quarter, Tohyee lists
+  every line of an approved bill or a spend money transaction dated in the
+  quarter that's coded to an account whose name has "fuel", "petrol" or
+  "diesel" in it, or whose description says petrol or diesel. Voided ones
+  are left out.
+  - A description with "petrol", "unleaded", "ULP", "91" or "95" (as a
+    grade) is petrol.
+  - One with "diesel" or "DSL" is diesel.
+  - Anything else on a fuel account, or a line that says both petrol and
+    diesel, is "Not sure": it counts as neither until someone picks. For a
+    line with both, mark it petrol and type only the petrol litres.
+  - The farmer can change what any line is, or mark it not fuel.
+- **FUEL3 Litres.**
+  - Litres written in the description ("400L", "400 litres") are used.
+  - Otherwise, when the quantity is more than 1, the quantity is taken as
+    the litres (fuel bills are usually litres × price per litre).
+  - Otherwise the litres are blank and must be typed.
+  - Typed litres always win.
+  - A petrol line with no litres stops the claim being worked out.
+- **FUEL4 Petrol bought without a line in the books.** Petrol on a fuel card
+  statement or bought personally can be added by hand: date, description and
+  litres.
+- **FUEL5 Bulk tanks.** Petrol used = petrol in the tank at the start of the
+  quarter + petrol bought − petrol in the tank at the end. The start is last
+  quarter's end, unless typed. With no tank, both are nil. Start 200 L,
+  bought 1,000 L, end 300 L: **900 L used**. If more is in the tank at the
+  end than could have been there, the claim isn't worked out.
+- **FUEL6 Splitting by usage.** The farm lists what uses petrol: quad bikes,
+  motorbikes, side-by-sides, tractors, generators, pumps, chainsaws and
+  other small engines, and road vehicles. Each one says whether it's
+  licensed for general use on the road and isn't an exempted farm vehicle.
+  For each quarter the farmer gives each one's share of the petrol used, in
+  per cent (from the logbook or tank records), starting from last quarter's
+  shares.
+  - Shares for things not licensed for the road are claimed; road vehicles'
+    shares aren't.
+  - Shares can't add up to more than 100%. Under 100%, the rest isn't
+    claimed, and Tohyee says so.
+- **FUEL7 The refund.** 900 L used; quad bikes 60%, generator 10%, ute
+  (licensed for the road) 30%:
+  - Off-road petrol: 900 × 70% = **630 L**.
+  - Refund: 630 × $0.805276 = **$507.32**, of which GST is $507.32 × 3/23 =
+    $66.17 and excise duty $441.15.
+  - Litres are to 2 decimal places, money to the cent.
+- **FUEL8 Diesel shown, not claimed.** Diesel lines are listed with their
+  litres so the split between petrol and diesel can be checked. They aren't
+  in the claim.
+- **FUEL9 When to claim.**
+  - Quarters end 31 March, 30 June, 30 September and 31 December.
+  - A claim is due within three months after the quarter ends (30 June for
+    the March quarter). After that, NZTA takes 10% off.
+  - A quarter that ended more than two years ago can't be claimed.
+  - Tohyee shows the due date and warns when it's late or too old.
+- **FUEL10 Registering.** NZTA needs the claimant registered before the
+  first claim. Tohyee says so and doesn't record it.
+- **FUEL11 In the books.** The refund includes GST on the excise. Following
+  common practice, the refund received is coded back to the fuel account
+  with GST at 15%, so the GST already claimed on that part of the petrol is
+  paid back. Tohyee shows this and doesn't post anything.
+- **FUEL12 What it doesn't do.**
+  - The ACC levy on petrol.
+  - LPG and CNG.
+  - Regional fuel tax.
+  - Diesel road user charges refunds.
+  - Lodging the MR70.
+
 ## Farming: the medicine cabinet (MED1-MED10; built by Claude 21 Nov 2026 when the owner asked for a picture of the medicines on hand on each farm; following common practice, not yet reviewed)
 
 Records only: nothing posts. It builds on product stock (TRT7-TRT8): the
