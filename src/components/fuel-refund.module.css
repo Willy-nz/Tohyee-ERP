@@ -1,0 +1,326 @@
+/* The fuel excise refund, in three steps for a phone (FUEL1-FUEL12). */
+.hero {
+  display: grid;
+  justify-items: center;
+  gap: 6px;
+  padding: 18px 16px;
+  border-radius: 18px;
+  background: linear-gradient(160deg, #e7f4ec, #f6fbf3);
+  border: 1px solid #cfe6d7;
+  text-align: center;
+}
+
+.quarter select {
+  font: inherit;
+  font-weight: 600;
+  padding: 6px 10px;
+  border-radius: 999px;
+  border: 1px solid #b9d3c3;
+  background: #fff;
+}
+
+.big {
+  font-size: clamp(2.4rem, 11vw, 3.4rem);
+  font-weight: 800;
+  line-height: 1.1;
+  color: #1d5b3a;
+  font-variant-numeric: tabular-nums;
+}
+
+.under {
+  color: #3e5a4a;
+  max-width: 32ch;
+}
+
+.pill {
+  display: inline-block;
+  padding: 3px 12px;
+  border-radius: 999px;
+  font-size: 0.85rem;
+  font-weight: 700;
+}
+
+.green {
+  background: #d4f0dd;
+  color: #1d5b3a;
+}
+
+.amber {
+  background: #fdecc8;
+  color: #7a4d00;
+}
+
+.red {
+  background: #f9d6d3;
+  color: #8a1f17;
+}
+
+.grey {
+  background: #e7ebef;
+  color: #43505c;
+}
+
+.checklist {
+  list-style: none;
+  margin: 8px 0 0;
+  padding: 0;
+  display: grid;
+  gap: 4px;
+  text-align: left;
+}
+
+.done {
+  color: #1d5b3a;
+}
+
+.done span {
+  font-weight: 800;
+}
+
+.todo {
+  color: #7a4d00;
+  font-weight: 600;
+}
+
+.step {
+  display: grid;
+  gap: 10px;
+  padding: 14px;
+  border-radius: 14px;
+  background: var(--surface, #fff);
+  border: 1px solid var(--border, #dde3e8);
+}
+
+.step h2 {
+  display: flex;
+  align-items: center;
+  gap: 10px;
+  margin: 0;
+  font-size: 1.15rem;
+}
+
+.number {
+  display: grid;
+  place-items: center;
+  width: 30px;
+  height: 30px;
+  border-radius: 50%;
+  background: #233e45;
+  color: #fff;
+  font-size: 0.95rem;
+}
+
+.summary {
+  margin: 0;
+  color: #43505c;
+}
+
+.needs {
+  display: grid;
+  gap: 10px;
+  padding: 12px;
+  border-radius: 12px;
+  background: #fff7e3;
+  border: 1px solid #f1d899;
+}
+
+.needs > p {
+  margin: 0;
+}
+
+.need {
+  display: grid;
+  gap: 8px;
+  padding-top: 8px;
+  border-top: 1px dashed #e8cf8c;
+}
+
+.need:first-of-type {
+  border-top: 0;
+  padding-top: 0;
+}
+
+.ask {
+  margin: 0;
+  font-size: 0.9rem;
+  color: #5b4a1f;
+}
+
+.choices {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  gap: 8px;
+}
+
+.choices button,
+.kinds button {
+  font: inherit;
+  font-weight: 700;
+  min-height: 48px;
+  padding: 8px 18px;
+  border-radius: 12px;
+  border: 2px solid #233e45;
+  background: #fff;
+  color: #233e45;
+  cursor: pointer;
+}
+
+.choices button:active,
+.kinds button:active {
+  transform: translateY(1px);
+}
+
+.litresRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: flex-end;
+  gap: 8px;
+}
+
+.more summary {
+  cursor: pointer;
+  font-weight: 600;
+  padding: 6px 0;
+}
+
+.lines {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 10px;
+}
+
+.lineMeta {
+  color: #43505c;
+  font-size: 0.9rem;
+}
+
+.link {
+  font: inherit;
+  margin-left: 8px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: var(--link, #1a5fb4);
+  text-decoration: underline;
+  cursor: pointer;
+}
+
+.users {
+  display: grid;
+  gap: 10px;
+}
+
+.user {
+  display: grid;
+  grid-template-columns: auto 1fr;
+  align-items: center;
+  gap: 10px;
+  padding: 10px;
+  border-radius: 12px;
+  background: #f4f8fa;
+}
+
+.road {
+  background: #f3f1ec;
+}
+
+.road input[type="range"] {
+  accent-color: #9a8f7a;
+}
+
+.userBody {
+  display: grid;
+  gap: 4px;
+  min-width: 0;
+}
+
+.userName {
+  display: flex;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 700;
+}
+
+.percent {
+  font-variant-numeric: tabular-nums;
+  font-size: 1.1rem;
+}
+
+.userBody input[type="range"] {
+  width: 100%;
+  height: 32px;
+  accent-color: #1d7a4c;
+}
+
+.roadToggle {
+  display: flex;
+  align-items: center;
+  gap: 6px;
+  font-size: 0.85rem;
+  color: #43505c;
+}
+
+.roadNote {
+  font-size: 0.8rem;
+  font-weight: 700;
+  color: #7a4d00;
+}
+
+.totalRow {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 8px;
+  font-weight: 600;
+}
+
+.ok {
+  color: #1d5b3a;
+}
+
+.over {
+  color: #8a1f17;
+}
+
+.adder {
+  display: grid;
+  gap: 8px;
+  padding: 12px;
+  border-radius: 12px;
+  border: 1px solid var(--border, #dde3e8);
+}
+
+.adder p {
+  margin: 0;
+}
+
+.kinds {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(96px, 1fr));
+  gap: 8px;
+}
+
+.kinds button {
+  display: grid;
+  justify-items: center;
+  gap: 4px;
+  padding: 8px 4px;
+  font-size: 0.8rem;
+  border-width: 1px;
+}
+
+.kinds .picked {
+  border-width: 3px;
+  background: #e7f4ec;
+}
+
+.howTo {
+  margin: 0;
+  padding-left: 20px;
+  display: grid;
+  gap: 6px;
+}

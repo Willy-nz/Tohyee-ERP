@@ -3,21 +3,22 @@
 import { useState } from "react";
 import { Money } from "@/components/books";
 import { DateInput } from "@/components/date-input";
+import { FuelUserArt } from "@/components/fuel-user-art";
 import { useApiData } from "@/components/hooks";
-import { Badge, Button, Card, Field, Notice, ui } from "@/components/ui";
+import { Button, Field, Notice, ui } from "@/components/ui";
 import { api, errorMessage } from "@/lib/client/api";
-import type { FuelLine, FuelQuarter, FuelUser } from "@/lib/farming/fuel-refund";
-import { FUEL_TYPE_LABELS, FUEL_TYPES, FUEL_USER_KIND_KEYS, FUEL_USER_KINDS, type FuelType, type FuelUserKind, PETROL_REFUND_PER_LITRE, previousQuarterEnd, quarterEnd } from "@/lib/farming/fuel-refund-rules";
+import type { FuelLine, FuelQuarter } from "@/lib/farming/fuel-refund";
+import { FUEL_USER_KIND_KEYS, FUEL_USER_KINDS, type FuelType, type FuelUserKind, previousQuarterEnd, quarterEnd } from "@/lib/farming/fuel-refund-rules";
 import { formatDate, todayInBrowser } from "@/lib/format";
+import styles from "./fuel-refund.module.css";
 
 /*
- * The fuel excise refund (FUEL1-FUEL12): a quarter's petrol from the books,
- * the tank, each vehicle or machine's share, and the refund for NZTA's MR70.
+ * The fuel excise refund (FUEL1-FUEL12), in three steps for someone on a
+ * phone: check the petrol, split it between what used it, and the tank. The
+ * refund sits at the top.
  */
 
-function lastEndedQuarter(today: string): string {
-  return previousQuarterEnd(quarterEnd(today));
-}
+type Send = (path: string, method: "POST" | "PUT", body: Record<string, unknown>) => Promise<boolean>;
 
 function quarterLabel(end: string): string {
   const month = { "03-31": "Jan–Mar", "06-30": "Apr–Jun", "09-30": "Jul–Sep", "12-31": "Oct–Dec" }[end.slice(5)];
@@ -30,9 +31,13 @@ function recentQuarters(today: string): string[] {
   return list;
 }
 
+function litres(value: string): string {
+  return `${Number(value).toLocaleString("en-NZ", { maximumFractionDigits: 2 })} L`;
+}
+
 export function FuelRefundView({ organisationId }: { organisationId: string }) {
   const today = todayInBrowser();
-  const [end, setEnd] = useState(lastEndedQuarter(today));
+  const [end, setEnd] = useState(previousQuarterEnd(quarterEnd(today)));
   const data = useApiData<{ quarter: FuelQuarter }>("/api/farming/fuel-refund", { organisationId, quarterEnd: end });
   const quarter = data.data?.quarter ?? null;
   const [error, setError] = useState<string | null>(null);
@@ -49,225 +54,367 @@ export function FuelRefundView({ organisationId }: { organisationId: string }) {
   };
   return (
     <div className={ui.stack}>
-      <div className={ui.inlineForm}>
-        <Field label="Quarter">
-          <select value={end} onChange={(event) => setEnd(event.target.value)}>
-            {recentQuarters(today).map((value) => (
-              <option key={value} value={value}>
-                {quarterLabel(value)}
-              </option>
-            ))}
-          </select>
-        </Field>
-      </div>
       {data.error ? <Notice tone="error">{data.error}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      <Hero end={end} setEnd={setEnd} today={today} quarter={quarter} />
       {quarter ? (
         <>
-          <ResultCard quarter={quarter} />
-          <LinesCard title="Petrol" quarter={quarter} lines={quarter.petrol} send={send} />
-          <UsersCard key={`${quarter.quarterEnd}-${quarter.users.map((user) => user.id + user.percent).join()}`} organisationId={organisationId} quarter={quarter} send={send} reload={data.reload} />
-          <TankCard key={`tank-${quarter.quarterEnd}`} quarter={quarter} send={send} />
-          {quarter.unsure.length ? <LinesCard title="Not sure: petrol or diesel?" description="Pick what each one is. If a line has both, mark it petrol and type only the petrol litres." quarter={quarter} lines={quarter.unsure} send={send} /> : null}
-          <LinesCard title={`Diesel (${quarter.dieselLitres} L, not refunded)`} quarter={quarter} lines={quarter.diesel} send={send} />
-          {quarter.notFuel.length ? <LinesCard title="Marked not fuel" quarter={quarter} lines={quarter.notFuel} send={send} /> : null}
-          <ManualCard quarter={quarter} send={send} organisationId={organisationId} reload={data.reload} setError={setError} />
+          <PetrolStep key={`petrol-${quarter.quarterEnd}`} quarter={quarter} send={send} />
+          <UsersStep key={`users-${quarter.quarterEnd}-${quarter.users.map((user) => user.id + user.percent + user.roadLicensed).join()}`} organisationId={organisationId} quarter={quarter} send={send} reload={data.reload} setError={setError} />
+          <TankStep key={`tank-${quarter.quarterEnd}-${quarter.opening}-${quarter.closing}`} quarter={quarter} send={send} />
+          <Extras quarter={quarter} send={send} organisationId={organisationId} reload={data.reload} setError={setError} />
         </>
       ) : null}
     </div>
   );
 }
 
-function ResultCard({ quarter }: { quarter: FuelQuarter }) {
-  const result = quarter.result;
-  const timing = { not_ended: <Badge tone="blue">Quarter not ended</Badge>, open: <Badge tone="green">Due {formatDate(quarter.dueDate)}</Badge>, late: <Badge tone="amber">Late: 10% off</Badge>, too_old: <Badge tone="red">Too old to claim</Badge> }[quarter.timing];
+/** The refund, big, and what's left to do (FUEL7, FUEL9). */
+function Hero({ end, setEnd, today, quarter }: { end: string; setEnd: (end: string) => void; today: string; quarter: FuelQuarter | null }) {
+  const result = quarter?.result ?? null;
+  const needsLines = quarter ? quarter.missingLitres + quarter.unsure.length : 0;
+  const shared = result ? Number(result.sharedPercent) : 0;
+  const steps = quarter
+    ? [
+        { done: needsLines === 0 && quarter.petrol.length > 0, text: needsLines ? `Petrol: ${needsLines} line${needsLines === 1 ? " needs" : "s need"} you` : quarter.petrol.length ? "Petrol checked" : "No petrol found yet" },
+        { done: shared === 100, text: shared === 100 ? "Split between bikes and machines" : `Split: ${shared.toFixed(0)}% of 100% given out` },
+        { done: true, text: quarter.closing !== "0.00" || quarter.openingTyped ? "Tank read" : "Tank: only if you have one" },
+      ]
+    : [];
+  const status = quarter
+    ? { not_ended: ["Quarter still going", styles.grey], open: [`Claim by ${formatDate(quarter.dueDate)}`, styles.green], late: ["Late: NZTA takes 10% off", styles.amber], too_old: ["Too old to claim", styles.red] }[quarter.timing]
+    : null;
   return (
-    <Card title={`Refund for ${quarterLabel(quarter.quarterEnd)}`} description={`Off-road petrol at ${(Number(PETROL_REFUND_PER_LITRE) * 100).toFixed(4)}c a litre (excise duty plus GST). Diesel isn't refunded.`}>
-      <div>{timing}</div>
-      {quarter.missingLitres ? <Notice tone="warning">{quarter.missingLitres} petrol line{quarter.missingLitres === 1 ? " has" : "s have"} no litres. Type them below to work out the refund.</Notice> : null}
+    <section className={styles.hero}>
+      <label className={styles.quarter}>
+        <span className={ui.srOnly}>Quarter</span>
+        <select value={end} onChange={(event) => setEnd(event.target.value)}>
+          {recentQuarters(today).map((value) => (
+            <option key={value} value={value}>
+              {quarterLabel(value)}
+            </option>
+          ))}
+        </select>
+      </label>
+      <div className={styles.big}>{result ? <>${Number(result.refund).toLocaleString("en-NZ", { minimumFractionDigits: 2, maximumFractionDigits: 2 })}</> : "—"}</div>
+      <div className={styles.under}>{result ? `back from NZTA for ${litres(result.offRoadLitres)} of off-road petrol` : "Finish the steps below to see your refund"}</div>
+      {status ? <span className={`${styles.pill} ${status[1]}`}>{status[0]}</span> : null}
+      <ul className={styles.checklist}>
+        {steps.map((step) => (
+          <li key={step.text} className={step.done ? styles.done : styles.todo}>
+            <span aria-hidden="true">{step.done ? "✓" : "•"}</span> {step.text}
+          </li>
+        ))}
+      </ul>
       {result?.problems.map((problem) => (
         <Notice key={problem} tone="error">
           {problem}
         </Notice>
       ))}
-      {[...(result?.notes ?? []), ...quarter.notes].map((note) => (
-        <Notice key={note} tone="info">
-          {note}
-        </Notice>
-      ))}
-      {result ? (
-        <table className={ui.table}>
-          <tbody>
-            <tr>
-              <td>Petrol bought</td>
-              <td className={ui.num}>{result.bought} L</td>
-            </tr>
-            <tr>
-              <td>Petrol used (with the tank)</td>
-              <td className={ui.num}>{result.used} L</td>
-            </tr>
-            <tr>
-              <td>Used off the road ({result.claimedPercent}%)</td>
-              <td className={ui.num}>{result.offRoadLitres} L</td>
-            </tr>
-            <tr>
-              <th>Refund to claim</th>
-              <th className={ui.num}>
-                <Money value={result.refund} />
-              </th>
-            </tr>
-            <tr>
-              <td className={ui.muted}>Excise duty / GST in it</td>
-              <td className={`${ui.num} ${ui.muted}`}>
-                <Money value={result.excise} /> / <Money value={result.gst} />
-              </td>
-            </tr>
-          </tbody>
-        </table>
-      ) : null}
-      <p className={ui.muted}>Claim it on NZTA&apos;s MR70 with the receipts. When the refund comes in, code it back to the fuel account with GST at 15%: the refund includes GST.</p>
-    </Card>
+    </section>
   );
 }
 
-type Send = (path: string, method: "POST" | "PUT", body: Record<string, unknown>) => Promise<boolean>;
-
-function LinesCard({ title, description, quarter, lines, send }: { title: string; description?: string; quarter: FuelQuarter; lines: FuelLine[]; send: Send }) {
+/** Step 1: the petrol, with what needs the farmer first (FUEL2-FUEL4). */
+function PetrolStep({ quarter, send }: { quarter: FuelQuarter; send: Send }) {
+  const needs = [...quarter.unsure, ...quarter.petrol.filter((line) => line.litres === null)];
+  const fine = quarter.petrol.filter((line) => line.litres !== null);
+  const total = fine.reduce((sum, line) => sum + Number(line.litres), 0);
   return (
-    <Card title={title} description={description}>
-      {!lines.length ? <p className={ui.muted}>None in {quarterLabel(quarter.quarterEnd)}.</p> : null}
-      <ul className={ui.list}>
-        {lines.map((line) => (
-          <LineRow key={`${line.source}-${line.sourceId}`} line={line} send={send} />
-        ))}
-      </ul>
-    </Card>
+    <section className={styles.step}>
+      <h2>
+        <span className={styles.number}>1</span> Petrol bought
+      </h2>
+      <p className={styles.summary}>{fine.length ? `${litres(String(total))} from ${fine.length} bill${fine.length === 1 ? "" : "s"}` : "None found in the books for this quarter."}</p>
+      {needs.length ? (
+        <div className={styles.needs}>
+          <p>
+            <strong>Tell Tohyee about {needs.length === 1 ? "this one" : `these ${needs.length}`}:</strong>
+          </p>
+          {needs.map((line) => (
+            <NeedRow key={`${line.source}-${line.sourceId}`} line={line} send={send} />
+          ))}
+        </div>
+      ) : null}
+      {fine.length ? (
+        <details className={styles.more}>
+          <summary>See the petrol bills</summary>
+          <ul className={styles.lines}>
+            {fine.map((line) => (
+              <FineRow key={`${line.source}-${line.sourceId}`} line={line} send={send} />
+            ))}
+          </ul>
+        </details>
+      ) : null}
+      <AddByHand quarter={quarter} send={send} />
+    </section>
   );
 }
 
-function LineRow({ line, send }: { line: FuelLine; send: Send }) {
-  const [litres, setLitres] = useState(line.litresTyped ? (line.litres ?? "") : "");
-  const save = (fuelType: FuelType, typed: string) => void send("/api/farming/fuel-refund/lines", "POST", { source: line.source, sourceId: line.sourceId, fuelType, litres: typed || null });
+function lineText(line: FuelLine) {
+  return (
+    <>
+      <strong>{formatDate(line.date)}</strong> {line.supplier ? `${line.supplier}: ` : ""}
+      {line.description} {line.amount ? <Money value={line.amount} /> : null}
+    </>
+  );
+}
+
+/** A line that needs the farmer: big buttons, then litres if it's petrol (FUEL2, FUEL3). */
+function NeedRow({ line, send }: { line: FuelLine; send: Send }) {
+  const [typed, setTyped] = useState(line.litresTyped && line.litres ? line.litres : "");
+  const choose = (fuelType: FuelType, value = typed) => void send("/api/farming/fuel-refund/lines", "POST", { source: line.source, sourceId: line.sourceId, fuelType, litres: value || null });
+  return (
+    <div className={styles.need}>
+      <div>{lineText(line)}</div>
+      {line.fuelType === "petrol" ? (
+        <div className={styles.litresRow}>
+          <Field label="How many litres of petrol?">
+            <input inputMode="decimal" value={typed} onChange={(event) => setTyped(event.target.value)} />
+          </Field>
+          <Button disabled={!/^\d+(\.\d{1,2})?$/.test(typed)} onClick={() => choose("petrol")}>
+            Save
+          </Button>
+        </div>
+      ) : (
+        <>
+          <p className={styles.ask}>Is this petrol? If it&apos;s both, choose Petrol and type just the petrol litres.</p>
+          <div className={styles.choices}>
+            <button type="button" onClick={() => choose("petrol")}>
+              Petrol
+            </button>
+            <button type="button" onClick={() => choose("diesel")}>
+              Diesel
+            </button>
+            <button type="button" onClick={() => choose("not_fuel")}>
+              Not fuel
+            </button>
+          </div>
+        </>
+      )}
+    </div>
+  );
+}
+
+function FineRow({ line, send }: { line: FuelLine; send: Send }) {
+  const [editing, setEditing] = useState(false);
+  const [typed, setTyped] = useState(line.litres ?? "");
+  const choose = (fuelType: FuelType, value: string | null = null) => void send("/api/farming/fuel-refund/lines", "POST", { source: line.source, sourceId: line.sourceId, fuelType, litres: value });
   return (
     <li>
-      <div>
-        <strong>{formatDate(line.date)}</strong> {line.supplier ? `${line.supplier}: ` : ""}
-        {line.description} {line.amount ? <Money value={line.amount} /> : null}
-        {line.accountName ? <span className={ui.muted}> · {line.accountName}</span> : null}
+      <div>{lineText(line)}</div>
+      <div className={styles.lineMeta}>
+        {litres(line.litres ?? "0")}
+        {line.source === "manual" ? " · added by hand" : line.litresTyped ? " · typed" : " · read from the bill"}
+        {line.source !== "manual" && !editing ? (
+          <button type="button" className={styles.link} onClick={() => setEditing(true)}>
+            Change
+          </button>
+        ) : null}
       </div>
-      {line.source === "manual" ? (
-        <span className={ui.muted}>
-          {line.litres} L, added by hand
-        </span>
-      ) : (
-        <div className={ui.inlineForm}>
-          <Field label="Fuel">
-            <select value={line.fuelType} onChange={(event) => save(event.target.value as FuelType, litres)}>
-              {FUEL_TYPES.map((value) => (
-                <option key={value} value={value}>
-                  {FUEL_TYPE_LABELS[value]}
-                </option>
-              ))}
-            </select>
+      {editing ? (
+        <div className={styles.litresRow}>
+          <Field label="Litres of petrol">
+            <input inputMode="decimal" value={typed} onChange={(event) => setTyped(event.target.value)} />
           </Field>
-          <Field label="Litres" hint={line.litresTyped ? "Typed" : line.litres ? `Tohyee read ${line.litres} L` : "Not found: type them"}>
-            <input inputMode="decimal" value={litres} placeholder={line.litres ?? ""} onChange={(event) => setLitres(event.target.value)} onBlur={() => litres !== (line.litresTyped ? line.litres : "") && save(line.fuelType, litres)} />
-          </Field>
+          <Button variant="secondary" onClick={() => choose("petrol", typed || null)}>
+            Save
+          </Button>
+          <Button variant="secondary" onClick={() => choose("diesel")}>
+            It&apos;s diesel
+          </Button>
+          <Button variant="secondary" onClick={() => choose("not_fuel")}>
+            Not fuel
+          </Button>
         </div>
-      )}
+      ) : null}
     </li>
   );
 }
 
-function UsersCard({ organisationId, quarter, send, reload }: { organisationId: string; quarter: FuelQuarter; send: Send; reload: () => void }) {
-  const [shares, setShares] = useState<Record<string, string>>(Object.fromEntries(quarter.users.map((user) => [user.id, user.percent === "0.00" ? "" : user.percent])));
-  const [adding, setAdding] = useState({ name: "", kind: "quad" as FuelUserKind });
-  const [error, setError] = useState<string | null>(null);
-  const total = Object.values(shares).reduce((sum, value) => sum + (Number(value) || 0), 0);
-  const saveShares = () => void send("/api/farming/fuel-refund", "PUT", { opening: quarter.openingTyped ? quarter.opening : null, closing: quarter.closing === "0.00" ? null : quarter.closing, shares: quarter.users.map((user) => ({ userId: user.id, percent: shares[user.id] || "0" })) });
-  const saveUser = async (body: Partial<FuelUser> & { name: string; kind: FuelUserKind }) => {
+function AddByHand({ quarter, send }: { quarter: FuelQuarter; send: Send }) {
+  const [form, setForm] = useState({ boughtOn: quarter.start, description: "", fuelType: "petrol" as "petrol" | "diesel", litres: "" });
+  return (
+    <details className={styles.more}>
+      <summary>Add petrol that isn&apos;t in the books</summary>
+      <p className={ui.muted}>From a fuel card statement, or bought yourself for the farm.</p>
+      <form
+        className={ui.stack}
+        onSubmit={(event) => {
+          event.preventDefault();
+          void send("/api/farming/fuel-refund/manual", "POST", form).then((ok) => ok && setForm({ ...form, description: "", litres: "" }));
+        }}
+      >
+        <Field label="What was it?">
+          <input value={form.description} maxLength={200} placeholder="Fuel card, September" onChange={(event) => setForm({ ...form, description: event.target.value })} />
+        </Field>
+        <div className={styles.litresRow}>
+          <Field label="Litres">
+            <input inputMode="decimal" value={form.litres} onChange={(event) => setForm({ ...form, litres: event.target.value })} />
+          </Field>
+          <Field label="Date">
+            <DateInput value={form.boughtOn} onChange={(event) => setForm({ ...form, boughtOn: event.target.value })} />
+          </Field>
+        </div>
+        <Button type="submit" disabled={!form.description.trim() || !form.litres}>
+          Add petrol
+        </Button>
+      </form>
+    </details>
+  );
+}
+
+/** Step 2: who used the petrol, with sliders (FUEL6). */
+function UsersStep({ organisationId, quarter, send, reload, setError }: { organisationId: string; quarter: FuelQuarter; send: Send; reload: () => void; setError: (error: string | null) => void }) {
+  const [shares, setShares] = useState<Record<string, number>>(Object.fromEntries(quarter.users.map((user) => [user.id, Number(user.percent)])));
+  const [adding, setAdding] = useState(false);
+  const total = Object.values(shares).reduce((sum, value) => sum + value, 0);
+  const changed = quarter.users.some((user) => Number(user.percent) !== (shares[user.id] ?? 0));
+  const saveUser = async (body: Record<string, unknown>) => {
     setError(null);
     try {
       await api("/api/farming/fuel-refund/users", { method: "POST", body: { organisationId, ...body } });
       reload();
+      return true;
     } catch (caught) {
       setError(errorMessage(caught));
+      return false;
     }
   };
   return (
-    <Card title="What uses the petrol" description="Each one's share of the petrol used this quarter, in per cent, from the logbook or tank records. Things licensed for general use on the road (not exempted farm vehicles) aren't claimed.">
-      {error ? <Notice tone="error">{error}</Notice> : null}
-      <ul className={ui.list}>
+    <section className={styles.step}>
+      <h2>
+        <span className={styles.number}>2</span> Who used the petrol?
+      </h2>
+      <p className={styles.summary}>Slide each one to roughly how much of the petrol it used. Road vehicles aren&apos;t refunded.</p>
+      <div className={styles.users}>
         {quarter.users.map((user) => (
-          <li key={user.id}>
-            <div className={ui.inlineForm}>
-              <Field label={`${user.name} · ${FUEL_USER_KINDS[user.kind]}`}>
-                <input aria-label={`${user.name}'s share in per cent`} inputMode="decimal" size={6} value={shares[user.id] ?? ""} placeholder="0" onChange={(event) => setShares({ ...shares, [user.id]: event.target.value })} />
-              </Field>
-              <span>%</span>
-              {user.roadLicensed ? <Badge tone="amber">Road: not claimed</Badge> : null}
+          <div key={user.id} className={`${styles.user} ${user.roadLicensed ? styles.road : ""}`}>
+            <FuelUserArt kind={user.kind} />
+            <div className={styles.userBody}>
+              <div className={styles.userName}>
+                {user.name}
+                <span className={styles.percent}>{(shares[user.id] ?? 0).toFixed(0)}%</span>
+              </div>
+              <input type="range" min={0} max={100} step={5} aria-label={`${user.name}'s share of the petrol`} value={shares[user.id] ?? 0} onChange={(event) => setShares({ ...shares, [user.id]: Number(event.target.value) })} />
+              <label className={styles.roadToggle}>
+                <input type="checkbox" checked={user.roadLicensed} onChange={(event) => void saveUser({ id: user.id, name: user.name, kind: user.kind, roadLicensed: event.target.checked, active: user.active })} /> Goes on the road (registered for general use)
+              </label>
+              {user.roadLicensed ? <span className={styles.roadNote}>Not refunded</span> : null}
             </div>
-            <label className={ui.checkbox}>
-              <input type="checkbox" checked={user.roadLicensed} onChange={(event) => void saveUser({ id: user.id, name: user.name, kind: user.kind, roadLicensed: event.target.checked, active: user.active })} /> Licensed for the road
-            </label>
-          </li>
+          </div>
         ))}
-      </ul>
-      {quarter.users.length ? <p>Total: <strong>{total.toFixed(2)}%</strong></p> : null}
+      </div>
       {quarter.users.length ? (
-        <Button disabled={total > 100} onClick={saveShares}>
-          Save shares
+        <div className={styles.totalRow}>
+          <span className={total === 100 ? styles.ok : total > 100 ? styles.over : undefined}>
+            {total === 100 ? "✓ " : ""}
+            {total}% of the petrol given out{total > 100 ? ": too much" : total < 100 ? `, ${100 - total}% left` : ""}
+          </span>
+          <Button
+            disabled={total > 100 || !changed}
+            onClick={() => void send("/api/farming/fuel-refund", "PUT", { opening: quarter.openingTyped ? quarter.opening : null, closing: quarter.closing === "0.00" ? null : quarter.closing, shares: quarter.users.map((user) => ({ userId: user.id, percent: String(shares[user.id] ?? 0) })) })}
+          >
+            Save split
+          </Button>
+        </div>
+      ) : (
+        <p>Add your quad bikes, farm bikes and machines first.</p>
+      )}
+      {adding ? (
+        <AddUser onAdd={(name, kind) => void saveUser({ name, kind }).then((ok) => ok && setAdding(false))} onCancel={() => setAdding(false)} />
+      ) : (
+        <Button variant="secondary" onClick={() => setAdding(true)}>
+          + Add a bike, vehicle or machine
         </Button>
-      ) : null}
-      <form
-        className={ui.inlineForm}
-        onSubmit={(event) => {
-          event.preventDefault();
-          void saveUser({ name: adding.name.trim(), kind: adding.kind }).then(() => setAdding({ ...adding, name: "" }));
-        }}
-      >
-        <Field label="Add a bike, vehicle or machine">
-          <input value={adding.name} maxLength={100} placeholder="Red quad" onChange={(event) => setAdding({ ...adding, name: event.target.value })} />
-        </Field>
-        <Field label="Kind">
-          <select value={adding.kind} onChange={(event) => setAdding({ ...adding, kind: event.target.value as FuelUserKind })}>
-            {FUEL_USER_KIND_KEYS.map((key) => (
-              <option key={key} value={key}>
-                {FUEL_USER_KINDS[key]}
-              </option>
-            ))}
-          </select>
-        </Field>
-        <Button type="submit" variant="secondary" disabled={!adding.name.trim()}>
-          Add
-        </Button>
-      </form>
-    </Card>
+      )}
+    </section>
   );
 }
 
-function TankCard({ quarter, send }: { quarter: FuelQuarter; send: Send }) {
+function AddUser({ onAdd, onCancel }: { onAdd: (name: string, kind: FuelUserKind) => void; onCancel: () => void }) {
+  const [kind, setKind] = useState<FuelUserKind | null>(null);
+  const [name, setName] = useState("");
+  return (
+    <div className={styles.adder}>
+      <p>
+        <strong>What is it?</strong>
+      </p>
+      <div className={styles.kinds}>
+        {FUEL_USER_KIND_KEYS.map((key) => (
+          <button
+            key={key}
+            type="button"
+            className={kind === key ? styles.picked : undefined}
+            aria-pressed={kind === key}
+            onClick={() => {
+              setKind(key);
+              if (!name) setName(FUEL_USER_KINDS[key]);
+            }}
+          >
+            <FuelUserArt kind={key} size={44} />
+            <span>{FUEL_USER_KINDS[key]}</span>
+          </button>
+        ))}
+      </div>
+      {kind ? (
+        <div className={styles.litresRow}>
+          <Field label="Name it" hint="So you can tell them apart, like Red quad.">
+            <input value={name} maxLength={100} onChange={(event) => setName(event.target.value)} />
+          </Field>
+          <Button disabled={!name.trim()} onClick={() => onAdd(name.trim(), kind)}>
+            Add
+          </Button>
+        </div>
+      ) : null}
+      <button type="button" className={styles.link} onClick={onCancel}>
+        Cancel
+      </button>
+    </div>
+  );
+}
+
+/** Step 3: the tank, only if there is one (FUEL5). */
+function TankStep({ quarter, send }: { quarter: FuelQuarter; send: Send }) {
+  const has = quarter.openingTyped || quarter.closing !== "0.00" || quarter.opening !== "0.00";
+  const [open, setOpen] = useState(has);
   const [opening, setOpening] = useState(quarter.openingTyped ? quarter.opening : "");
   const [closing, setClosing] = useState(quarter.closing === "0.00" ? "" : quarter.closing);
   return (
-    <Card title="Petrol tank" description="Only if you keep petrol in a bulk tank. Read it on the last day of the quarter.">
-      <div className={ui.inlineForm}>
-        <Field label="Litres at the start" hint={quarter.openingTyped ? "Typed" : `Last quarter's end: ${quarter.opening} L`}>
-          <input inputMode="decimal" value={opening} placeholder={quarter.opening} onChange={(event) => setOpening(event.target.value)} />
-        </Field>
-        <Field label="Litres at the end">
-          <input inputMode="decimal" value={closing} onChange={(event) => setClosing(event.target.value)} />
-        </Field>
-        <Button variant="secondary" onClick={() => void send("/api/farming/fuel-refund", "PUT", { opening: opening || null, closing: closing || null })}>
-          Save tank
-        </Button>
-      </div>
-    </Card>
+    <section className={styles.step}>
+      <h2>
+        <span className={styles.number}>3</span> Petrol tank
+      </h2>
+      {!open ? (
+        <div className={styles.choices}>
+          <button type="button" onClick={() => setOpen(true)}>
+            I have a petrol tank
+          </button>
+          <span className={ui.muted}>No tank? Skip this.</span>
+        </div>
+      ) : (
+        <>
+          <p className={styles.summary}>Read the tank on the last day of the quarter.</p>
+          <div className={styles.litresRow}>
+            <Field label="Litres at the start" hint={quarter.openingTyped ? undefined : `Last quarter's reading: ${litres(quarter.opening)}`}>
+              <input inputMode="decimal" value={opening} placeholder={quarter.opening} onChange={(event) => setOpening(event.target.value)} />
+            </Field>
+            <Field label="Litres at the end">
+              <input inputMode="decimal" value={closing} onChange={(event) => setClosing(event.target.value)} />
+            </Field>
+          </div>
+          <Button variant="secondary" onClick={() => void send("/api/farming/fuel-refund", "PUT", { opening: opening || null, closing: closing || null })}>
+            Save tank
+          </Button>
+          {quarter.result ? <p className={ui.muted}>Petrol used this quarter: {litres(quarter.result.used)}</p> : null}
+        </>
+      )}
+    </section>
   );
 }
 
-function ManualCard({ quarter, send, organisationId, reload, setError }: { quarter: FuelQuarter; send: Send; organisationId: string; reload: () => void; setError: (error: string | null) => void }) {
-  const [form, setForm] = useState({ boughtOn: quarter.start, description: "", fuelType: "petrol" as "petrol" | "diesel", litres: "" });
+/** Folded away: how to claim, diesel, not fuel, added by hand (FUEL8, FUEL10, FUEL11). */
+function Extras({ quarter, send, organisationId, reload, setError }: { quarter: FuelQuarter; send: Send; organisationId: string; reload: () => void; setError: (error: string | null) => void }) {
   const manual = [...quarter.petrol, ...quarter.diesel].filter((line) => line.source === "manual");
   const remove = async (id: string) => {
     setError(null);
@@ -278,44 +425,77 @@ function ManualCard({ quarter, send, organisationId, reload, setError }: { quart
       setError(errorMessage(caught));
     }
   };
+  const result = quarter.result;
+  const notes = [...(result?.notes ?? []), ...quarter.notes.filter((note) => !note.startsWith("NZTA needs you registered"))];
   return (
-    <Card title="Fuel not in the books" description="Petrol or diesel on a fuel card statement, or bought personally for the farm.">
-      <ul className={ui.list}>
-        {manual.map((line) => (
-          <li key={line.sourceId}>
-            {formatDate(line.date)}: {line.description}, {line.litres} L {FUEL_TYPE_LABELS[line.fuelType].toLowerCase()}{" "}
-            <Button variant="secondary" onClick={() => void remove(line.sourceId)}>
-              Remove
-            </Button>
+    <section className={styles.step}>
+      <details className={styles.more}>
+        <summary>How to claim</summary>
+        <ol className={styles.howTo}>
+          <li>Register with NZTA for fuel excise refunds (once).</li>
+          <li>Fill in NZTA&apos;s MR70 form with the off-road litres, and email it with your fuel receipts to fed@nzta.govt.nz.</li>
+          <li>
+            When the money comes in, code it back to your fuel account with GST at 15%.
+            {result ? (
+              <>
+                {" "}
+                <Money value={result.gst} /> of it is GST.
+              </>
+            ) : null}
           </li>
+        </ol>
+        <p className={ui.muted}>Petrol is refunded at 80.5276c a litre: excise duty plus GST. Diesel isn&apos;t refunded.</p>
+        {notes.map((note) => (
+          <Notice key={note} tone="info">
+            {note}
+          </Notice>
         ))}
-      </ul>
-      <form
-        className={ui.inlineForm}
-        onSubmit={(event) => {
-          event.preventDefault();
-          void send("/api/farming/fuel-refund/manual", "POST", form).then((ok) => ok && setForm({ ...form, description: "", litres: "" }));
-        }}
-      >
-        <Field label="Date">
-          <DateInput value={form.boughtOn} onChange={(event) => setForm({ ...form, boughtOn: event.target.value })} />
-        </Field>
-        <Field label="What">
-          <input value={form.description} maxLength={200} onChange={(event) => setForm({ ...form, description: event.target.value })} />
-        </Field>
-        <Field label="Fuel">
-          <select value={form.fuelType} onChange={(event) => setForm({ ...form, fuelType: event.target.value as "petrol" | "diesel" })}>
-            <option value="petrol">Petrol</option>
-            <option value="diesel">Diesel</option>
-          </select>
-        </Field>
-        <Field label="Litres">
-          <input inputMode="decimal" value={form.litres} onChange={(event) => setForm({ ...form, litres: event.target.value })} />
-        </Field>
-        <Button type="submit" variant="secondary" disabled={!form.description.trim() || !form.litres}>
-          Add
-        </Button>
-      </form>
-    </Card>
+      </details>
+      <details className={styles.more}>
+        <summary>Diesel ({litres(quarter.dieselLitres)}, not refunded)</summary>
+        <ul className={styles.lines}>
+          {quarter.diesel.map((line) => (
+            <li key={`${line.source}-${line.sourceId}`}>
+              <div>{lineText(line)}</div>
+              {line.source !== "manual" ? (
+                <button type="button" className={styles.link} onClick={() => void send("/api/farming/fuel-refund/lines", "POST", { source: line.source, sourceId: line.sourceId, fuelType: "unsure" })}>
+                  Not diesel?
+                </button>
+              ) : null}
+            </li>
+          ))}
+        </ul>
+      </details>
+      {quarter.notFuel.length ? (
+        <details className={styles.more}>
+          <summary>Marked not fuel ({quarter.notFuel.length})</summary>
+          <ul className={styles.lines}>
+            {quarter.notFuel.map((line) => (
+              <li key={`${line.source}-${line.sourceId}`}>
+                <div>{lineText(line)}</div>
+                <button type="button" className={styles.link} onClick={() => void send("/api/farming/fuel-refund/lines", "POST", { source: line.source, sourceId: line.sourceId, fuelType: "unsure" })}>
+                  It is fuel
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+      {manual.length ? (
+        <details className={styles.more}>
+          <summary>Added by hand ({manual.length})</summary>
+          <ul className={styles.lines}>
+            {manual.map((line) => (
+              <li key={line.sourceId}>
+                {formatDate(line.date)}: {line.description}, {litres(line.litres ?? "0")}{" "}
+                <button type="button" className={styles.link} onClick={() => void remove(line.sourceId)}>
+                  Remove
+                </button>
+              </li>
+            ))}
+          </ul>
+        </details>
+      ) : null}
+    </section>
   );
 }
