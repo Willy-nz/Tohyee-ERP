@@ -72,7 +72,7 @@ export const AI_TOOL_PLAIN_WORDS: readonly { name: string; level: AiAccessLevel;
   { name: "farm_home", level: "read", words: "What's happening on the farm and what's due: the farm Home's cards" },
   { name: "farm_calendar", level: "read", words: "Your farm calendar between two dates" },
   { name: "farm_product_stock", level: "read", words: "Animal health and spray products on hand, from the chemical register" },
-  { name: "farm_fuel_refund", level: "read", words: "The quarter's fuel excise refund on off-road petrol, for NZTA's MR70" },
+  { name: "farm_fuel_excise_claim", level: "read", words: "The quarter's fuel excise refund on off-road petrol, for NZTA's MR70" },
   { name: "farm_medicine_cabinet", level: "read", words: "A farm's medicine cabinet: medicines on hand, running low, out and expiring" },
   { name: "farm_rotation_plan", level: "read", words: "A farm's grazing round: planned moves for each mob and paddock" },
   { name: "list_breeding_records", level: "read", words: "Breeding records for a mob or a farm" },

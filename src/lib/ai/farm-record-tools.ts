@@ -135,7 +135,7 @@ export const FARM_OVERVIEW_TOOLS: AiTool[] = [
     run: async (tx, args) => ({ slots: await cabinet(tx, { farmId: await farmFor(tx, args.farmId) }) }),
   },
   {
-    name: "farm_fuel_refund",
+    name: "farm_fuel_excise_claim",
     title: "Fuel excise refund",
     description:
       "A quarter's fuel excise refund as Fuel refund shows it (quarterEnd: 31 Mar, 30 Jun, 30 Sep or 31 Dec): petrol and diesel lines from bills and spend money with litres, the tank at the start and end, each vehicle or machine's share of the petrol and whether it's licensed for the road, the off-road litres, the refund at 80.5276c a litre with its GST, the due date and whether it's late. Bookkeepers and owners only. Nothing is lodged with NZTA.",
