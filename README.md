@@ -49,8 +49,8 @@ before connecting an assistant.
 > organisation and review accounting outputs. Tohyee is provided as is, without
 > warranty; see the [licence](LICENSE).
 
-Latest release: [v0.39.0](https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.39.0)
-([notes](docs/releases/0.39.0.md)). Get the installer and what each download
+Latest release: [v0.40.0](https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.40.0)
+([notes](docs/releases/0.40.0.md)). Get the installer and what each download
 includes from the [latest release](https://github.com/Willy-nz/Tohyee-ERP/releases/latest).
 The [feature register](docs/FEATURES.md) records implemented features and limits;
 [release notes](docs/releases) describe packaged versions.
@@ -130,7 +130,8 @@ real phone or in a paddock yet.
 
 | Release | What's new |
 | --- | --- |
-| [**0.39.0**](docs/releases/0.39.0.md) | Farm chat with photos and links to paddocks, mobs and tasks; voice notes; a Chat app for the whole organisation; AI can read and post in chat. |
+| [**0.40.0**](docs/releases/0.40.0.md) | Income tax for trusts with the IR6 and IR6Bs; business structure; a medicine cabinet for each farm; the fuel excise refund on off-road petrol; a new website. |
+| [0.39.0](docs/releases/0.39.0.md) | Farm chat with photos and links to paddocks, mobs and tasks; voice notes; a Chat app for the whole organisation; AI can read and post in chat. |
 | [0.38.0](docs/releases/0.38.0.md) | Payroll as an add-on without Accounting, employees from a file (BambooHR export or spreadsheet), Analytics on phones, report pictures for the AI, PowerPoint one page per slide. |
 | [0.37.0](docs/releases/0.37.0.md) | Tohyee has moved to this repository. Analytics text editing beside the report, a profit and loss that follows the page's dropdown, Download PDF, Google Merchant Center, Business Profile and Ads. |
 | [0.36.0](docs/releases/0.36.0.md) | Analytics reports on paper (cover, contents, sign-off, directory), rounded reports that add up, slides, commentary boxes, AI field work for farm staff, Reports only AI keys, AI key end dates, approval for AI voids. |
