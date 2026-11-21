@@ -50,7 +50,6 @@ export function FarmMedicines({ organisationId, farm, farms }: FarmContext) {
       <section className={styles.machine} aria-label={`${farm.name} medicine cabinet`}>
         <header className={styles.marquee}>
           <div className={styles.marqueeIdentity}>
-            <span className={styles.cabinetEmblem} aria-hidden="true">+</span>
             <div className={styles.marqueeText}>
               <span className={styles.marqueeEyebrow}>Farm supplies / medicine cabinet</span>
               <h2>{farm.name}</h2>
@@ -78,7 +77,7 @@ export function FarmMedicines({ organisationId, farm, farms }: FarmContext) {
                   className={`${styles.slot} ${chosen === entry.chemicalRecordId ? styles.chosen : ""} ${entry.badge === "out" ? styles.out : ""}`}
                   onClick={() => setChosen(chosen === entry.chemicalRecordId ? null : entry.chemicalRecordId)}
                   aria-pressed={chosen === entry.chemicalRecordId}
-                  aria-label={`${entry.name}, ${amount(entry)} on hand${entry.badge ? `, ${BADGE_LABELS[entry.badge]}` : ""}${entry.expiry === "expired" ? ", expired" : entry.expiry === "soon" ? ", expires soon" : ""}. ${chosen === entry.chemicalRecordId ? "Close details" : "Open details"}`}
+                  aria-label={`${entry.name}, ${amount(entry)} on hand${entry.badge === "ok" || entry.badge === "none" ? "" : `, ${BADGE_LABELS[entry.badge]}`}${entry.expiry === "expired" ? ", expired" : entry.expiry === "soon" ? ", expires soon" : ""}. ${chosen === entry.chemicalRecordId ? "Close details" : "Open details"}`}
                 >
                   <span className={styles.slotNumber} aria-hidden="true">{String(index + 1).padStart(2, "0")}</span>
                   <span className={styles.picture}>
