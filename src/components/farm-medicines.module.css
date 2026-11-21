@@ -33,21 +33,6 @@
   gap: 12px;
 }
 
-.cabinetEmblem {
-  flex: none;
-  display: grid;
-  place-items: center;
-  width: 44px;
-  height: 44px;
-  border: 1px solid rgb(202 247 210 / 0.32);
-  border-radius: 12px;
-  background: rgb(198 235 211 / 0.13);
-  color: #d6f7da;
-  font-size: 30px;
-  font-weight: 300;
-  line-height: 1;
-}
-
 .marqueeText {
   display: grid;
   min-width: 0;
@@ -194,8 +179,8 @@
 .picture {
   display: grid;
   place-items: center;
-  width: clamp(65px, 7vw, 92px);
-  height: 92px;
+  width: clamp(80px, 9vw, 124px);
+  height: 124px;
   max-width: 100%;
   flex: none;
   padding: 7px;
@@ -203,7 +188,7 @@
   background: radial-gradient(circle, rgb(229 246 238 / 0.15), transparent 75%);
 }
 
-.picture svg { max-width: 100%; max-height: 100%; filter: drop-shadow(0 5px 5px rgb(0 0 0 / 0.18)); }
+.picture svg { width: 100%; height: 100%; filter: drop-shadow(0 5px 5px rgb(0 0 0 / 0.18)); }
 
 .picture img {
   width: 100%;
@@ -311,17 +296,22 @@
   box-shadow: inset 0 5px 10px rgb(0 0 0 / 0.6), 0 1px rgb(255 255 255 / 0.1);
 }
 
+@media (min-width: 1200px) {
+  .shelves { grid-template-columns: repeat(6, minmax(0, 1fr)); }
+}
 @media (max-width: 880px) {
   .shelves { grid-template-columns: repeat(3, minmax(0, 1fr)); }
 }
 @media (max-width: 540px) {
   .machine { border-radius: 16px; padding: 11px; }
   .marquee { align-items: flex-start; }
-  .cabinetEmblem { width: 36px; height: 36px; font-size: 25px; }
   .machineStats { width: 100%; }
   .machineStats span { padding: 4px 8px; }
-  .shelves { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
-  .slot { min-height: 215px; padding: 22px 6px 12px; }
+  .shelves { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
+  .slot { min-height: 0; padding: 18px 3px 10px; }
+  .picture { width: 100%; height: 84px; padding: 2px; }
+  .stockLabel { display: none; }
+  .name { font-size: 0.74rem; }
   .glassTop span:last-child { display: none; }
   .machineFooterLabel:last-child { display: none; }
 }
