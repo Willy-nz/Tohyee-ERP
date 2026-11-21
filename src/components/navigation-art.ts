@@ -10,7 +10,7 @@ const ROUTES: Array<[string, IllustratedIconName]> = [
   ["/operations/farming/safety", "safety"], ["/operations/farming/calendar", "calendar"], ["/operations/farming/tasks", "checklist"],
   ["/operations/farming/notebook", "documents"], ["/operations/farming/compare", "analytics"],
   ["/operations/farming/benchmarks", "analytics"], ["/operations/farming/import", "maps"],
-  ["/operations/farming/soil", "flask"], ["/operations/farming/co-op-shares", "coins"], ["/operations/farming/apps", "apps"],
+  ["/operations/farming/soil", "flask"], ["/operations/farming/co-op-shares", "coins"], ["/operations/farming/fuel-refund", "quad"], ["/operations/farming/apps", "apps"],
   ["/operations/farming/pasture", "farm"], ["/operations/farming/rainfall", "effluent"], ["/operations/farm/weather", "weather"], ["/operations/farming/fertiliser", "farm"],
   // Farms and paddocks is drawn as a map; every other farming page is named above.
   ["/operations/farming", "maps"], ["/operations/farm", "farm"],

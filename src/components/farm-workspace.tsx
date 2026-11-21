@@ -613,6 +613,7 @@ const DETAILS: MoreLink[] = [
 const YEAR_END: MoreLink[] = [
   { href: "/operations/farming/benchmarks", icon: "analytics", label: "Benchmarks" },
   { href: "/operations/farming/co-op-shares", icon: "coins", label: "Co-op shares" },
+  { href: "/operations/farming/fuel-refund", icon: "quad", label: "Fuel excise refund", minRole: "bookkeeper" },
   { href: "/operations/livestock/valuation", icon: "price", label: "Livestock valuation" },
   { href: "/operations/farming/import", icon: "maps", label: "Import paddock shapes", minRole: "bookkeeper" },
 ];

@@ -640,6 +640,7 @@ export const FARM_MENUS: Menu[] = [
           { href: "/operations/farming/notebook", label: "Farm notebook" },
           { href: "/operations/livestock", label: "Livestock", module: "livestock" },
           { href: "/operations/farming/co-op-shares", label: "Co-op shares" },
+          { href: "/operations/farming/fuel-refund", label: "Fuel excise refund", minRole: "bookkeeper" },
         ],
       },
       {
