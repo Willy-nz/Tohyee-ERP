@@ -1,8 +1,8 @@
-import type { ReactNode } from "react";
+import { type ReactNode, useId } from "react";
 import type { MedicineShape } from "@/lib/farming/medicine-rules";
 
 /**
- * Generic packshots inspired by the real veterinary supply formats found in NZ:
+ * Generic drawings of the kinds of pack animal medicines come in:
  * intramammary syringes, injectable vials, oral-drench jugs, two-chamber pour-ons,
  * large handled chemical cans, bolus pails, electrolyte sachets and aerosol cans.
  *
@@ -10,7 +10,9 @@ import type { MedicineShape } from "@/lib/farming/medicine-rules";
  * in the medicine cabinet. Do not infer specific drug, dose or withholding from art.
  */
 export function MedicineArt({ shape, colour, size = 72 }: { shape: MedicineShape; colour: string; size?: number }) {
-  const key = "med-" + shape;
+  // Unique per drawing: several packs of one shape share a page, and a gradient id
+  // found first inside a hidden (folded) one wouldn't paint the others.
+  const key = `med-${shape}-${useId().replace(/[^a-zA-Z0-9_-]/g, "")}`;
   return (
     <svg viewBox="0 0 96 96" width={size} height={size} aria-hidden="true" focusable="false">
       <defs>
