@@ -44,7 +44,7 @@
   }
 
   function isStaticAsset(pathname) {
-    return pathname.indexOf("/_next/static/") === 0 || pathname.indexOf("/icons/") === 0 || pathname === "/manifest.webmanifest" || pathname === "/icon.svg" || pathname === "/apple-icon.png";
+    return pathname.indexOf("/_next/static/") === 0 || pathname.indexOf("/icons/") === 0 || pathname.indexOf("/illustrations/icons/") === 0 || pathname === "/manifest.webmanifest" || pathname === "/icon.svg" || pathname === "/apple-icon.png";
   }
 
   /** FNV-1a, so a cache's name doesn't spell out whose it is. */
@@ -102,7 +102,7 @@
   /** The built files a page loads, so they're kept with it. */
   function assetUrlsFromHtml(html) {
     var found = {};
-    var pattern = /\/_next\/static\/[A-Za-z0-9_\-./~%]+?\.(?:js|css|woff2)/g;
+    var pattern = /(?:\/_next\/static\/[A-Za-z0-9_\-./~%]+?\.(?:js|css|woff2)|\/illustrations\/icons\/[a-z0-9-]+\.svg)/g;
     var match;
     while ((match = pattern.exec(html))) found[match[0]] = true;
     return Object.keys(found).sort();
