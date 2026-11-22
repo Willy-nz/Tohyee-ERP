@@ -1348,7 +1348,7 @@ function CoverEstimates({ organisationId, farmId }: { organisationId: string; fa
   return (
     <Card
       title={`Modelled pasture cover: ${check.farmName}`}
-      description="Optional. A line fitted to this farm's own plate-meter (or other measured) readings and the same paddocks' greenness, checked on dates it wasn't fitted on. It's an estimate: it never replaces or changes a reading, and nothing plans grazing or fertiliser from it."
+      description={<>Optional. An estimate: it never replaces or changes a reading. <InfoTip label="How it&apos;s worked out">A line fitted to this farm&apos;s own plate-meter (or other measured) readings and the same paddocks&apos; greenness, checked on dates it wasn&apos;t fitted on. Nothing plans grazing or fertiliser from it.</InfoTip></>}
     >
       {error ? <Notice tone="error">{error}</Notice> : null}
       {model ? (

@@ -612,17 +612,13 @@ export const FARM_MENUS: Menu[] = [
     // Its first link (Farms and paddocks) is drawn as a map; the menu is the whole farm.
     art: "farm",
     area: ["/operations/farm/more", "/operations/farm/offline", "/operations/farm/security", "/operations/farm/mobs", "/operations/farm/medicines", "/operations/farm/animals", "/operations/farm/timeline", "/operations/farm/weather", "/operations/farming"],
+    // The everyday pages first; year-end and money sit together near the end.
     groups: [
       {
         heading: "Paddocks and feed",
         links: [
           { href: "/operations/farming", label: "Farms and paddocks" },
-          { href: "/operations/farm/mobs", label: "Mobs" },
-          { href: "/operations/farm/medicines", label: "Medicines" },
-          { href: "/operations/farm/animals", label: "Animals" },
           { href: "/operations/farming/pasture", label: "Pasture and feed" },
-          { href: "/operations/farming/rainfall", label: "Rainfall" },
-          { href: "/operations/farm/weather", label: "Weather forecast" },
           { href: "/operations/farming/soil", label: "Soil tests" },
           { href: "/operations/farming/fertiliser", label: "Fertiliser plans" },
           { href: "/operations/farming/compare", label: "All farms compared" },
@@ -630,30 +626,45 @@ export const FARM_MENUS: Menu[] = [
         ],
       },
       {
-        heading: "Records",
+        heading: "Stock",
+        links: [
+          { href: "/operations/farm/mobs", label: "Mobs" },
+          { href: "/operations/farm/animals", label: "Animals" },
+          { href: "/operations/farm/medicines", label: "Medicines" },
+        ],
+      },
+      {
+        heading: "Weather",
+        links: [
+          { href: "/operations/farming/rainfall", label: "Rainfall" },
+          { href: "/operations/farm/weather", label: "Weather forecast" },
+        ],
+      },
+      {
+        heading: "Jobs and records",
         links: [
           { href: "/operations/farming/calendar", label: "Farm calendar" },
           { href: "/operations/farming/tasks", label: "Tasks" },
           { href: "/operations/farm/timeline", label: "Farm timeline" },
+          { href: "/operations/farming/notebook", label: "Farm notebook" },
           { href: "/operations/farm/tractor", label: "Tractor mode" },
           { href: "/operations/farm/security", label: "Security" },
-          { href: "/operations/farming/notebook", label: "Farm notebook" },
+        ],
+      },
+      {
+        heading: "Year end and money",
+        links: [
           { href: "/operations/livestock", label: "Livestock", module: "livestock" },
+          { href: "/operations/livestock/valuation", label: "Livestock valuation", module: "livestock" },
           { href: "/operations/farming/co-op-shares", label: "Co-op shares" },
           { href: "/operations/farming/fuel-refund", label: "Fuel excise refund", minRole: "bookkeeper" },
-        ],
-      },
-      {
-        heading: "Insights and apps",
-        links: [
           { href: "/operations/farming/benchmarks", label: "Benchmarks" },
-          { href: "/operations/livestock/valuation", label: "Livestock valuation", module: "livestock" },
-          { href: "/operations/farming/apps", label: "Farm apps" },
         ],
       },
       {
-        heading: "This device",
+        heading: "Apps and this device",
         links: [
+          { href: "/operations/farming/apps", label: "Farm apps" },
           { href: "/operations/farm/offline", label: "Offline on this device" },
           { href: "/get-tohyee", label: "Get Tohyee on this device" },
         ],

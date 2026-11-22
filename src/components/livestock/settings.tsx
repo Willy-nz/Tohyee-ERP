@@ -82,7 +82,7 @@ export function LivestockSettingsPanel({ organisationId }: { organisationId: str
         <>
           <Card
             title="Reporting basis"
-            description={<>The basis of the farm&apos;s financial statements (LV28).{" "}<InfoTip label="Reporting basis">Special purpose (tax basis) statements follow the farm&apos;s own stated policy. General purpose statements (NZ IFRS or PBE Standards) put changes in livestock values through profit or loss, and measure livestock at fair value less costs to sell, which Tohyee doesn&apos;t work out: the tax values need your accountant&apos;s adjustment.</InfoTip></>}
+            description={<>The basis of the farm&apos;s financial statements.{" "}<InfoTip label="Reporting basis">Special purpose (tax basis) statements follow the farm&apos;s own stated policy. General purpose statements (NZ IFRS or PBE Standards) put changes in livestock values through profit or loss, and measure livestock at fair value less costs to sell, which Tohyee doesn&apos;t work out: the tax values need your accountant&apos;s adjustment.</InfoTip></>}
           >
             <div className={ui.choiceList} role="radiogroup" aria-label="Reporting basis">
               {(["special_purpose", "general_purpose"] as const).map((basis) => (
@@ -98,7 +98,7 @@ export function LivestockSettingsPanel({ organisationId }: { organisationId: str
               ))}
             </div>
           </Card>
-          <Card title="Herd scheme revaluation" description={<>Where the non-taxable revaluation of opening stock goes (LV12).{" "}<InfoTip label="Herd scheme revaluation">The draft financial statements&apos; livestock note states the choice as the farm&apos;s policy. Under general purpose reporting it&apos;s always profit and loss. A change applies to the next valuation approved; approved years aren&apos;t re-posted.</InfoTip></>}>
+          <Card title="Herd scheme revaluation" description={<>Where the non-taxable revaluation of opening stock goes.{" "}<InfoTip label="Herd scheme revaluation">The draft financial statements&apos; livestock note states the choice as the farm&apos;s policy. Under general purpose reporting it&apos;s always profit and loss. A change applies to the next valuation approved; approved years aren&apos;t re-posted.</InfoTip></>}>
             <div className={ui.choiceList} role="radiogroup" aria-label="Herd scheme revaluation">
               {(["profit_and_loss", "reserve"] as const).map((target) => (
                 <label key={target}>

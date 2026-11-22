@@ -143,7 +143,7 @@ export function AerialPhotosCard({ organisationId, settings, onSaved }: { organi
     <div id="aerial-photos" className={styles.anchor}>
       <Card
         title="Aerial photos for farm maps"
-        description="Free aerial photos from LINZ (Toitū Te Whenua) behind your paddocks. Each organisation uses its own free key from LINZ Basemaps: it takes about a minute."
+        description="Free aerial photos from LINZ behind your paddocks, with your own free key. It takes about a minute."
         actions={imageryKey ? <Badge tone={current && !current.ok ? "amber" : "green"}>{current && !current.ok ? "Not loading" : "On"}</Badge> : <Badge tone="neutral">Off</Badge>}
       >
         {error ? <Notice tone="error">{error}</Notice> : null}

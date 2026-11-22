@@ -183,7 +183,6 @@ function LogHome({ organisationId, farm, onStart }: FarmContext & { onStart: (fl
           </button>
         </div>
         <EffluentLogButtons organisationId={organisationId} farm={farm} buttonClass={styles.bigButtons} itemClass={styles.bigButton} />
-        <p className={ui.muted}>Not kept in Tohyee yet: voice notes, animal treatments, and births and deaths.</p>
       </Card>
       <Card title="On this phone" description="Each record is saved here first, then sent. Nothing is lost without a signal.">
         <StorageWarning stored={stored} waiting={store.drafts.filter((draft) => draft.status === "saved").length} onRetry={retryStorage} onSend={() => void sync()} />
@@ -584,7 +583,7 @@ function FarmWalk({ organisationId, farm, onClose }: FarmContext & { onClose: ()
 
   if (!walk) {
     return (
-      <Card title={`Farm walk · ${farm.name}`} description="A cover for each paddock, in order. Each one is saved on this phone as you go, and sent when there's a signal. You can close the app and carry on later.">
+      <Card title={`Farm walk · ${farm.name}`} description="Saved on this phone as you go, and sent when there's a signal.">
         <h3>How are you measuring?</h3>
         <Choices options={PASTURE_METHODS.map((value) => ({ value, label: PASTURE_METHOD_LABELS[value] }))} value={method} onPick={setMethod} />
         <h3>Which day?</h3>

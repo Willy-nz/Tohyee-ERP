@@ -532,7 +532,7 @@ export function TrainingCard({ organisationId, farm }: { organisationId: string;
   return (
     <Card
       title={`Training and qualifications${attention ? ` (${attention} to renew)` : ""}`}
-      description="Who's trained for what, and when it runs out (for every farm). WorkSafe's farm guide suggests noting which jobs each person can and can't do."
+      description="Who's trained for what, and when it runs out (for every farm)."
       actions={data.data.canRecord && !adding ? <Button size="small" variant="secondary" onClick={() => setAdding(true)}>Add training</Button> : null}
     >
       {error ? <Notice tone="error">{error}</Notice> : null}

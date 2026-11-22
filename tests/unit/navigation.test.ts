@@ -373,7 +373,7 @@ describe("the Farm app", () => {
       ["More", null],
     ]);
     const more = visibleMenus("farm", owner(true)).find((menu) => menu.label === "More")!;
-    expect(more.groups.map((group) => group.heading)).toEqual(["Paddocks and feed", "Records", "Insights and apps", "This device"]);
+    expect(more.groups.map((group) => group.heading)).toEqual(["Paddocks and feed", "Stock", "Weather", "Jobs and records", "Year end and money", "Apps and this device"]);
   });
 
   it("isn't nested in Accounting any more, and needs Farming (and Accounting) on", () => {
@@ -407,13 +407,13 @@ describe("farm staff", () => {
     expect(menus.map((menu) => menu.label)).toEqual(["Today", "Map", "Log", "Chat", "Safety", "Effluent", "More"]);
     expect(menus.at(-1)!.groups.flatMap((group) => group.links.map((link) => link.href))).toEqual([
       "/operations/farming",
-      "/operations/farm/mobs",
-      "/operations/farm/medicines",
-      "/operations/farm/animals",
       "/operations/farming/pasture",
+      "/operations/farming/soil",
+      "/operations/farm/mobs",
+      "/operations/farm/animals",
+      "/operations/farm/medicines",
       "/operations/farming/rainfall",
       "/operations/farm/weather",
-      "/operations/farming/soil",
       "/operations/farming/calendar",
       "/operations/farming/tasks",
       "/operations/farm/timeline",

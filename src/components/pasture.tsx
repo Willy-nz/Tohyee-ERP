@@ -2,6 +2,7 @@
 
 import Link from "next/link";
 import { FarmSelector, useSelectedFarm } from "@/components/farm-selector";
+import { InfoTip } from "@/components/info-tip";
 import { type FormEvent, useState } from "react";
 import { DateInput } from "@/components/date-input";
 import { useApiData } from "@/components/hooks";
@@ -76,6 +77,14 @@ export function PastureHome({ organisationId, farmId = null }: { organisationId:
   );
 }
 
+const PASTURE_TABS = [
+  ["cover", "Cover"],
+  ["grazings", "Grazings"],
+  ["feed", "Feed"],
+  ["readings", "Readings"],
+] as const;
+type PastureTab = (typeof PASTURE_TABS)[number][0];
+
 function FarmPasture({ organisationId, farm }: { organisationId: string; farm: Farm }) {
   const { can } = useWorkspace();
   // Farm staff record field work too; removing a record stays with bookkeepers.
@@ -93,8 +102,19 @@ function FarmPasture({ organisationId, farm }: { organisationId: string; farm: F
   };
   const data = summary.data?.summary;
   const maxCover = Math.max(1, ...(data?.cover.wedge.map((row) => row.cover) ?? []));
+  // One job a view: cover first, the histories behind their own tabs.
+  const [tab, setTab] = useState<PastureTab>("cover");
   return (
-    <div className={farmRowStyles.tapTargets}>
+    <div className={`${farmRowStyles.tapTargets} ${ui.stack}`}>
+      <div className={ui.tabs} role="tablist" aria-label="Pasture and feed">
+        {PASTURE_TABS.map(([value, label]) => (
+          <button key={value} type="button" role="tab" aria-selected={tab === value} className={`${ui.tab} ${tab === value ? ui.tabActive : ""}`} onClick={() => setTab(value)}>
+            {label}
+          </button>
+        ))}
+      </div>
+      {tab === "cover" ? (
+        <>
       <Card title={`Pasture cover on ${farm.name}`} description="Each paddock's latest reading, averaged by area. Satellite, model and photo readings are marked as estimates.">
         <div className={ui.inlineForm}>
           <Field label="On">
@@ -183,13 +203,19 @@ function FarmPasture({ organisationId, farm }: { organisationId: string; farm: F
           </>
         ) : null}
       </Card>
-      <PhotoEstimates organisationId={organisationId} farm={farm} canDecide={canRecord} onDecided={reload} />
-      <PhotoCalibrationCard organisationId={organisationId} farm={farm} />
-      {canRecord ? <AddReading organisationId={organisationId} farmId={farm.id} paddocks={active} onAdded={reload} /> : null}
-      {can("bookkeeper") ? <ImportReadings organisationId={organisationId} farm={farm} onImported={reload} /> : null}
-      <Grazings organisationId={organisationId} farmId={farm.id} paddocks={active} canEdit={canRecord} canRemove={can("bookkeeper")} version={version} onChanged={reload} />
-      <Supplements organisationId={organisationId} farm={farm} paddocks={active} months={data?.supplementMonths ?? []} canEdit={canRecord} canRemove={can("bookkeeper")} version={version} onChanged={reload} />
-      <Readings organisationId={organisationId} farmId={farm.id} paddocks={active} canEdit={can("bookkeeper")} version={version} onChanged={reload} />
+          {canRecord ? <AddReading organisationId={organisationId} farmId={farm.id} paddocks={active} onAdded={reload} /> : null}
+          <PhotoEstimates organisationId={organisationId} farm={farm} canDecide={canRecord} onDecided={reload} />
+          <PhotoCalibrationCard organisationId={organisationId} farm={farm} />
+        </>
+      ) : null}
+      {tab === "grazings" ? <Grazings organisationId={organisationId} farmId={farm.id} paddocks={active} canEdit={canRecord} canRemove={can("bookkeeper")} version={version} onChanged={reload} /> : null}
+      {tab === "feed" ? <Supplements organisationId={organisationId} farm={farm} paddocks={active} months={data?.supplementMonths ?? []} canEdit={canRecord} canRemove={can("bookkeeper")} version={version} onChanged={reload} /> : null}
+      {tab === "readings" ? (
+        <>
+          <Readings organisationId={organisationId} farmId={farm.id} paddocks={active} canEdit={can("bookkeeper")} version={version} onChanged={reload} />
+          {can("bookkeeper") ? <ImportReadings organisationId={organisationId} farm={farm} onImported={reload} /> : null}
+        </>
+      ) : null}
     </div>
   );
 }
@@ -617,7 +643,7 @@ function Grazings({ organisationId, farmId, paddocks, canEdit, canRemove, versio
     grazing.eaten ? `${kg(grazing.eaten.perHa)} kg DM/ha${grazing.eaten.totalKgDm !== null ? `, ${kg(grazing.eaten.totalKgDm)} kg DM` : ""}${grazing.eaten.perHead ? `, ${grazing.eaten.perHead} a head` : ""}` : null;
   const inNow = open.data?.grazings ?? [];
   return (
-    <Card title="Grazings" description="Which mob was in which paddock, from the day in to the day out. With the covers before and after, Tohyee works out what was eaten.">
+    <Card title="Grazings" description="Which mob was in which paddock. With the covers before and after, Tohyee works out what was eaten.">
       {open.error ? <Notice tone="error">{open.error}</Notice> : null}
       {runError ? <Notice tone="error">{runError}</Notice> : null}
       {inNow.length ? (
@@ -840,7 +866,7 @@ function Supplements({
   const quantity = (line: Supplement) => `${Number(line.quantity).toLocaleString("en-NZ")} ${SUPPLEMENT_UNIT_LABELS[line.unit]}`;
   const remove = (line: Supplement) => (canRemove ? <RemoveAction organisationId={organisationId} path={`/api/farming/supplements/${line.id}`} what="feed" onRemoved={onChanged} /> : null);
   return (
-    <Card title="Supplements fed" description="What was fed out, and how much. Only kg DM is added up; anything else counts once its kg DM is typed. Buying feed stays a bill.">
+    <Card title="Supplements fed" description={<>What was fed out, and how much. <InfoTip label="What&apos;s added up">Only kg DM is added up; anything else counts once its kg DM is typed. Buying feed stays a bill.</InfoTip></>}>
       {runError ? <Notice tone="error">{runError}</Notice> : null}
       {months.length ? (
         <ul style={{ margin: "0 0 12px" }}>

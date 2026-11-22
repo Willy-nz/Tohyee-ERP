@@ -3,6 +3,7 @@
 import Link from "next/link";
 import { type ReactNode, useState } from "react";
 import { DateInput } from "@/components/date-input";
+import { InfoTip } from "@/components/info-tip";
 import { ChecksScreen, IncidentsScreen, PackScreen, ReminderList, useEffluentCare } from "@/components/farm-effluent-care";
 import { LogScreen, PondsScreen, useEffluentLog } from "@/components/farm-effluent-log";
 import { newOperationId, SafetyHistory } from "@/components/farm-safety";
@@ -380,7 +381,7 @@ function SetupScreen({ organisationId, farm }: EffluentContext) {
   return (
     <div className={styles.overview}>
       <div className={styles.column}>
-        <Card title="Map" description="Blue: effluent blocks. Red: no-apply zones, with their buffers as light red circles. P: ponds and sumps. A picture to plan by, not a survey.">
+        <Card title="Map" description={<>A picture to plan by, not a survey. <InfoTip label="What the colours mean">Blue: effluent blocks. Red: no-apply zones, with their buffers as light red circles. P: ponds and sumps.</InfoTip></>}>
           <div id="effluent-map" style={{ scrollMarginTop: 72 }} />
           {placing ? (
             <Notice tone="info">
@@ -883,7 +884,7 @@ function SystemsCard({ organisationId, farm, setup, manage, onSaved }: { organis
   return (
     <Card
       title={`Systems (${setup.systems.filter((system) => !system.data.retired && system.change !== "withdrawn").length})`}
-      description="Each is a machine in Safety's equipment register, with its pre-start checklist. A failed critical check puts it out of use until someone allowed releases it."
+      description={<>Each is a machine in Safety&apos;s equipment register. <InfoTip label="Pre-start checks">Each has its pre-start checklist. A failed critical check puts it out of use until someone allowed releases it.</InfoTip></>}
       actions={manage && !adding ? <Button size="small" onClick={() => setAdding(true)}>Add a system</Button> : null}
     >
       {adding ? <SystemForm organisationId={organisationId} farm={farm} setup={setup} record={null} correcting={false} onDone={() => { setAdding(false); onSaved(); }} onCancel={() => setAdding(false)} /> : null}

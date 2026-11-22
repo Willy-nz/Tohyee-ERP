@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { useApiData } from "@/components/hooks";
+import { InfoTip } from "@/components/info-tip";
 import { Badge,Button,Card,Empty,Field,Notice,Stat,ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
 import { api,errorMessage } from "@/lib/client/api";
@@ -11,6 +12,21 @@ import type { AgeingPreview,HeadCount } from "@/lib/livestock/movements";
 import { NotOn,Steps,YearPicker,defaultYear,useLivestockSettings,yearEnds } from "@/components/livestock/shared";
 
 // Overview: head count -----------------------------------------------------------
+
+type HeadRow = HeadCount["rows"][number];
+const signed = (value: number) => (value === 0 ? "" : value > 0 ? `+${value}` : String(value));
+const out = (value: number) => (value ? `(${value})` : "");
+/** The movements between opening and closing, in the order of the sum. */
+const MOVEMENT_COLUMNS: Array<{ label: string; text: (row: HeadRow) => string }> = [
+  { label: "Ageing", text: (row) => signed(row.ageingIn - row.ageingOut) },
+  { label: "Born", text: (row) => (row.births ? String(row.births) : "") },
+  { label: "Bought", text: (row) => (row.bought ? String(row.bought) : "") },
+  { label: "Sold", text: (row) => out(row.sold) },
+  { label: "Died", text: (row) => out(row.died) },
+  { label: "Rations", text: (row) => out(row.rations) },
+  { label: "Missing / found", text: (row) => signed(row.found - row.missing) },
+  { label: "Class changes", text: (row) => signed(row.reclassIn - row.reclassOut) },
+];
 
 export function LivestockOverview({ organisationId }: { organisationId: string }) {
   const { can } = useWorkspace();
@@ -98,12 +114,24 @@ function HeadCountView({ organisationId, yearEnd }: { organisationId: string; ye
       </div>
       <Card
         title={`Head count, ${formatDate(data.yearStart)} to ${formatDate(data.yearEnd)}`}
-        description="Opening + born + bought − sold − died − rations − missing + found ± class changes ± ageing = closing. Ageing happens at the start of the year and nets to zero across the herd."
+        description={
+          <>
+            Each class from opening to closing.{" "}
+            <InfoTip label="How closing is worked out">
+            Opening + born + bought − sold − died − rations − missing + found ± class changes ± ageing = closing. Ageing happens at the start of the year and nets to zero across the herd. A column with
+            nothing in it for the year is left out.
+          </InfoTip>
+          </>
+        }
       >
         {data.rows.length === 0 ? (
           <Empty>No stock yet. Set the opening position in Livestock settings, then record movements.</Empty>
         ) : (
-          kinds.map((kind) => (
+          kinds.map((kind) => {
+            const rows = data.rows.filter((row) => row.kind === kind);
+            // A movement nobody recorded this year isn't a column: the table stays as wide as the year was busy.
+            const columns = MOVEMENT_COLUMNS.filter((column) => rows.some((row) => column.text(row) !== ""));
+            return (
             <div key={kind} className={ui.tableWrap}>
               <table className={`${ui.table} ${ui.stackOnPhone}`}>
                 <caption>{KIND_NAMES[kind]}</caption>
@@ -111,54 +139,29 @@ function HeadCountView({ organisationId, yearEnd }: { organisationId: string; ye
                   <tr>
                     <th>Class</th>
                     <th className={ui.num}>Opening</th>
-                    <th className={ui.num}>Ageing</th>
-                    <th className={ui.num}>Born</th>
-                    <th className={ui.num}>Bought</th>
-                    <th className={ui.num}>Sold</th>
-                    <th className={ui.num}>Died</th>
-                    <th className={ui.num}>Rations</th>
-                    <th className={ui.num}>Missing / found</th>
-                    <th className={ui.num}>Class changes</th>
+                    {columns.map((column) => (
+                      <th key={column.label} className={ui.num}>
+                        {column.label}
+                      </th>
+                    ))}
                     <th className={ui.num}>Closing</th>
                     <th className={ui.num}>Counted</th>
                   </tr>
                 </thead>
                 <tbody>
-                  {data.rows
-                    .filter((row) => row.kind === kind)
-                    .map((row) => {
+                  {rows.map((row) => {
                       const key = `${row.kind}.${row.classCode}`;
-                      const signed = (value: number) => (value === 0 ? "" : value > 0 ? `+${value}` : String(value));
                       return (
                         <tr key={key}>
                           <td data-label="Class">{row.className}</td>
                           <td data-label="Opening" className={ui.num}>
                             {row.opening}
                           </td>
-                          <td data-label="Ageing" className={ui.num}>
-                            {signed(row.ageingIn - row.ageingOut)}
-                          </td>
-                          <td data-label="Born" className={ui.num}>
-                            {row.births || ""}
-                          </td>
-                          <td data-label="Bought" className={ui.num}>
-                            {row.bought || ""}
-                          </td>
-                          <td data-label="Sold" className={ui.num}>
-                            {row.sold ? `(${row.sold})` : ""}
-                          </td>
-                          <td data-label="Died" className={ui.num}>
-                            {row.died ? `(${row.died})` : ""}
-                          </td>
-                          <td data-label="Rations" className={ui.num}>
-                            {row.rations ? `(${row.rations})` : ""}
-                          </td>
-                          <td data-label="Missing / found" className={ui.num}>
-                            {signed(row.found - row.missing)}
-                          </td>
-                          <td data-label="Class changes" className={ui.num}>
-                            {signed(row.reclassIn - row.reclassOut)}
-                          </td>
+                          {columns.map((column) => (
+                            <td key={column.label} data-label={column.label} className={ui.num}>
+                              {column.text(row)}
+                            </td>
+                          ))}
                           <td data-label="Closing" className={ui.num}>
                             <strong>{row.closing}</strong>
                           </td>
@@ -183,7 +186,8 @@ function HeadCountView({ organisationId, yearEnd }: { organisationId: string; ye
                 </tbody>
               </table>
             </div>
-          ))
+            );
+          })
         )}
         <p className={ui.muted}>
           Totals: opening {data.totals.opening}, closing {data.totals.closing}. Ageing {data.ageingBalances ? "nets to zero" : "doesn't net to zero"}.
@@ -223,7 +227,7 @@ function HeadCountView({ organisationId, yearEnd }: { organisationId: string; ye
       </Card>
 
       {data.held.length > 0 ? (
-        <Card title="Held for others" description="Stock on the farm that belongs to someone else. Shown here, never counted as the farm's or valued (LV3).">
+        <Card title="Held for others" description="Stock on the farm that belongs to someone else. Shown here, never counted as the farm's or valued.">
           <div className={ui.tableWrap}>
             <table className={`${ui.table} ${ui.stackOnPhone}`}>
               <thead>

@@ -415,7 +415,7 @@ export function PhotoCalibrationCard({ organisationId, farm }: { organisationId:
   const data = useApiData<{ calibration: PhotoCalibration }>(`/api/farming/farms/${farm.id}/pasture/calibration`, { organisationId, windowDays });
   const calibration = data.data?.calibration;
   return (
-    <Card title="Photo estimates beside other readings" description="How far the AI's photo estimates were from other readings of the same paddock close in time, over the last year. For your judgement only: Tohyee never adjusts an estimate.">
+    <Card title="Photo estimates beside other readings" description={<>For your judgement only: Tohyee never adjusts an estimate. <InfoTip label="What this compares">How far the AI&apos;s photo estimates were from other readings of the same paddock close in time, over the last year.</InfoTip></>}>
       <div className={ui.inlineForm}>
         <Field label="Close in time means within">
           <select value={windowDays} onChange={(event) => setWindowDays(Number(event.target.value))}>
