@@ -1,5 +1,6 @@
-import { IllustratedIcon } from "@/components/illustrated-icon";
 "use client";
+
+import { IllustratedIcon } from "@/components/illustrated-icon";
 
 import Link from "next/link";
 import { useState } from "react";
