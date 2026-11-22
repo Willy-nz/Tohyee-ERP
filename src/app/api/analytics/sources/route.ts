@@ -2,8 +2,9 @@ import { json, readJson, route, searchParams, withOrganisation } from "@/lib/api
 import { roleAtLeast } from "@/lib/auth/roles";
 import { createSource, listSources, sourcesForViewer } from "@/lib/analytics/sources";
 
+/** The data sources. Bookkeepers and up; anyone below admin gets them without connection details. */
 export const GET = route(async (request) => {
-  const sources = await withOrganisation(request, searchParams(request).get("organisationId"), "viewer", async (tx, { membership }) => {
+  const sources = await withOrganisation(request, searchParams(request).get("organisationId"), "bookkeeper", async (tx, { membership }) => {
     const all = await listSources(tx);
     return roleAtLeast(membership.role, "admin") ? all : sourcesForViewer(all);
   });
