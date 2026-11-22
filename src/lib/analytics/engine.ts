@@ -77,7 +77,25 @@ async function duckdb(): Promise<typeof import("@duckdb/node-api")> {
 // One DuckDB instance per file per process: DuckDB lets only one process
 // write a file, and connections from one instance share it safely.
 type Opened = { instance: Promise<DuckDBInstance>; folder: string | null };
-const instances = new Map<string, Opened>();
+
+/**
+ * The open files and the write queues are kept on globalThis, not in this
+ * module. The built server holds more than one copy of this module in the one
+ * process (the schedulers started at start-up get one, the pages and API
+ * routes another). With a map each, each copy opened the file for itself. On
+ * Windows the second open is refused, so the server locked itself out and
+ * reported "locked by another Tohyee process" with its own process number;
+ * on Linux both opens succeed and two instances write one file.
+ */
+type EngineRegistry = { instances: Map<string, Opened>; queues: Map<string, Promise<unknown>> };
+const globalForEngine = globalThis as typeof globalThis & { __tohyeeAnalyticsEngine?: EngineRegistry };
+const registry = (globalForEngine.__tohyeeAnalyticsEngine ??= { instances: new Map(), queues: new Map() });
+const instances = registry.instances;
+
+/** The analytics files this process has open (tests and diagnostics). */
+export function openAnalyticsFiles(): string[] {
+  return [...instances.keys()];
+}
 
 /**
  * The folders DuckDB may read and write: the organisation's source folder and
@@ -136,6 +154,10 @@ export function analyticsLockedMessage(error: unknown): string | null {
   const text = error instanceof Error ? error.message : String(error);
   if (!LOCKED.test(text)) return null;
   const pid = /PID (\d+)/.exec(text)?.[1];
+  // Tohyee holding its own file is a fault in Tohyee, not something left running: say so, so it gets reported.
+  if (pid && Number(pid) === process.pid) {
+    return "Analytics couldn't open its own file a second time. Restart Tohyee and try again, and please report this: it's a fault in Tohyee.";
+  }
   return `Analytics is locked by another Tohyee process${pid ? ` (process ${pid})` : ""}, usually one left running after an update. Restart Tohyee (or the computer) and try again.`;
 }
 
@@ -203,8 +225,8 @@ async function instanceFor(organisationId: string, folderHint?: string): Promise
   return instance;
 }
 
-// Loads and other writes for one organisation run one at a time.
-const queues = new Map<string, Promise<unknown>>();
+// Loads and other writes for one organisation run one at a time (across every copy of this module: see the registry).
+const queues = registry.queues;
 
 function serialise<T>(organisationId: string, work: () => Promise<T>): Promise<T> {
   const previous = queues.get(organisationId) ?? Promise.resolve();
