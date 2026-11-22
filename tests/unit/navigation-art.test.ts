@@ -151,7 +151,11 @@ describe("illustrated module navigation", () => {
     const folder = join(process.cwd(), "public/illustrations/icons");
     const files = readdirSync(folder).filter((file) => file.endsWith(".svg")).map((file) => file.replace(/\.svg$/, "")).sort();
     const routeIcons = new Set([...MENUS, ...CRM_MENUS, ...ANALYTICS_MENUS, ...FARM_MENUS].flatMap((menu) => menu.groups.flatMap((group) => group.links.map((link) => iconForDestination(link.href)))));
-    for (const name of routeIcons) if (name) expect(files, name).toContain(name);
+    // A menu's picture is either an inline drawing with its SVG file, or one of the farm pictures kept as a PNG.
+    const pictures = readdirSync(folder).filter((file) => file.endsWith(".png")).map((file) => file.replace(/\.png$/, ""));
+    for (const name of routeIcons) if (name) expect([...files, ...pictures], name).toContain(name);
+    // No name is both: a farm picture's old sketch would be drawn as the PNG and fail the comparison below.
+    expect(files.filter((name) => pictures.includes(name))).toEqual([]);
     const normalise = (svg: string) => svg.replace(/<title>.*?<\/title>/, "").replace(/^[\s\S]*?<g /, "<g ").replace(/<\/svg>[\s\S]*$/, "").replace(/><\/(path|circle|rect|ellipse)>/g, "/>").replace(/\s+/g, " ").trim();
     for (const name of files) {
       const inline = renderToStaticMarkup(createElement(IllustratedIcon, { name: name as IllustratedIconName }));
