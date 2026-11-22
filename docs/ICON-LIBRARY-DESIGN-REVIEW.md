@@ -6,7 +6,7 @@ The 35 farm-specific icons now have **individual, transparent, 96×96 PNG assets
 
 PNG is a raster format, not an editable vector. The full-resolution 192×192 crops are also provided separately in the deliverable archive. For a future scale-independent release, trace from the approved images with manual vector QA rather than reverting to simplistic code-generated geometry.
 
-The PNGs are compact palette images optimised for mobile 28–48px. The service worker's static-asset handling includes the new PNG URLs so opened farm pages can retain them for offline use.
+The PNGs are compact palette images optimised for mobile 28–48px. The service worker fetches all 35 by name when it keeps the offline farm pages (`FARM_ICON_URLS` in `public/sw-rules.js`), because the pages draw them after loading and they aren't in a page's HTML. At 96×96 they are soft on a phone at the 48px Log size, and a few are cropped at the edge (near miss, tractor, stock truck, births): the 192×192 crops should replace them.
 
 ## Scope examined
 
@@ -23,7 +23,7 @@ The more meaningful deficits were **missing illustrations** and **mismatched reu
 
 ## Changes
 
-- Created 35 first-pass SVG sketches, then superseded their on-screen rendering with 35 approved, polished transparent PNG illustrations. The SVG sketches remain as archived precursors.
+- Created 35 first-pass SVG sketches, then superseded their on-screen rendering with 35 approved, polished transparent PNG illustrations. The SVG sketches were removed once the PNGs replaced them.
 - Prioritised distinct silhouette and direction: cow/gate/arrows for Mob in/out, coiled bale for Feed, plate-meter pole and base, drench applicator, wheeled irrigator, calf, ear tag, tractor and excavator.
 - Uses one shared rendering component for new and existing artwork. Existing inline SVGs stay unchanged, while approved PNGs are served as local images. No third-party CDN or product photos.
 - Wired **Log buttons, Effluent quick actions, Log/More bottom tabs and Farm More** to the icons; navigation route artwork uses the new destination-specific drawings.

@@ -31,6 +31,15 @@
     "/operations/farming/notebook": "Farm notebook",
   };
   var OFFLINE_PAGES = Object.keys(PAGE_NAMES).concat(["/get-tohyee"]);
+  /**
+   * The farm pictures (Log buttons, tabs, the Farm menu) are files of their
+   * own, and the pages draw them after loading, so they aren't in a page's
+   * HTML: the worker fetches them when it keeps the offline pages. The same
+   * names as FARM_ICON_NAMES in src/components/illustrated-icon.tsx (tested).
+   */
+  var FARM_ICON_URLS = ["farm-walk", "mob-in", "mob-out", "cover-reading", "feed", "rain-gauge", "move-mob", "births", "deaths", "treatment", "hazard", "near-miss", "incident", "irrigation", "pond-level", "log", "more", "pasture", "fertiliser", "rainfall", "soil-test", "tractor", "medicines", "animal-tag", "stock-truck", "vet", "delivery", "contractor", "meeting", "deadline", "sun", "cloud", "rain", "wind", "frost"].map(function (name) {
+    return "/illustrations/icons/" + name + ".png";
+  });
   /** Built files (names change with every build), icons, fonts and the manifest. */
   var STATIC_CACHE = "tohyee-static-v1";
   var PAGE_CACHE_PREFIX = "tohyee-pages-";
@@ -171,6 +180,7 @@
 
   scope.TohyeeSw = {
     OFFLINE_PAGES: OFFLINE_PAGES,
+    FARM_ICON_URLS: FARM_ICON_URLS,
     PAGE_NAMES: PAGE_NAMES,
     STATIC_CACHE: STATIC_CACHE,
     OFFLINE_SESSION_DAYS: OFFLINE_SESSION_DAYS,

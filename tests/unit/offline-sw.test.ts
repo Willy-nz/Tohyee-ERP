@@ -152,6 +152,20 @@ describe("the farm illustrations in offline pages", () => {
   });
 });
 
+describe("the farm pictures are kept for offline", () => {
+  it("keeps every farm picture the screens draw, and each one is a file", () => {
+    const sandbox: { self: { TohyeeSw?: { FARM_ICON_URLS: string[] } } } = { self: {} };
+    vm.runInNewContext(code("sw-rules.js"), sandbox);
+    const kept = [...sandbox.self.TohyeeSw!.FARM_ICON_URLS].sort();
+    const component = fs.readFileSync(path.join(import.meta.dirname, "../../src/components/illustrated-icon.tsx"), "utf8");
+    const list = component.slice(component.indexOf("const FARM_ICON_NAMES = ["), component.indexOf("] as const;"));
+    const drawn = [...list.matchAll(/"([a-z-]+)"/g)].map((match) => `/illustrations/icons/${match[1]}.png`).sort();
+    expect(drawn.length).toBe(35);
+    expect(kept).toEqual(drawn);
+    for (const url of kept) expect(fs.existsSync(path.join(import.meta.dirname, "../../public", url)), url).toBe(true);
+  });
+});
+
 describe("the farm sections open with no connection", () => {
   it("lists the same screens in the worker and the page", () => {
     const sandbox: { self: { TohyeeSw?: { OFFLINE_PAGES: string[] } } } = { self: {} };
