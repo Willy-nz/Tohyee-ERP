@@ -94,7 +94,7 @@ export function IllustratedIcon({ name, size = 40 }: { name: IllustratedIconName
   return (
     <span className={styles.icon} aria-hidden="true" style={{ width: size, height: size }}>
       {isFarmIcon(name) ? (
-        <Image src={`/illustrations/icons/${name}.svg`} alt="" width={size} height={size} unoptimized />
+        <Image src={`/illustrations/icons/${name}.png`} alt="" width={size} height={size} unoptimized />
       ) : (
         <svg viewBox="0 0 64 64" width={size} height={size} focusable="false">{artwork[name]}</svg>
       )}
