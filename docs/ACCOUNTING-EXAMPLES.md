@@ -23570,3 +23570,38 @@ Shopify; #1001 goes to Dunedin and #1002 to Palmerston North.
 - **SHP5 Towns on the district map.** shipping_town on a district map matches
   city and district names (Dunedin is Dunedin City). A town that isn't a
   district (Mosgiel, say) doesn't match and is listed as not on the map.
+
+## Update now in Tohyee (UPD1-UPD6; 22 Nov 2026; asked for by the owner, the details are Claude's, not yet reviewed)
+
+Tested in `tests/unit/remote-update.test.ts`, and on Windows in
+`installer/windows/test-install.ps1`. A Windows server runs v1.0.0 and
+v1.1.0 is out.
+
+- **UPD1 From any device.** A server admin opens Update Tohyee from their
+  menu (on a phone, say) and presses Update now to v1.1.0. This is the one
+  server setting that works away from the server computer: the rest stay
+  there. Other people get "Only a server admin can update Tohyee."
+- **UPD2 Backed up first.** It does what the server app's Install does: checks
+  GitHub that v1.1.0 is still the latest and has a Windows installer, then
+  backs up every organisation and the server's own database. Only then does
+  it leave a request for the updater, and the server's audit trail records
+  who asked, from which version to which.
+- **UPD3 Nothing half done.** If a backup fails, or a newer version has come
+  out since the page was opened, it stops with why and nothing is installed.
+- **UPD4 One at a time.** While a request is waiting (up to 10 minutes),
+  asking again says it's on its way. After that the page says the updater
+  may not be running, and it can be asked again.
+- **UPD5 Only where it can work.** Tohyee runs as a limited Windows account
+  that can't install anything, so the installing is done by the Tohyee
+  updater, a scheduled task Windows runs as SYSTEM, set up by the installer
+  from this version on. Within a minute it finds the request and trusts only
+  the version number in it: it installs it only if it's newer than what's
+  installed and is GitHub's latest release, and only if the download matches
+  GitHub's SHA-256. On Docker or Linux servers the page says to update them
+  the way they were installed.
+- **UPD6 How it went.** The page shows what the updater last said
+  (downloading, installing, skipped or failed, with why) and looks again every
+  15 seconds while it works. Tohyee is away for a few minutes while it
+  installs; when it's back on v1.1.0 the page says so. If it's still on
+  v1.0.0 20 minutes after installing started, the page says the update didn't
+  finish and names the installer's log.

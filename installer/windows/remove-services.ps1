@@ -27,4 +27,7 @@ if (Get-Service -Name 'TohyeePostgres' -ErrorAction SilentlyContinue) {
     & sc.exe delete TohyeePostgres | Out-Null
   }
 }
+# The updater for Update now in Tohyee.
+Unregister-ScheduledTask -TaskName 'Tohyee updater' -TaskPath '\Tohyee\' -Confirm:$false -ErrorAction SilentlyContinue
+
 exit 0

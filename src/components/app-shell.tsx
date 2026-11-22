@@ -381,6 +381,12 @@ function UserMenu({ onSignOut }: { onSignOut: () => void }) {
               Modules
             </Link>
           ) : null}
+          {user.isServerAdmin ? (
+            // Works from any device, unlike the rest of the server settings (UPD1).
+            <Link href="/operations/update-tohyee" className={styles.dropdownLink} onClick={close}>
+              Update Tohyee
+            </Link>
+          ) : null}
           <div className={styles.userTheme}>
             <ThemeSwitch />
           </div>
