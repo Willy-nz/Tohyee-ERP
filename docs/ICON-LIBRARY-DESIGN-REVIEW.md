@@ -1,5 +1,13 @@
 # Icon-library design review — 22 November 2026
 
+## Approved illustrated artwork — 22 November 2026
+
+The 35 farm-specific icons now have **individual, transparent, 96×96 PNG assets** in `public/illustrations/icons/<name>.png`, taken from the five high-quality approved illustration sheets, rather than the first hand-coded sketches. The application now renders these PNGs through `IllustratedIcon`. The earlier `.svg` files are kept only as legacy editable placeholders and are **not the currently displayed artwork**. The icon QA gallery displays the PNGs for farm categories and the original SVGs for shared categories.
+
+PNG is a raster format, not an editable vector. The full-resolution 192×192 crops are also provided separately in the deliverable archive. For a future scale-independent release, trace from the approved images with manual vector QA rather than reverting to simplistic code-generated geometry.
+
+The PNGs are compact palette images optimised for mobile 28–48px. The service worker's static-asset handling includes the new PNG URLs so opened farm pages can retain them for offline use.
+
 ## Scope examined
 
 - **63 shared SVG illustrations** in `public/illustrations/icons/` on `main` before this change.
@@ -15,23 +23,23 @@ The more meaningful deficits were **missing illustrations** and **mismatched reu
 
 ## Changes
 
-- Created 35 separate, original, unbranded SVGs, using the requested names, canvas, colours, stroke width and rounded stroke geometry.
+- Created 35 first-pass SVG sketches, then superseded their on-screen rendering with 35 approved, polished transparent PNG illustrations. The SVG sketches remain as archived precursors.
 - Prioritised distinct silhouette and direction: cow/gate/arrows for Mob in/out, coiled bale for Feed, plate-meter pole and base, drench applicator, wheeled irrigator, calf, ear tag, tractor and excavator.
-- Uses one shared rendering component for new and existing artwork. Existing inline SVGs stay unchanged, while new farm artwork is served as local SVG images. No third-party CDN or product photos.
+- Uses one shared rendering component for new and existing artwork. Existing inline SVGs stay unchanged, while approved PNGs are served as local images. No third-party CDN or product photos.
 - Wired **Log buttons, Effluent quick actions, Log/More bottom tabs and Farm More** to the icons; navigation route artwork uses the new destination-specific drawings.
-- Added `/illustrations/icon-review.html` for manual checks at 28px and 64px on light/dark surfaces, including all 98 shared/farm icons.
+- Added `/illustrations/icon-review.html` for manual checks at 28px and 64px on light/dark surfaces, including all 98 shared/farm icons (new PNGs and original SVGs).
 
 ## Browser review checklist
 
 1. Open `/illustrations/icon-review.html` in a local dev/test server. Toggle **28px**, **64px**, and **dark**; verify all images load.
 2. At 28px, particularly inspect calf, cow and gate, hay bale, applicator, irrigator, contractor/digger, stock truck and rain gauge. Small details may need simplifying following browser/device feedback.
 3. Visit **Farm → Log** and **Farm → More** on a phone and desktop. Check the SVGs do not push text offscreen, clip, overlap badges or lose focus outlines.
-4. Verify **offline** behaviour of local SVG image requests on the installed web app. Previously existing inline artwork renders even without a request; the new assets must be cached to achieve the same reliability.
+4. Verify **offline** behaviour of local PNG image requests on the installed web app. Previously existing inline artwork renders even without a request; the new assets are covered by static caching but should be tested on a real device.
 5. Visit a farm with Effluent set up to check Irrigation and Pond Level icons.
 6. Test Windows/Android/Apple icon and marketing website branding separately before contemplating changes to their brand marks. They are intentionally preserved.
 
 ## Limits
 
-Artwork is not a substitute for actual product photos, medicines packaging or farm safety instructions. These icons are navigation illustrations, not diagnostic information. I checked the file structure, paths and style invariants in code; **a true browser visual review with screenshots has not been completed**. The complete icon catalogue is available for a human/device pass before merging. The six calendar-job-type icons and five weather-condition icons are prepared for use, but their specialist screens are not yet wired in this PR.
+Artwork is not a substitute for actual product photos, medicines packaging or farm safety instructions. These icons are navigation illustrations, not diagnostic information. I inspected the cropped PNG contact sheet and reviewed file structure and paths; **a true browser/device visual review has not been completed**. The complete icon catalogue is available for a human/device pass before merging. The six calendar-job-type icons and five weather-condition icons are prepared for use, but their specialist screens are not yet wired in this PR.
 
 The app's existing internal artwork is intentionally retained, avoiding unnecessary churn to all unrelated modules.
