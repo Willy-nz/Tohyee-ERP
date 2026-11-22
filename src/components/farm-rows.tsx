@@ -2,6 +2,7 @@
 
 import { type ReactNode, useEffect, useState } from "react";
 import { DateInput } from "@/components/date-input";
+import { IllustratedIcon, type IllustratedIconName } from "@/components/illustrated-icon";
 import { Button, Notice, ui } from "@/components/ui";
 import { api, errorMessage } from "@/lib/client/api";
 import { type HistoryBounds, offlineHistoryNote } from "@/lib/offline/pack-inventory";
@@ -20,6 +21,8 @@ export { styles as farmRowStyles };
 export type FarmRow = {
   key: string;
   title: ReactNode;
+  /** A small drawing before the title (a job's kind). Decorative: the words still say it. */
+  picture?: IllustratedIconName;
   /** Shown on one line after the title, joined with " · ". Empty parts are left out. */
   parts: ReactNode[];
   /** What opens under the line: the rest of the record. */
@@ -36,6 +39,7 @@ function Line({ row, open }: { row: FarmRow; open: boolean }) {
   const parts = row.parts.filter((part) => part !== null && part !== undefined && part !== false && part !== "");
   return (
     <>
+      {row.picture ? <IllustratedIcon name={row.picture} size={28} /> : null}
       <span className={styles.title}>{row.title}</span>
       <span className={styles.parts}>
         {parts.map((part, index) => (
