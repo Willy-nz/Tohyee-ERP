@@ -11,6 +11,7 @@ export const SCREEN_COVERAGE: Record<string, ScreenCoverage> = {
   "PATCH /api/accounts/[accountId]": {"tool": "update_account"},
   "POST /api/accounts": {"tool": "create_account"},
   "PUT /api/admin/analytics-folders": {"person": "Server settings are for server admins on the server computer."},
+  "POST /api/server-update": {"person": "Updating the server is for a server admin to choose (UPD1)."},
   "POST /api/admin/backups/check": {"person": "Server settings are for server admins on the server computer."},
   "POST /api/admin/backups/recovery-kit/check": {"person": "Server settings are for server admins on the server computer."},
   "POST /api/admin/backups/recovery-kit/rotate": {"person": "Server settings are for server admins on the server computer."},
