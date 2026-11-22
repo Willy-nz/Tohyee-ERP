@@ -116,7 +116,7 @@ export function FarmReportingSetupCard({ organisationId, yearEnd, canEdit, onSav
   }
   const data = setup.data?.setup;
   return (
-    <Card title="Farm reporting" description="A tracking category carries the farm: tag each income and expense line with its farm. Choose the category, link each farm to its value, and enter each farm's own figures for the year.">
+    <Card title="Farm reporting" description={<>Tag each income and expense line with its farm. <InfoTip label="Setting it up">A tracking category carries the farm. Choose the category, link each farm to its value, and enter each farm&apos;s own figures for the year.</InfoTip></>}>
       {error ? <Notice tone="error">{error}</Notice> : null}
       {setup.error ? <Notice tone="error">{setup.error}</Notice> : null}
       {data && !data.advancedFeatures ? (

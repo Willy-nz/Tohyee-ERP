@@ -839,7 +839,7 @@ function DailyWeather({ organisationId, farmId }: { organisationId: string; farm
   return (
     <Card
       title="Daily rain from MetService"
-      description="Each hour from the forecast fetched closest before it, added up for the day (midnight to midnight). Your gauge's reading is used instead where there is one."
+      description={<>Your gauge&apos;s reading is used where there is one. <InfoTip label="How a day is added up">Each hour comes from the forecast fetched closest before it, added up for the day (midnight to midnight).</InfoTip></>}
     >
       {weather.days.length === 0 ? (
         <p className={ui.muted}>No finished days yet. They&apos;re worked out each morning from the forecasts kept.</p>

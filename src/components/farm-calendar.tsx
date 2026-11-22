@@ -722,7 +722,7 @@ function CalendarLink({ organisationId, onClose }: { organisationId: string; onC
   return (
     <Card
       title="Calendar link"
-      description="A private address your phone, Google Calendar, Apple Calendar or Outlook can subscribe to, so these items show there too. It only reads: changes made there don't come back."
+      description={<>A private address your phone&apos;s calendar can subscribe to. <InfoTip label="How it works">Works with Google Calendar, Apple Calendar and Outlook, so these items show there too. It only reads: changes made there don&apos;t come back.</InfoTip></>}
       actions={<Button variant="secondary" size="small" onClick={onClose}>Close</Button>}
     >
       {error ? <Notice tone="error">{error}</Notice> : null}

@@ -23,10 +23,11 @@ import { PaddockMap } from "@/components/farming";
 import { PaddockPhotoDiary } from "@/components/pasture-photos";
 import { WeatherForecastCard } from "@/components/weather-forecast";
 import { useApiData } from "@/components/hooks";
-import { Button, Card, Empty, Notice, PageHeader, ui } from "@/components/ui";
+import { Button, Card, Empty, Notice, PageHeader, Stat, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
 import { CALENDAR_KIND_LABELS, type CalendarItem } from "@/lib/farming/calendar-shared";
 import { addDays, coverText, daysAgo, mobText, shortDate } from "@/lib/farming/farm-words";
+import { todayGlance } from "@/lib/farming/today-glance";
 import type { FarmAppLauncher } from "@/lib/farming/launchers";
 import { bandsFor, MAP_COLOURINGS, type MapColouring, paddockBand } from "@/lib/farming/map-colours";
 import type { PaddockStatus } from "@/lib/farming/paddock-status";
@@ -218,8 +219,16 @@ export function FarmToday({ organisationId, farm }: FarmContext) {
   const inNow = (statuses.data?.paddocks ?? []).filter((status) => status.inNow).sort((a, b) => NATURAL.compare(a.name, b.name));
   const fills = statuses.data ? bandFills(statuses.data.paddocks, "grazed", today) : undefined;
   const farmWorker = current?.role === "farm_worker";
+  const glance = statuses.data ? todayGlance(today, statuses.data.paddocks) : null;
   return (
     <div className={styles.grid}>
+      {glance ? (
+        <div className={styles.glance}>
+          <Stat label="Cover, kg DM/ha" value={glance.averageCover === null ? "–" : glance.averageCover.toLocaleString("en-NZ")} />
+          <Stat label={glance.head === null ? "Paddocks stocked" : "Head in paddocks"} value={(glance.head ?? glance.paddocksStocked).toLocaleString("en-NZ")} />
+          <Stat label="Jobs today" value={calendar.data ? todays.length : "–"} />
+        </div>
+      ) : null}
       <Card title="Today's jobs" description={todays.length ? undefined : "From the farm calendar."}>
         {calendar.error ? <Notice tone="error">{calendar.error}</Notice> : null}
         {calendar.data && !todays.length ? <p>Nothing on the calendar for today.</p> : null}

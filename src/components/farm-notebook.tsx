@@ -2,6 +2,7 @@
 
 import { useState } from "react";
 import { DateInput } from "@/components/date-input";
+import { InfoTip } from "@/components/info-tip";
 import { useApiData } from "@/components/hooks";
 import { Badge, Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
@@ -96,7 +97,7 @@ export function FarmNotebook({ organisationId }: { organisationId: string }) {
   return (
     <>
       <Card
-        description="What's worth knowing about the farm: its history, goals, people and how it's farmed. Your AI reads this to answer questions, and adds to it when it learns something (marked as written by the AI)."
+        description={<>The farm&apos;s history, goals, people and how it&apos;s farmed. <InfoTip label="Your AI and the notebook">Your AI reads this to answer questions, and adds to it when it learns something (marked as written by the AI).</InfoTip></>}
         actions={
           editable && !adding ? (
             <Button onClick={() => setAdding(true)} size="small">

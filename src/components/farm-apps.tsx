@@ -2,6 +2,7 @@
 
 import { type FormEvent, useState } from "react";
 import { useApiData } from "@/components/hooks";
+import { InfoTip } from "@/components/info-tip";
 import { Badge, Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
 import { api, errorMessage } from "@/lib/client/api";
 import type { FarmAppKey } from "@/lib/farm-apps/keys";
@@ -56,7 +57,7 @@ export function FarmApps({ organisationId }: { organisationId: string }) {
     <>
       <AppTiles organisationId={organisationId} />
       <h2>Manage integrations</h2>
-      <Card title="Apps you build or use" description="An app key lets an app read farm data and record field work through Tohyee's Farming API, as you, and only what you tick. It can't reach the books, payroll or contacts, and it posts nothing.">
+      <Card title="Apps you build or use" description={<>Lets an app read farm data and record field work as you. <InfoTip label="What an app key can do">Only what you tick. It can&apos;t reach the books, payroll or contacts, and it posts nothing.</InfoTip></>}>
         <p>
           The API is at <code>{base}</code>, described in <a href={`${base}/openapi.json`}>openapi.json</a>. The <a href={GUIDE}>guide</a> shows an AI tool how to build an app against it, and the{" "}
           <a href={SAMPLE}>soil sampling app</a> is a working example.
@@ -94,7 +95,7 @@ export function FarmApps({ organisationId }: { organisationId: string }) {
           </Button>
         </form>
       </Card>
-      <Card title="Your app keys" description="Only the keys you made. A key stops working when you revoke it, leave the organisation, or your password or two-step sign-in is reset.">
+      <Card title="Your app keys" description={<>Only the keys you made. <InfoTip label="When a key stops working">A key stops working when you revoke it, leave the organisation, or your password or two-step sign-in is reset.</InfoTip></>}>
         {keys.error ? <Notice tone="error">{keys.error}</Notice> : null}
         {keys.data && keys.data.keys.length === 0 ? <Empty>No app keys yet.</Empty> : null}
         {keys.data && keys.data.keys.length ? (
@@ -165,7 +166,7 @@ function AppTiles({ organisationId }: { organisationId: string }) {
   };
   const list = launchers.data?.launchers ?? [];
   return (
-    <Card title="App tiles" description="Apps the farm uses, shown as tiles on the farm's Today and More pages. A tile is only a name and an address: each app asks for its own key.">
+    <Card title="App tiles" description="Shown as tiles on Today and More. Each app asks for its own key.">
       {error ? <Notice tone="error">{error}</Notice> : null}
       {launchers.error ? <Notice tone="error">{launchers.error}</Notice> : null}
       {launchers.data && !list.length ? <Empty>No app tiles yet.</Empty> : null}
