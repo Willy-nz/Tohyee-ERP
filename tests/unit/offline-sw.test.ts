@@ -137,6 +137,19 @@ function pretendBrowser() {
 
 const signedIn = (id: string) => ({ status: 200, body: { user: { id, email: `${id}@example.com` }, organisations: [] } });
 
+describe("the farm illustrations in offline pages", () => {
+  it("recognises and caches local SVG icons beside the built application files", () => {
+    const sandbox: { self: { TohyeeSw?: { isStaticAsset: (path: string) => boolean; assetUrlsFromHtml: (html: string) => string[] } } } = { self: {} };
+    vm.runInNewContext(code("sw-rules.js"), sandbox);
+    const rules = sandbox.self.TohyeeSw!;
+    expect(rules.isStaticAsset("/illustrations/icons/mob-in.svg")).toBe(true);
+    expect(rules.isStaticAsset("/illustrations/icons/rain-gauge.svg")).toBe(true);
+    expect(rules.isStaticAsset("/illustrations/icon-review.html")).toBe(false);
+    expect(rules.assetUrlsFromHtml('<img src="/illustrations/icons/mob-in.svg"><img src="/illustrations/icons/mob-in.svg"><script src="/_next/static/chunks/test.js"></script>'))
+      .toEqual(["/_next/static/chunks/test.js", "/illustrations/icons/mob-in.svg"]);
+  });
+});
+
 describe("the farm sections open with no connection", () => {
   it("lists the same screens in the worker and the page", () => {
     const sandbox: { self: { TohyeeSw?: { OFFLINE_PAGES: string[] } } } = { self: {} };
