@@ -3,6 +3,7 @@
 import { useSearchParams } from "next/navigation";
 import { type ReactNode, useState } from "react";
 import { DateInput } from "@/components/date-input";
+import { IllustratedIcon } from "@/components/illustrated-icon";
 import { operationId, useFarmDrafts } from "@/components/farm-drafts";
 import { EffluentLogButtons } from "@/components/farm-effluent-log";
 import { LogRainfall } from "@/components/farm-rainfall";
@@ -105,30 +106,37 @@ function LogHome({ organisationId, farm, onStart }: FarmContext & { onStart: (fl
       <Card title={`Log on ${farm.name}`}>
         <div className={styles.bigButtons}>
           <button type="button" className={styles.bigButton} onClick={() => onStart({ kind: "walk" })}>
+            <IllustratedIcon name="farm-walk" size={48} />
             {walk ? "Carry on the farm walk" : "Farm walk"}
             <small>{walk ? `${Math.min(walk.position + 1, walk.order.length)} of ${walk.order.length} paddocks` : "A cover for each paddock"}</small>
           </button>
           <button type="button" className={styles.bigButton} onClick={() => onStart({ kind: "in" })}>
+            <IllustratedIcon name="mob-in" size={48} />
             Mob in
             <small>A grazing starts</small>
           </button>
           <button type="button" className={styles.bigButton} onClick={() => onStart({ kind: "out" })}>
+            <IllustratedIcon name="mob-out" size={48} />
             Mob out
             <small>The day out</small>
           </button>
           <button type="button" className={styles.bigButton} onClick={() => onStart({ kind: "cover" })}>
+            <IllustratedIcon name="cover-reading" size={48} />
             Cover reading
             <small>One paddock</small>
           </button>
           <button type="button" className={styles.bigButton} onClick={() => onStart({ kind: "feed" })}>
+            <IllustratedIcon name="feed" size={48} />
             Feed
             <small>Supplements fed</small>
           </button>
           <button type="button" className={styles.bigButton} onClick={() => onStart({ kind: "photo" })}>
+            <IllustratedIcon name="photo" size={48} />
             Paddock photo
             <small>For the photo diary or a cover estimate</small>
           </button>
           <button type="button" className={styles.bigButton} onClick={() => onStart({ kind: "rain" })}>
+            <IllustratedIcon name="rain-gauge" size={48} />
             Rain gauge
             <small>Today&apos;s rain in mm</small>
           </button>
@@ -136,18 +144,22 @@ function LogHome({ organisationId, farm, onStart }: FarmContext & { onStart: (fl
         <h3>Stock</h3>
         <div className={styles.bigButtons}>
           <button type="button" className={styles.bigButton} onClick={() => onStart({ kind: "stock", type: "move" })}>
+            <IllustratedIcon name="move-mob" size={48} />
             Move a mob
             <small>To another paddock</small>
           </button>
           <button type="button" className={styles.bigButton} onClick={() => onStart({ kind: "stock", type: "births" })}>
+            <IllustratedIcon name="births" size={48} />
             Births
             <small>Born into a mob</small>
           </button>
           <button type="button" className={styles.bigButton} onClick={() => onStart({ kind: "stock", type: "deaths" })}>
+            <IllustratedIcon name="deaths" size={48} />
             Deaths
             <small>Died from a mob</small>
           </button>
           <button type="button" className={styles.bigButton} onClick={() => onStart({ kind: "stock", type: "treatment" })}>
+            <IllustratedIcon name="treatment" size={48} />
             Treatment
             <small>Drench, vaccine, other animal remedy</small>
           </button>
@@ -155,14 +167,17 @@ function LogHome({ organisationId, farm, onStart }: FarmContext & { onStart: (fl
         <h3>Safety</h3>
         <div className={styles.bigButtons}>
           <button type="button" className={styles.bigButton} onClick={() => onStart({ kind: "safety", type: "hazard" })}>
+            <IllustratedIcon name="hazard" size={48} />
             Report a hazard
             <small>Something that could hurt someone</small>
           </button>
           <button type="button" className={styles.bigButton} onClick={() => onStart({ kind: "safety", type: "near_miss" })}>
+            <IllustratedIcon name="near-miss" size={48} />
             Near miss
             <small>Nobody hurt, but it nearly happened</small>
           </button>
           <button type="button" className={styles.bigButton} onClick={() => onStart({ kind: "safety", type: "incident" })}>
+            <IllustratedIcon name="incident" size={48} />
             Incident
             <small>Someone hurt, or damage done</small>
           </button>
