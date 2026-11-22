@@ -18,7 +18,7 @@ import styles from "./farm-frame.module.css";
  * phone they sit at the bottom, above the phone's own bar, and the page
  * leaves room for them so nothing is hidden behind them.
  */
-const TAB_ART: Partial<Record<string, IllustratedIconName>> = { today: "calendar", map: "maps", safety: "safety" };
+const TAB_ART: Partial<Record<string, IllustratedIconName>> = { today: "calendar", map: "maps", log: "log", chat: "chat", safety: "safety", more: "more" };
 
 /** Unread farm chat messages across the person's farms (FCH6), checked every minute. */
 function useChatUnread(): number {

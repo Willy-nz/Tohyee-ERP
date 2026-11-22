@@ -1,3 +1,4 @@
+import Image from "next/image";
 import styles from "./illustrated-icon.module.css";
 
 // Original artwork from public/illustrations/icons. Inline SVG needs no separate
@@ -71,13 +72,32 @@ const artwork = {
   "social": (<g fill="none" stroke="#233E45" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path fill="#FFFDF7" d="M8 12h30q5 0 5 5v15q0 5-5 5H22l-9 8v-8H8Z"/><path d="M15 21h20M15 28h12"/><path fill="#A8D8BF" d="M26 37h25q5 0 5 5v9q0 3-3 3h-3v7l-8-7H26Z"/><path fill="#F3D48B" d="M41 50s-6-3.5-6-7.5a3 3 0 0 1 6-1 3 3 0 0 1 6 1c0 4-6 7.5-6 7.5Z"/></g>),
 };
 
-export type IllustratedIconName = keyof typeof artwork;
+// Farm icon files use the same visual grammar as the inline general icons.
+// Keep their names explicit so no untrusted path can become an image URL.
+const FARM_ICON_NAMES = [
+  "farm-walk", "mob-in", "mob-out", "cover-reading", "feed", "rain-gauge",
+  "move-mob", "births", "deaths", "treatment", "hazard", "near-miss", "incident",
+  "irrigation", "pond-level", "log", "more", "pasture", "fertiliser", "rainfall",
+  "soil-test", "tractor", "medicines", "animal-tag", "stock-truck", "vet",
+  "delivery", "contractor", "meeting", "deadline", "sun", "cloud", "rain",
+  "wind", "frost",
+] as const;
+type FarmIconName = (typeof FARM_ICON_NAMES)[number];
+function isFarmIcon(name: IllustratedIconName): name is FarmIconName {
+  return (FARM_ICON_NAMES as readonly string[]).includes(name);
+}
+
+export type IllustratedIconName = keyof typeof artwork | FarmIconName;
 
 /** Decorative illustration: always pair with a visible label. */
 export function IllustratedIcon({ name, size = 40 }: { name: IllustratedIconName; size?: 28 | 32 | 40 | 48 }) {
   return (
     <span className={styles.icon} aria-hidden="true" style={{ width: size, height: size }}>
-      <svg viewBox="0 0 64 64" width={size} height={size} focusable="false">{artwork[name]}</svg>
+      {isFarmIcon(name) ? (
+        <Image src={`/illustrations/icons/${name}.png`} alt="" width={size} height={size} unoptimized />
+      ) : (
+        <svg viewBox="0 0 64 64" width={size} height={size} focusable="false">{artwork[name]}</svg>
+      )}
     </span>
   );
 }

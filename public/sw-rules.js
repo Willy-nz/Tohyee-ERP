@@ -31,6 +31,15 @@
     "/operations/farming/notebook": "Farm notebook",
   };
   var OFFLINE_PAGES = Object.keys(PAGE_NAMES).concat(["/get-tohyee"]);
+  /**
+   * The farm pictures (Log buttons, tabs, the Farm menu) are files of their
+   * own, and the pages draw them after loading, so they aren't in a page's
+   * HTML: the worker fetches them when it keeps the offline pages. The same
+   * names as FARM_ICON_NAMES in src/components/illustrated-icon.tsx (tested).
+   */
+  var FARM_ICON_URLS = ["farm-walk", "mob-in", "mob-out", "cover-reading", "feed", "rain-gauge", "move-mob", "births", "deaths", "treatment", "hazard", "near-miss", "incident", "irrigation", "pond-level", "log", "more", "pasture", "fertiliser", "rainfall", "soil-test", "tractor", "medicines", "animal-tag", "stock-truck", "vet", "delivery", "contractor", "meeting", "deadline", "sun", "cloud", "rain", "wind", "frost"].map(function (name) {
+    return "/illustrations/icons/" + name + ".png";
+  });
   /** Built files (names change with every build), icons, fonts and the manifest. */
   var STATIC_CACHE = "tohyee-static-v1";
   var PAGE_CACHE_PREFIX = "tohyee-pages-";
@@ -44,7 +53,7 @@
   }
 
   function isStaticAsset(pathname) {
-    return pathname.indexOf("/_next/static/") === 0 || pathname.indexOf("/icons/") === 0 || pathname === "/manifest.webmanifest" || pathname === "/icon.svg" || pathname === "/apple-icon.png";
+    return pathname.indexOf("/_next/static/") === 0 || pathname.indexOf("/icons/") === 0 || pathname.indexOf("/illustrations/icons/") === 0 || pathname === "/manifest.webmanifest" || pathname === "/icon.svg" || pathname === "/apple-icon.png";
   }
 
   /** FNV-1a, so a cache's name doesn't spell out whose it is. */
@@ -102,7 +111,7 @@
   /** The built files a page loads, so they're kept with it. */
   function assetUrlsFromHtml(html) {
     var found = {};
-    var pattern = /\/_next\/static\/[A-Za-z0-9_\-./~%]+?\.(?:js|css|woff2)/g;
+    var pattern = /(?:\/_next\/static\/[A-Za-z0-9_\-./~%]+?\.(?:js|css|woff2)|\/illustrations\/icons\/[a-z0-9-]+\.(?:svg|png))/g;
     var match;
     while ((match = pattern.exec(html))) found[match[0]] = true;
     return Object.keys(found).sort();
@@ -171,6 +180,7 @@
 
   scope.TohyeeSw = {
     OFFLINE_PAGES: OFFLINE_PAGES,
+    FARM_ICON_URLS: FARM_ICON_URLS,
     PAGE_NAMES: PAGE_NAMES,
     STATIC_CACHE: STATIC_CACHE,
     OFFLINE_SESSION_DAYS: OFFLINE_SESSION_DAYS,

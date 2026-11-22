@@ -4,14 +4,14 @@ import type { IllustratedIconName } from "./illustrated-icon";
 // decorative artwork; navigation visibility/permissions still come from navigation.ts.
 const ROUTES: Array<[string, IllustratedIconName]> = [
   ["/operations/farm/effluent", "effluent"], ["/operations/farm/safety", "safety"],
-  ["/operations/farm/map", "maps"], ["/operations/farm/tractor", "location"],
-  ["/operations/farm/offline", "offline"], ["/operations/farm/security", "camera"], ["/operations/farm/log", "photo"], ["/operations/farm/chat", "chat"],
-  ["/operations/farm/mobs", "livestock"], ["/operations/farm/medicines", "flask"], ["/operations/farm/animals", "scales"], ["/operations/farm/timeline", "clock"],
+  ["/operations/farm/map", "maps"], ["/operations/farm/tractor", "tractor"],
+  ["/operations/farm/offline", "offline"], ["/operations/farm/security", "camera"], ["/operations/farm/log", "log"], ["/operations/farm/chat", "chat"],
+  ["/operations/farm/mobs", "livestock"], ["/operations/farm/medicines", "medicines"], ["/operations/farm/animals", "animal-tag"], ["/operations/farm/timeline", "clock"],
   ["/operations/farming/safety", "safety"], ["/operations/farming/calendar", "calendar"], ["/operations/farming/tasks", "checklist"],
   ["/operations/farming/notebook", "documents"], ["/operations/farming/compare", "analytics"],
   ["/operations/farming/benchmarks", "analytics"], ["/operations/farming/import", "maps"],
-  ["/operations/farming/soil", "flask"], ["/operations/farming/co-op-shares", "coins"], ["/operations/farming/fuel-refund", "quad"], ["/operations/farming/apps", "apps"],
-  ["/operations/farming/pasture", "farm"], ["/operations/farming/rainfall", "effluent"], ["/operations/farm/weather", "weather"], ["/operations/farming/fertiliser", "farm"],
+  ["/operations/farming/soil", "soil-test"], ["/operations/farming/co-op-shares", "coins"], ["/operations/farming/fuel-refund", "quad"], ["/operations/farming/apps", "apps"],
+  ["/operations/farming/pasture", "pasture"], ["/operations/farming/rainfall", "rainfall"], ["/operations/farm/weather", "weather"], ["/operations/farming/fertiliser", "fertiliser"],
   // Farms and paddocks is drawn as a map; every other farming page is named above.
   ["/operations/farming", "maps"], ["/operations/farm", "farm"],
   ["/operations/livestock/account-sales", "sales"], ["/operations/livestock/valuation", "price"],

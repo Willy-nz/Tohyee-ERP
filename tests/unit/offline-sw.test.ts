@@ -137,6 +137,35 @@ function pretendBrowser() {
 
 const signedIn = (id: string) => ({ status: 200, body: { user: { id, email: `${id}@example.com` }, organisations: [] } });
 
+describe("the farm illustrations in offline pages", () => {
+  it("recognises and caches local SVG icons beside the built application files", () => {
+    const sandbox: { self: { TohyeeSw?: { isStaticAsset: (path: string) => boolean; assetUrlsFromHtml: (html: string) => string[] } } } = { self: {} };
+    vm.runInNewContext(code("sw-rules.js"), sandbox);
+    const rules = sandbox.self.TohyeeSw!;
+    expect(rules.isStaticAsset("/illustrations/icons/mob-in.svg")).toBe(true);
+    expect(rules.isStaticAsset("/illustrations/icons/rain-gauge.svg")).toBe(true);
+    expect(rules.isStaticAsset("/illustrations/icons/mob-in.png")).toBe(true);
+    expect(rules.isStaticAsset("/illustrations/icons/rain-gauge.png")).toBe(true);
+    expect(rules.isStaticAsset("/illustrations/icon-review.html")).toBe(false);
+    expect(rules.assetUrlsFromHtml('<img src="/illustrations/icons/mob-in.png"><img src="/illustrations/icons/mob-in.png"><script src="/_next/static/chunks/test.js"></script>'))
+      .toEqual(["/_next/static/chunks/test.js", "/illustrations/icons/mob-in.png"]);
+  });
+});
+
+describe("the farm pictures are kept for offline", () => {
+  it("keeps every farm picture the screens draw, and each one is a file", () => {
+    const sandbox: { self: { TohyeeSw?: { FARM_ICON_URLS: string[] } } } = { self: {} };
+    vm.runInNewContext(code("sw-rules.js"), sandbox);
+    const kept = [...sandbox.self.TohyeeSw!.FARM_ICON_URLS].sort();
+    const component = fs.readFileSync(path.join(import.meta.dirname, "../../src/components/illustrated-icon.tsx"), "utf8");
+    const list = component.slice(component.indexOf("const FARM_ICON_NAMES = ["), component.indexOf("] as const;"));
+    const drawn = [...list.matchAll(/"([a-z-]+)"/g)].map((match) => `/illustrations/icons/${match[1]}.png`).sort();
+    expect(drawn.length).toBe(35);
+    expect(kept).toEqual(drawn);
+    for (const url of kept) expect(fs.existsSync(path.join(import.meta.dirname, "../../public", url)), url).toBe(true);
+  });
+});
+
 describe("the farm sections open with no connection", () => {
   it("lists the same screens in the worker and the page", () => {
     const sandbox: { self: { TohyeeSw?: { OFFLINE_PAGES: string[] } } } = { self: {} };
