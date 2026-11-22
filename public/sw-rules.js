@@ -102,7 +102,7 @@
   /** The built files a page loads, so they're kept with it. */
   function assetUrlsFromHtml(html) {
     var found = {};
-    var pattern = /(?:\/_next\/static\/[A-Za-z0-9_\-./~%]+?\.(?:js|css|woff2)|\/illustrations\/icons\/[a-z0-9-]+\.svg)/g;
+    var pattern = /(?:\/_next\/static\/[A-Za-z0-9_\-./~%]+?\.(?:js|css|woff2)|\/illustrations\/icons\/[a-z0-9-]+\.(?:svg|png))/g;
     var match;
     while ((match = pattern.exec(html))) found[match[0]] = true;
     return Object.keys(found).sort();
