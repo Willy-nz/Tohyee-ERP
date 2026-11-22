@@ -4,15 +4,14 @@ This folder contains the **35 illustrated farm icons** selected for Tohyee's Far
 
 ## Where they are used
 
-- `public/illustrations/icons/<name>.png` — 512 × 512 RGBA PNG files used by the Farm UI. These replace the original 96 × 96 versions without changing icon names or the existing rendering component.
+- `public/illustrations/icons/<name>.png` — 192 × 192 RGBA PNG files used by the Farm UI, resized from the 1024 × 1024 copies below. The screens show them at 48px at most, so 192px is sharp on any phone, and all 35 come to about 1.5 MB to fetch and keep offline (512px was 6 MB). To remake one: `convert masters-1024/<name>.png -filter Lanczos -resize 192x192 -strip <name>.png`.
 - `design-assets/farm-icons/masters-1024/<name>.png` — corresponding 1024 × 1024 RGBA PNG copies for larger display/export.
-- The earlier `public/illustrations/icons/<name>.svg` files are **not** the artwork used in the Farm UI and have not been replaced in this change.
 
 ## Provenance and limitations
 
 The images were cropped from five **image-generated, transparent icon sheets** approved in the Tohyee design conversation. Every crop was checked together in a 35-icon contact sheet. Artwork is centred with transparent padding and no baked-in captions or cards.
 
-The original illustrated subjects measure roughly **258–594 source pixels** across, depending on the icon and sheet. **Both 512px and 1024px exports have been resampled** from those source images. The 1024px assets are larger working files, **not independently generated native-1024 detail** and not vector SVGs. Avoid claiming they contain 1024 pixels of independently drawn detail; future truly native high-resolution artwork would need fresh individual renders or carefully verified vector tracing.
+The original illustrated subjects measure roughly **258–594 source pixels** across, depending on the icon and sheet. **Both the 192px and 1024px files have been resampled** from those source images. The 1024px assets are larger working files, **not independently generated native-1024 detail** and not vector SVGs. Avoid claiming they contain 1024 pixels of independently drawn detail; future truly native high-resolution artwork would need fresh individual renders or carefully verified vector tracing.
 
 The illustrations use the polished farm design language: dark-teal outlines and soft yellow, blue, green and cream fills. They are generic illustrations, not photos or specific medicines.
 

@@ -28,12 +28,14 @@ function pngDimensionsAndType(filename: string) {
   return { width: header.readUInt32BE(16), height: header.readUInt32BE(20), colourType: header[25] };
 }
 
+// The app's copies are 192px: four times the largest size they're shown at (48px), and about 1.5 MB for all 35
+// where 512px was 6 MB for a phone to fetch and keep offline. The 1024px working copies are what they're made from.
 describe("farm illustration export files", () => {
   it("has 35 corresponding transparent RGBA assets at both export sizes", () => {
     expect(ICON_NAMES).toHaveLength(35);
     for (const name of ICON_NAMES) {
       expect(pngDimensionsAndType(iconFile("public/illustrations/icons", name))).toEqual({
-        width: 512, height: 512, colourType: 6,
+        width: 192, height: 192, colourType: 6,
       });
       expect(pngDimensionsAndType(iconFile("design-assets/farm-icons/masters-1024", name))).toEqual({
         width: 1024, height: 1024, colourType: 6,
