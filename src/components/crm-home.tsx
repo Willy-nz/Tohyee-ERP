@@ -5,6 +5,7 @@ import type { ReactNode } from "react";
 import { useApiData } from "@/components/hooks";
 import { DashboardCardChooser, PageDashboardFrame, useDashboardPreferences } from "@/components/page-dashboard";
 import { Badge, Card, Empty, Notice, ui } from "@/components/ui";
+import dashboardStyles from "./crm-dashboard.module.css";
 import { useWorkspace } from "@/components/workspace";
 import type { CurrencyAmount } from "@/lib/crm/dashboard";
 import type { SalesHome, SalesHomeDeal } from "@/lib/crm/sales-home";
@@ -54,7 +55,10 @@ function PipelineCard({ data }: { data: SalesHome }) {
             <tbody>
               {pipeline.stages.map((stage) => (
                 <tr key={stage.stage}>
-                  <td><Link href="/crm/pipeline">{stage.stageName}</Link></td>
+                  <td className={dashboardStyles.stageCell}>
+                    <span className={dashboardStyles.stageBar} style={{ width: `${Math.round((stage.count / Math.max(1, ...pipeline.stages.map((entry) => entry.count))) * 120)}px` }} aria-hidden="true" />
+                    <Link href="/crm/pipeline">{stage.stageName}</Link>
+                  </td>
                   <td className={ui.num}>{stage.count}</td>
                   <td className={ui.num}>{formatAmounts(stage.amounts, data.baseCurrency)}</td>
                   <td className={ui.num}>{stage.oldestDays === null ? "" : `${stage.oldestDays} ${stage.oldestDays === 1 ? "day" : "days"}`}</td>
