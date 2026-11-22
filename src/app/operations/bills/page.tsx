@@ -7,6 +7,7 @@ import { BillStatusBadge } from "@/components/bills/bill-editor";
 import { Money, RequireOrganisation, OrganisationActions } from "@/components/books";
 import { CustomValueCell, listColumns, useCustomFields } from "@/components/custom-fields";
 import { useApiData } from "@/components/hooks";
+import { ListSearch } from "@/components/list-search";
 import { PaidStatusBadge } from "@/components/invoices/invoice-editor";
 import { Button, Empty, Notice, Page, PageHeader, ui } from "@/components/ui";
 import type { BillStatus, BillSummary } from "@/lib/bills/service";
@@ -25,10 +26,10 @@ const FILTERS: Filter[] = [
   { slug: "voided", label: "Voided", status: "voided", awaitingPayment: false, empty: "No voided bills." },
 ];
 
-function BillList({ organisationId, filter }: { organisationId: string; filter: Filter }) {
+function BillList({ organisationId, filter, search }: { organisationId: string; filter: Filter; search: string }) {
   const { status } = filter;
   const awaitingPayment = filter.awaitingPayment ? "true" : null;
-  const list = useApiData<BillPage>("/api/bills", { organisationId, status, awaitingPayment });
+  const list = useApiData<BillPage>("/api/bills", { organisationId, status, awaitingPayment, search: search || null });
   const columns = listColumns(useCustomFields(organisationId).data, "document", ["bill"]);
   const [more, setMore] = useState<BillPage | null>(null);
   const [moreError, setMoreError] = useState<string | null>(null);
@@ -40,7 +41,7 @@ function BillList({ organisationId, filter }: { organisationId: string; filter: 
     if (!nextBeforeId) return;
     try {
       const page = await api<BillPage>("/api/bills", {
-        query: { organisationId, status, awaitingPayment, beforeId: nextBeforeId },
+        query: { organisationId, status, awaitingPayment, search: search || null, beforeId: nextBeforeId },
       });
       setMore((current) => ({ bills: [...(current?.bills ?? []), ...page.bills], nextBeforeId: page.nextBeforeId }));
     } catch (caught) {
@@ -55,7 +56,7 @@ function BillList({ organisationId, filter }: { organisationId: string; filter: 
     return <p className={ui.muted}>Loading…</p>;
   }
   if (bills.length === 0) {
-    return <Empty>{filter.empty}</Empty>;
+    return <Empty>{search ? `No bills match “${search}”.` : filter.empty}</Empty>;
   }
   return (
     <>
@@ -118,6 +119,7 @@ function Bills({ organisationId }: { organisationId: string }) {
   const params = useSearchParams();
   // The list shown is in the address (?show=), so the menus can open "Awaiting payment".
   const filter = FILTERS.find((entry) => entry.slug === params.get("show")) ?? FILTERS[0];
+  const [search, setSearch] = useState("");
   return (
     <div className={ui.listSection}>
       <div className={ui.tabs} role="tablist" aria-label="Bill status">
@@ -134,7 +136,8 @@ function Bills({ organisationId }: { organisationId: string }) {
           </button>
         ))}
       </div>
-      <BillList key={filter.label} organisationId={organisationId} filter={filter} />
+      <ListSearch label="Search bills" placeholder="Supplier or their invoice number" onSearch={setSearch} />
+      <BillList key={`${filter.label}:${search}`} organisationId={organisationId} filter={filter} search={search} />
     </div>
   );
 }

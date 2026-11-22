@@ -21,6 +21,7 @@ import { ReconcilePanel } from "@/components/bank/reconcile-panel";
 import { Money, RequireOrganisation } from "@/components/books";
 import { useApiData } from "@/components/hooks";
 import { Badge, Card, Notice, Page, PageHeader, Stat, ui } from "@/components/ui";
+import { MoreMenu } from "@/components/more-menu";
 import { useWorkspace } from "@/components/workspace";
 import type { BankAccount } from "@/lib/bank/accounts";
 import type { UsageAccount } from "@/lib/bank/mixed-use";
@@ -29,6 +30,8 @@ import { formatDate, formatDateTime } from "@/lib/format";
 
 const TABS = ["reconcile", "proposals", "lines", "import", "feed", "transactions", "batches"] as const;
 type Tab = (typeof TABS)[number];
+/** Shown as tabs all the time. */
+const EVERYDAY_TABS: readonly Tab[] = ["reconcile", "lines", "transactions"];
 
 function BankAccountView({ organisationId, accountId }: { organisationId: string; accountId: string }) {
   const detail = useApiData<{ bankAccount: BankAccount }>(`/api/bank-accounts/${accountId}`, { organisationId });
@@ -162,7 +165,8 @@ function BankAccountView({ organisationId, accountId }: { organisationId: string
       ) : null}
       <Card>
         <div className={ui.tabs} role="tablist" aria-label="Bank account">
-          {TABS.filter((entry) => !(personal && entry === "proposals")).map((entry) => (
+          {/* The everyday three, plus whichever of the others is open; the rest are under More. */}
+          {TABS.filter((entry) => EVERYDAY_TABS.includes(entry) || entry === tab).map((entry) => (
             <button
               key={entry}
               type="button"
@@ -174,6 +178,11 @@ function BankAccountView({ organisationId, accountId }: { organisationId: string
               {labels[entry]}
             </button>
           ))}
+          <MoreMenu
+            text="More"
+            label="More for this bank account"
+            items={TABS.filter((entry) => !EVERYDAY_TABS.includes(entry) && entry !== tab && !(personal && entry === "proposals")).map((entry) => ({ label: labels[entry], onSelect: () => setTab(entry) }))}
+          />
         </div>
         {tab === "reconcile" && personal ? (
           <MixedUsePanel organisationId={organisationId} accountId={account.id} canReview={can("bookkeeper")} onChanged={reload} />

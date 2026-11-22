@@ -13,6 +13,7 @@ import { fillLinesFromItems, isBlank, LINE_ITEM_COLUMNS, LINE_ITEM_JOINS, lineFo
 import { parseIsoDate } from "@/lib/dates";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
+import { listSearchPattern } from "@/lib/lists/search";
 import { assertSameRequest, requestHash } from "@/lib/idempotency";
 import {
   AMOUNTS_MODES,
@@ -1036,12 +1037,13 @@ function assertDraft(invoice: Invoice, action: "edited" | "deleted"): void {
  */
 export async function listInvoices(
   tx: OrgTx,
-  filters: { status?: unknown; awaitingPayment?: unknown; contactId?: unknown; beforeId?: unknown; limit?: unknown } = {},
+  filters: { status?: unknown; awaitingPayment?: unknown; contactId?: unknown; search?: unknown; beforeId?: unknown; limit?: unknown } = {},
 ): Promise<{ invoices: InvoiceSummary[]; nextBeforeId: string | null }> {
   const status =
     filters.status == null || filters.status === "" ? null : requireOneOf(filters.status, "status", INVOICE_STATUSES);
   const awaitingPayment = optionalBoolean(filters.awaitingPayment, "awaitingPayment") ?? false;
   const contactId = optionalId(filters.contactId, "contactId");
+  const search = listSearchPattern(filters.search);
   const beforeId = optionalId(filters.beforeId, "beforeId");
   const limitRaw = Number(filters.limit ?? 50);
   const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 200 ? limitRaw : 50;
@@ -1050,9 +1052,10 @@ export async function listInvoices(
       where ($1::text is null or i.status = $1) and ($2::bigint is null or i.id < $2)
         and (not $3::boolean or (i.status = 'approved' and paid.amount_paid + credited.amount_credited < i.total))
         and ($4::bigint is null or i.contact_id = $4)
+        and ($5::text is null or i.invoice_number ilike $5 or c.name ilike $5 or i.reference ilike $5)
       order by i.id desc
       limit ${limit + 1}`,
-    [status, beforeId, awaitingPayment, contactId],
+    [status, beforeId, awaitingPayment, contactId, search],
   );
   const rows = result.rows.slice(0, limit);
   return {

@@ -977,6 +977,17 @@ describeWithDatabase("bills", () => {
     const next = await asUser(viewer, (tx) => listBills(tx, { limit: "2", beforeId: page.nextBeforeId }));
     expect(next.bills.map((entry) => entry.id)).toEqual(all.bills.slice(2, 4).map((entry) => entry.id));
     await expect(asUser(viewer, (tx) => listBills(tx, { status: "paid" }))).rejects.toThrow(/status must be one of/);
+    // The search box: text anywhere in the supplier's invoice number or name, any case; % and _ are just characters.
+    const wanted = all.bills.find((entry) => entry.supplierInvoiceNumber)!;
+    const number = wanted.supplierInvoiceNumber!.toLowerCase();
+    const byNumber = await asUser(viewer, (tx) => listBills(tx, { search: ` ${number} `, limit: "200" }));
+    expect(byNumber.bills.map((entry) => entry.id)).toContain(wanted.id);
+    expect(byNumber.bills.every((entry) => (entry.supplierInvoiceNumber ?? "").toLowerCase().includes(number) || entry.contactName.toLowerCase().includes(number))).toBe(true);
+    const byName = await asUser(viewer, (tx) => listBills(tx, { search: wanted.contactName.slice(0, 4).toUpperCase(), limit: "200" }));
+    expect(byName.bills.map((entry) => entry.id)).toContain(wanted.id);
+    expect((await asUser(viewer, (tx) => listBills(tx, { search: "%" }))).bills).toEqual([]);
+    expect((await asUser(viewer, (tx) => listBills(tx, { search: "  " }))).bills.length).toBe(Math.min(50, all.bills.length));
+    await expect(asUser(viewer, (tx) => listBills(tx, { search: "x".repeat(101) }))).rejects.toThrow(/shorter/);
   });
 
   it("over HTTP: viewers can read; bookkeepers can do everything else; non-members get 404", async () => {
