@@ -7,7 +7,7 @@
   background: #fffdf7;
   vertical-align: middle;
 }
-.icon svg { display: block; width: 100%; height: 100%; }
+.icon svg, .icon img { display: block; width: 100%; height: 100%; object-fit: contain; }
 @media (forced-colors: active) {
   .icon { background: Canvas; }
   .icon svg g { stroke: CanvasText; }
