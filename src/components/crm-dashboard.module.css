@@ -1,0 +1,14 @@
+/* A stage's share of the open deals, drawn beside its name. */
+.stageBar {
+  display: inline-block;
+  height: 10px;
+  min-width: 4px;
+  margin-right: 10px;
+  border-radius: 5px;
+  background: var(--chart-1, var(--accent));
+  vertical-align: middle;
+}
+
+.stageCell {
+  white-space: nowrap;
+}

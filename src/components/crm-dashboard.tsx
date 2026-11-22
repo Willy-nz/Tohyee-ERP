@@ -4,11 +4,14 @@ import Link from "next/link";
 import { useState } from "react";
 import { amountIn, useBaseCurrency } from "@/components/crm";
 import { useApiData } from "@/components/hooks";
-import { Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
+import { InfoTip } from "@/components/info-tip";
+import { Button, Card, Empty, Field, Notice, Stat, ui } from "@/components/ui";
 import type { CurrencyAmount, Dashboard, DashboardDeal } from "@/lib/crm/dashboard";
 import type { ForecastPeriodKind } from "@/lib/crm/forecast-figures";
 import { LEAD_SOURCE_LABELS } from "@/lib/crm/lead-types";
 import { formatDate, formatMoney } from "@/lib/format";
+import { add, dec, toFixedString } from "@/lib/money/decimal";
+import styles from "./crm-dashboard.module.css";
 
 type Drill = { title: string; deals: DashboardDeal[] };
 
@@ -35,11 +38,31 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
         {value}
       </button>
     );
+  // The few figures up top, from what the tables below already hold.
+  const openDeals = d ? d.ageing.reduce((sum, row) => sum + row.count, 0) : 0;
+  const mostInStage = Math.max(1, ...(d?.ageing.map((row) => row.count) ?? []));
+  const openAmounts: CurrencyAmount[] = [];
+  for (const entry of d?.ageing.flatMap((row) => row.amounts) ?? []) {
+    const same = openAmounts.find((total) => total.currencyCode === entry.currencyCode);
+    if (same) same.amount = toFixedString(add(dec(same.amount), dec(entry.amount)), 2);
+    else openAmounts.push({ ...entry });
+  }
+  const latest = d?.periods.at(-1);
+  const latestWinLoss = d?.winLoss.at(-1);
+  const noLeads = d ? d.leads.every((row) => row.added === 0 && row.converted === 0) : false;
+  const noneClosed = d ? d.winLoss.every((row) => row.won === 0 && row.lost === 0) : false;
   const inPeriod = (start: string, end: string, deal: DashboardDeal) => deal.closedOn !== null && deal.closedOn >= start && deal.closedOn <= end;
   return (
     <>
       <Card
-        description="Worked out from the CRM's records each time. Amounts exclude GST and are never added across currencies. A deal's closed date is the day it moved to Closed won or lost."
+        description={
+          <>
+            Amounts exclude GST.{" "}
+            <InfoTip label="How these are worked out">
+              Worked out from the CRM&apos;s records each time. Amounts are never added across currencies. A deal&apos;s closed date is the day it moved to Closed won or lost.
+            </InfoTip>
+          </>
+        }
       >
         <div className={ui.grid3}>
           <Field label="By">
@@ -59,7 +82,45 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
         <p className={ui.muted}>Loading…</p>
       ) : (
         <>
+          <div className={ui.statRow}>
+            <Stat label="Open deals" value={openDeals} />
+            <Stat label="Open amount" value={amounts(openAmounts)} />
+            <Stat label={`Won in ${latest?.label ?? "this period"}`} value={latestWinLoss ? latestWinLoss.won : "—"} />
+            <Stat label="Win rate" value={latestWinLoss?.winRate == null ? "—" : `${latestWinLoss.winRate}%`} />
+          </div>
+          <Card title="Open deals by stage">
+            {d.ageing.length === 0 ? (
+              <Empty>No open deals.</Empty>
+            ) : (
+              <table className={ui.table}>
+                <thead>
+                  <tr>
+                    <th>Stage</th>
+                    <th className={ui.num}>Deals</th>
+                    <th className={ui.num}>Amount</th>
+                    <th className={ui.num}>Average days in stage</th>
+                    <th className={ui.num}>Longest</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.ageing.map((row) => (
+                    <tr key={row.stage}>
+                      <td className={styles.stageCell}>
+                        <span className={styles.stageBar} style={{ width: `${Math.round((row.count / mostInStage) * 120)}px` }} aria-hidden="true" />
+                        {row.stageName}
+                      </td>
+                      <td className={ui.num}>{count(row.count, `Open in ${row.stageName}`, () => d.deals.filter((deal) => deal.stageType === "open" && deal.stageName === row.stageName))}</td>
+                      <td className={ui.num}>{amounts(row.amounts)}</td>
+                      <td className={ui.num}>{row.averageDays ?? "—"}</td>
+                      <td className={ui.num}>{row.oldestDays ?? "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            )}
+          </Card>
           <Card title="Leads">
+            {noLeads ? <Empty>No leads in these periods.</Empty> : (
             <table className={ui.table}>
               <thead>
                 <tr>
@@ -80,6 +141,7 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
                 ))}
               </tbody>
             </table>
+            )}
             {d.leadSources.length > 0 ? (
               <p className={ui.muted}>
                 By how they came in:{" "}
@@ -87,7 +149,13 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
               </p>
             ) : null}
           </Card>
-          <Card title="Win rate and sales cycle" description="Deals closed in each period: won ÷ (won + lost). The sales cycle is the days from a deal being added to it being won.">
+          <Card
+            title="Win rate and sales cycle"
+            description={
+              <InfoTip label="How these are worked out">Deals closed in each period: won ÷ (won + lost). The sales cycle is the days from a deal being added to it being won.</InfoTip>
+            }
+          >
+            {noneClosed ? <Empty>No deals closed in these periods.</Empty> : (
             <table className={ui.table}>
               <thead>
                 <tr>
@@ -118,33 +186,6 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
                 })}
               </tbody>
             </table>
-          </Card>
-          <Card title="Open deals by stage">
-            {d.ageing.length === 0 ? (
-              <Empty>No open deals.</Empty>
-            ) : (
-              <table className={ui.table}>
-                <thead>
-                  <tr>
-                    <th>Stage</th>
-                    <th className={ui.num}>Deals</th>
-                    <th className={ui.num}>Amount</th>
-                    <th className={ui.num}>Average days in stage</th>
-                    <th className={ui.num}>Longest</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.ageing.map((row) => (
-                    <tr key={row.stage}>
-                      <td>{row.stageName}</td>
-                      <td className={ui.num}>{count(row.count, `Open in ${row.stageName}`, () => d.deals.filter((deal) => deal.stageType === "open" && deal.stageName === row.stageName))}</td>
-                      <td className={ui.num}>{amounts(row.amounts)}</td>
-                      <td className={ui.num}>{row.averageDays ?? "—"}</td>
-                      <td className={ui.num}>{row.oldestDays ?? "—"}</td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
             )}
           </Card>
           <Card title="Activity">
@@ -179,7 +220,7 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
               </table>
             )}
           </Card>
-          <Card title="Quota attainment" description={`As the forecast works it out: Closed in ${baseCurrency} by expected close date ÷ quota.`}>
+          <Card title="Quota attainment" description={<InfoTip label="How this is worked out">As the forecast works it out: Closed in {baseCurrency} by expected close date ÷ quota.</InfoTip>}>
             {d.quotas.length === 0 ? (
               <Empty>
                 No quotas set. Admins set them on <Link href="/crm/forecasts">Forecasts</Link>.
