@@ -294,12 +294,24 @@ export function FarmToday({ organisationId, farm }: FarmContext) {
   );
 }
 
+/** A drawing for each kind of calendar job, beside its words. */
+const JOB_PICTURES: Record<CalendarItem["kind"], IllustratedIconName> = {
+  animal_health: "vet",
+  delivery: "delivery",
+  stock_movement: "stock-truck",
+  contractor: "contractor",
+  deadline: "deadline",
+  meeting: "meeting",
+  other: "calendar",
+};
+
 function JobList({ items, today }: { items: CalendarItem[]; today: string }) {
   return (
     <FarmRowList
       label="Jobs"
       rows={items.map((item) => ({
         key: item.key,
+        picture: JOB_PICTURES[item.kind],
         title: item.date && item.date !== today ? shortDate(item.date, today) : (item.startTime ?? "Today"),
         parts: [item.title, CALENDAR_KIND_LABELS[item.kind], item.tentative ? "to confirm" : null],
       }))}
