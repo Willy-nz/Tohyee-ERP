@@ -588,23 +588,23 @@ type MoreLink = { icon?: IllustratedIconName; href: string; label: string; note?
 /** The Farm menu's big buttons: the farm work that isn't one of the five tabs, Effluent first. */
 const FARM_WORK: MoreLink[] = [
   { href: "/operations/farm/effluent", icon: "effluent", label: "Effluent", note: "Irrigation log, ponds, checks, incidents, council pack", staff: true },
-  { href: "/operations/farm/tractor", icon: "location", label: "Tractor mode", note: "Spreading, spraying and mowing from phone GPS", staff: true },
+  { href: "/operations/farm/tractor", icon: "tractor", label: "Tractor mode", note: "Spreading, spraying and mowing from phone GPS", staff: true },
   { href: "/operations/farm/security", icon: "camera", label: "Security", note: "Camera photos and clips", staff: true },
   { href: "/operations/farm/mobs", icon: "livestock", label: "Mobs", note: "Moves, weights, sales and stocking rate", staff: true },
-  { href: "/operations/farm/medicines", icon: "flask", label: "Medicines", note: "What's on hand, running low and expiring", staff: true },
-  { href: "/operations/farm/animals", icon: "scales", label: "Animals", note: "Tags, weights, body condition and quick entry", staff: true },
-  { href: "/operations/farming/pasture", icon: "farm", label: "Pasture and feed", note: "Readings, grazings and feed", staff: true },
-  { href: "/operations/farming/rainfall", icon: "effluent", label: "Rainfall", note: "Rain gauges, by month and season", staff: true },
+  { href: "/operations/farm/medicines", icon: "medicines", label: "Medicines", note: "What's on hand, running low and expiring", staff: true },
+  { href: "/operations/farm/animals", icon: "animal-tag", label: "Animals", note: "Tags, weights, body condition and quick entry", staff: true },
+  { href: "/operations/farming/pasture", icon: "pasture", label: "Pasture and feed", note: "Readings, grazings and feed", staff: true },
+  { href: "/operations/farming/rainfall", icon: "rainfall", label: "Rainfall", note: "Rain gauges, by month and season", staff: true },
   { href: "/operations/farm/weather", icon: "weather", label: "Weather", note: "MetService forecast for the next 7 days", staff: true },
   { href: "/operations/farming/calendar", icon: "calendar", label: "Farm calendar", note: "Jobs, due dates and reminders", staff: true },
   { href: "/operations/farming/tasks", icon: "checklist", label: "Tasks", note: "Jobs for the farm team, with reminders", staff: true },
   { href: "/operations/farm/timeline", icon: "clock", label: "Farm timeline", note: "Moves, treatments, sales, weights and sprays", staff: true },
-  { href: "/operations/farming/soil", icon: "flask", label: "Soil tests", staff: true },
+  { href: "/operations/farming/soil", icon: "soil-test", label: "Soil tests", staff: true },
   { href: "/operations/farming", icon: "maps", label: "Farms and paddocks", note: "Areas, boundaries, drawing paddocks", staff: true },
 ];
 
 const DETAILS: MoreLink[] = [
-  { href: "/operations/farming/fertiliser", icon: "farm", label: "Fertiliser plans" },
+  { href: "/operations/farming/fertiliser", icon: "fertiliser", label: "Fertiliser plans" },
   { href: "/operations/farming/notebook", icon: "documents", label: "Farm notebook" },
   { href: "/operations/livestock", icon: "livestock", label: "Livestock" },
   { href: "/operations/farming/compare", icon: "analytics", label: "All farms compared" },
