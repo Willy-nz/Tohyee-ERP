@@ -650,6 +650,15 @@ describeWithDatabase("customer payments", () => {
     expect(awaiting.every((entry) => entry.status === "approved" && entry.paidStatus !== "paid")).toBe(true);
     expect(awaitingIds).toEqual([...awaitingIds].sort((a, b) => Number(b) - Number(a)));
 
+    // The search box: text anywhere in the number, customer or reference, any case, with the other filters.
+    const wanted = all.get(unpaid.id)!;
+    const byNumber = (await asUser(viewer, (tx) => listInvoices(tx, { search: wanted.invoiceNumber!.toLowerCase() }))).invoices;
+    expect(byNumber.map((entry) => entry.id)).toEqual([unpaid.id]);
+    const byCustomer = (await asUser(viewer, (tx) => listInvoices(tx, { search: wanted.contactName.slice(0, 4).toUpperCase(), awaitingPayment: true, limit: 200 }))).invoices;
+    expect(byCustomer.map((entry) => entry.id)).toContain(unpaid.id);
+    expect(byCustomer.map((entry) => entry.id)).not.toContain(paid.id);
+    expect((await asUser(viewer, (tx) => listInvoices(tx, { search: "%_%" }))).invoices).toEqual([]);
+
     // Paged like the full list.
     const page = await asUser(viewer, (tx) => listInvoices(tx, { awaitingPayment: true, limit: 1 }));
     expect(page.invoices.map((entry) => entry.id)).toEqual([awaitingIds[0]]);

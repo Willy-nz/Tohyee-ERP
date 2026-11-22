@@ -14,6 +14,7 @@ export const GET = route(async (request) => {
       status: params.get("status"),
       awaitingPayment: params.get("awaitingPayment"),
       contactId: params.get("contactId"),
+      search: params.get("search"),
       beforeId: params.get("beforeId"),
       limit: params.get("limit"),
     }),

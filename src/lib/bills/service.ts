@@ -15,6 +15,7 @@ import { dueDateFromSupplierTerms } from "@/lib/customers/service";
 import { parseIsoDate } from "@/lib/dates";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
+import { listSearchPattern } from "@/lib/lists/search";
 import { assertSameRequest, requestHash } from "@/lib/idempotency";
 import {
   AMOUNTS_MODES,
@@ -1006,12 +1007,13 @@ function assertDraft(bill: Bill, action: "edited" | "deleted"): void {
  */
 export async function listBills(
   tx: OrgTx,
-  filters: { status?: unknown; awaitingPayment?: unknown; contactId?: unknown; beforeId?: unknown; limit?: unknown } = {},
+  filters: { status?: unknown; awaitingPayment?: unknown; contactId?: unknown; search?: unknown; beforeId?: unknown; limit?: unknown } = {},
 ): Promise<{ bills: BillSummary[]; nextBeforeId: string | null }> {
   const status =
     filters.status == null || filters.status === "" ? null : requireOneOf(filters.status, "status", BILL_STATUSES);
   const awaitingPayment = optionalBoolean(filters.awaitingPayment, "awaitingPayment") ?? false;
   const contactId = optionalId(filters.contactId, "contactId");
+  const search = listSearchPattern(filters.search);
   const beforeId = optionalId(filters.beforeId, "beforeId");
   const limitRaw = Number(filters.limit ?? 50);
   const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 200 ? limitRaw : 50;
@@ -1020,9 +1022,10 @@ export async function listBills(
       where ($1::text is null or b.status = $1) and ($2::bigint is null or b.id < $2)
         and (not $3::boolean or (b.status = 'approved' and paid.amount_paid + credited.amount_credited < b.total))
         and ($4::bigint is null or b.contact_id = $4)
+        and ($5::text is null or b.supplier_invoice_number ilike $5 or c.name ilike $5)
       order by b.id desc
       limit ${limit + 1}`,
-    [status, beforeId, awaitingPayment, contactId],
+    [status, beforeId, awaitingPayment, contactId, search],
   );
   const rows = result.rows.slice(0, limit);
   return {

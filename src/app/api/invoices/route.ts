@@ -4,7 +4,7 @@ import { createInvoice, listInvoices } from "@/lib/invoices/service";
 /**
  * GET: newest first, 50 at a time. Filters: status (draft|approved|voided),
  * awaitingPayment (true: approved invoices with something still due), contactId
- * (one customer's invoices), beforeId (next page), limit (max 200).
+ * (one customer's invoices), search (text in the number, customer or reference), beforeId (next page), limit (max 200).
  */
 export const GET = route(async (request) => {
   const params = searchParams(request);
@@ -13,6 +13,7 @@ export const GET = route(async (request) => {
       status: params.get("status"),
       awaitingPayment: params.get("awaitingPayment"),
       contactId: params.get("contactId"),
+      search: params.get("search"),
       beforeId: params.get("beforeId"),
       limit: params.get("limit"),
     }),

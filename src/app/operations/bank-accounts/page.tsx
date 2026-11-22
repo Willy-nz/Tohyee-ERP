@@ -212,35 +212,36 @@ function BankAccounts({ organisationId }: { organisationId: string }) {
         </label>
       </Card>
       <Card
-        title="Akahu bank feeds"
-        description="This organisation's own Akahu personal app, which brings in its bank and credit card transactions automatically."
+        title="Bank feeds"
+        description="Bank and credit card transactions brought in automatically, through this organisation's own Akahu app."
       >
         <AkahuFeedsCard organisationId={organisationId} onChanged={list.reload} />
       </Card>
-      <Card
-        title="SimpleFIN bank feeds"
-        description="For overseas bank accounts (mostly US banks): this organisation's own SimpleFIN Bridge account brings in their transactions. NZ banks use Akahu."
-      >
-        <SimpleFinSettingsCard organisationId={organisationId} />
-      </Card>
-      <Card
-        title="Stripe"
-        description="This organisation's Stripe balance as a bank account: charges, Stripe's fees, refunds, disputes and payouts come in as statement lines."
-      >
-        <StripeSettingsCard organisationId={organisationId} />
-      </Card>
-      <Card
-        title="PayPal"
-        description="This organisation's PayPal balance as a bank account: payments, PayPal's fees, refunds, chargebacks, conversions and withdrawals come in as statement lines."
-      >
-        <PayPalSettingsCard organisationId={organisationId} />
-      </Card>
-      <Card
-        title="Wise"
-        description="Each currency balance in this organisation's Wise business account as a bank account: money received, card payments, transfers, conversions and Wise's fees come in as statement lines."
-      >
-        <WiseSettingsCard organisationId={organisationId} />
-      </Card>
+      {/* The feeds most organisations never use are folded away, one line each. */}
+      <details className={ui.collapsible}>
+        <summary>SimpleFIN: overseas bank accounts</summary>
+        <Card description="For overseas bank accounts (mostly US banks), through this organisation's own SimpleFIN Bridge account. NZ banks use Akahu.">
+          <SimpleFinSettingsCard organisationId={organisationId} />
+        </Card>
+      </details>
+      <details className={ui.collapsible}>
+        <summary>Stripe</summary>
+        <Card description="This organisation's Stripe balance as a bank account: charges, fees, refunds, disputes and payouts come in as statement lines.">
+          <StripeSettingsCard organisationId={organisationId} />
+        </Card>
+      </details>
+      <details className={ui.collapsible}>
+        <summary>PayPal</summary>
+        <Card description="This organisation's PayPal balance as a bank account: payments, fees, refunds, chargebacks, conversions and withdrawals come in as statement lines.">
+          <PayPalSettingsCard organisationId={organisationId} />
+        </Card>
+      </details>
+      <details className={ui.collapsible}>
+        <summary>Wise</summary>
+        <Card description="Each currency balance in this organisation's Wise business account as a bank account, with its movements as statement lines.">
+          <WiseSettingsCard organisationId={organisationId} />
+        </Card>
+      </details>
     </>
   );
 }

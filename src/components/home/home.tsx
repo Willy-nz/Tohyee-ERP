@@ -13,7 +13,7 @@ import { useWorkspace } from "@/components/workspace";
 import { Notice, ui } from "@/components/ui";
 import type { BankAccount } from "@/lib/bank/accounts";
 import { addDays, monthLabel } from "@/lib/financial-year";
-import { formatDate, formatDateTime } from "@/lib/format";
+import { formatDate } from "@/lib/format";
 import { parseAnalyticsTileReference } from "@/lib/dashboard/analytics-tile-reference";
 import { defaultsNote } from "@/lib/dashboard/defaults";
 import { jobsAtAGlance } from "@/lib/dashboard/home-cards";
@@ -262,24 +262,19 @@ export function BankHealth({ organisationId, currency }: { organisationId: strin
   return (
     <section className={styles.tile} aria-label="Bank accounts">
       <div className={styles.tileTitle}><h2>Bank accounts</h2><Link href="/operations/bank-accounts">View all</Link></div>
-      <p className={ui.muted}>Current ledger balances · {currency}</p>
+      <p className={ui.muted}>Balances in Tohyee · {currency}</p>
       {banks.error ? <Notice tone="error">{banks.error}</Notice> : !list ? <p role="status">Loading bank accounts…</p> : list.total === 0 ? <p className={ui.muted}>No bank accounts yet.</p> : (
         <div className={styles.banks}>
           {list.shown.map((account) => {
             const feed = feedOf(account);
             const feeds = feed ? [feed] : [];
             const failed = feeds.some((feed) => feed.lastSyncStatus === "failed");
-            const connected = feeds.some((feed) => feed.lastSyncStatus === "ok");
-            const status = failed ? "Needs reconnecting" : connected ? "Connected" : feeds.length ? "Awaiting first sync" : "Manual import";
-            // A failed attempt is not a successful update timestamp.
-            const updated = feeds.filter((feed) => feed.lastSyncStatus === "ok" && feed.lastSyncedAt).map((feed) => feed.lastSyncedAt!).sort().at(-1);
+            // The balance and what's left to reconcile lead; the feed is only mentioned when it needs someone.
             return (
               <div key={account.id} className={styles.bank}>
-                <div className={styles.row}><span><Link href="/operations/bank-accounts">{account.name}</Link><small className={styles.activityMeta}>Account {account.code}{account.accountType === "credit_card" ? " · Credit card" : ""}</small></span><span><Money value={account.ledgerBalance} /><small className={styles.activityMeta}>Ledger · {currency}</small></span></div>
-                <p className={failed ? styles.bad : ui.muted}><span aria-hidden="true">{failed ? "⚠" : connected ? "✓" : "↔"}</span> {status}</p>
-                <small className={ui.muted}>{updated ? `Last successful sync ${formatDateTime(updated)}` : "No confirmed successful sync"}</small>
-                {account.statementBalance !== null ? <p className={ui.muted}>Statement · {account.statementCurrency} <Money value={account.statementBalance} />{account.statementBalanceAt ? ` · ${formatDateTime(account.statementBalanceAt)}` : ""}</p> : null}
-                <Link href="/operations/bank-accounts">{account.unreconciledCount ? `Reconcile ${account.unreconciledCount} ${account.unreconciledCount === 1 ? "item" : "items"}` : account.lastLineDate ? "All reconciled" : "No statement yet: import one"}</Link>
+                <div className={styles.row}><span><Link href={`/operations/bank-accounts/${account.id}`}>{account.name}</Link>{account.accountType === "credit_card" ? <small className={styles.activityMeta}>Credit card</small> : null}</span><span><Money value={account.ledgerBalance} /></span></div>
+                {failed ? <p className={styles.bad}><span aria-hidden="true">⚠</span> Bank feed needs reconnecting</p> : null}
+                <Link href={`/operations/bank-accounts/${account.id}`}>{account.unreconciledCount ? `Reconcile ${account.unreconciledCount} ${account.unreconciledCount === 1 ? "item" : "items"}` : account.lastLineDate ? "All reconciled" : "No statement yet: import one"}</Link>
               </div>
             );
           })}

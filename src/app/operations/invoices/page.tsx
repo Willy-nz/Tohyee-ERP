@@ -6,6 +6,7 @@ import { Suspense, useState } from "react";
 import { Money, RequireOrganisation, OrganisationActions } from "@/components/books";
 import { CustomValueCell, listColumns, useCustomFields } from "@/components/custom-fields";
 import { useApiData } from "@/components/hooks";
+import { ListSearch } from "@/components/list-search";
 import { useHomeSummary } from "@/components/home/home";
 import { useSalespeople } from "@/components/salespeople";
 import { InvoiceStatusBadge, PaidStatusBadge } from "@/components/invoices/invoice-editor";
@@ -26,10 +27,10 @@ const FILTERS: Filter[] = [
   { slug: "voided", label: "Voided", status: "voided", awaitingPayment: false, empty: "No voided invoices." },
 ];
 
-function InvoiceList({ organisationId, filter }: { organisationId: string; filter: Filter }) {
+function InvoiceList({ organisationId, filter, search }: { organisationId: string; filter: Filter; search: string }) {
   const { status } = filter;
   const awaitingPayment = filter.awaitingPayment ? "true" : null;
-  const list = useApiData<InvoicePage>("/api/invoices", { organisationId, status, awaitingPayment });
+  const list = useApiData<InvoicePage>("/api/invoices", { organisationId, status, awaitingPayment, search: search || null });
   // The salesperson column shows while advanced features are on (SR1).
   const showSalesperson = useSalespeople(organisationId).data?.advancedFeatures ?? false;
   const columns = listColumns(useCustomFields(organisationId).data, "document", ["invoice"]);
@@ -43,7 +44,7 @@ function InvoiceList({ organisationId, filter }: { organisationId: string; filte
     if (!nextBeforeId) return;
     try {
       const page = await api<InvoicePage>("/api/invoices", {
-        query: { organisationId, status, awaitingPayment, beforeId: nextBeforeId },
+        query: { organisationId, status, awaitingPayment, search: search || null, beforeId: nextBeforeId },
       });
       setMore((current) => ({ invoices: [...(current?.invoices ?? []), ...page.invoices], nextBeforeId: page.nextBeforeId }));
     } catch (caught) {
@@ -58,7 +59,7 @@ function InvoiceList({ organisationId, filter }: { organisationId: string; filte
     return <p className={ui.muted}>Loading…</p>;
   }
   if (invoices.length === 0) {
-    return <Empty>{filter.empty}</Empty>;
+    return <Empty>{search ? `No invoices match “${search}”.` : filter.empty}</Empty>;
   }
   return (
     <>
@@ -125,6 +126,7 @@ function Invoices({ organisationId }: { organisationId: string }) {
   const params = useSearchParams();
   // The list shown is in the address (?show=), so the menus can open "Awaiting payment".
   const filter = FILTERS.find((entry) => entry.slug === params.get("show")) ?? FILTERS[0];
+  const [search, setSearch] = useState("");
   // What customers owe, on the Awaiting payment tab (the old Sales overview's figure).
   const owed = useHomeSummary(organisationId).data?.owedToYou ?? null;
   return (
@@ -149,7 +151,8 @@ function Invoices({ organisationId }: { organisationId: string }) {
           </button>
         ))}
       </div>
-      <InvoiceList key={filter.label} organisationId={organisationId} filter={filter} />
+      <ListSearch label="Search invoices" placeholder="Number, customer or reference" onSearch={setSearch} />
+      <InvoiceList key={`${filter.label}:${search}`} organisationId={organisationId} filter={filter} search={search} />
     </div>
   );
 }
