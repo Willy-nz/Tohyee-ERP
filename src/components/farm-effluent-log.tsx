@@ -1,3 +1,4 @@
+import { IllustratedIcon } from "@/components/illustrated-icon";
 "use client";
 
 import Link from "next/link";
@@ -739,10 +740,12 @@ export function EffluentLogButtons({ organisationId, farm, buttonClass, itemClas
       <h3>Effluent</h3>
       <div className={buttonClass}>
         <Link className={itemClass} href={effluentHref({ farmId: farm.id, screen: "log" })}>
+          <IllustratedIcon name="irrigation" size={48} />
           Irrigation
           <small>Start, shift or stop a run</small>
         </Link>
         <Link className={itemClass} href={effluentHref({ farmId: farm.id, screen: "ponds" })}>
+          <IllustratedIcon name="pond-level" size={48} />
           Pond level
           <small>Read the gauge, or not applied today</small>
         </Link>
