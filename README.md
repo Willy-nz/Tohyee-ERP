@@ -517,9 +517,11 @@ arguments>`. Passwords and tokens are read from `TOHYEE_PASSWORD`,
 showing what you type. Remote access changes take effect when Tohyee next
 starts, because the running server runs the tunnel.
 
-**Releases:** pushing a `v*` tag builds a release bundle and attaches it to a
-GitHub release (`.github/workflows/release-server-bundle.yml`); the tag must
-match the version in `package.json`. Server admins can check for new releases
+**Releases:** merging a pull request that raises the version in
+`package.json` (with its notes in `docs/releases/<version>.md`) makes the
+`v<version>` tag and the GitHub release, then starts the release builds
+(`.github/workflows/release-on-version.yml`). Pushing a `v*` tag by hand
+still works too; the tag must match the version in `package.json`. Server admins can check for new releases
 under **Updates**.
 
 ## Documentation
