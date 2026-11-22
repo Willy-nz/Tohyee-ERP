@@ -1,0 +1,91 @@
+name: Release on version
+
+# Merging a "Release x.y.z" pull request (package.json's version goes up, with
+# docs/releases/x.y.z.md) publishes the release: this makes the v<version>
+# tag and the GitHub release on that commit, with the notes from the docs,
+# then starts the three release builds on the tag (server bundle and Docker
+# images, Windows installer, Android app). A tag made with the workflow's own
+# token doesn't start workflows by itself, so they're started by hand
+# (workflow_dispatch), which it can do.
+#
+# Nothing happens when the version's tag already exists, so pushing a tag by
+# hand still works as before. Run it by hand (Actions › Release on version ›
+# Run workflow, on main) to release the version already on main.
+#
+# It runs none of the repo's code: it only reads package.json and the notes.
+
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "package.json"
+  workflow_dispatch:
+
+permissions:
+  contents: read
+
+concurrency:
+  group: release-on-version
+  cancel-in-progress: false
+
+jobs:
+  release:
+    if: github.ref == 'refs/heads/main'
+    runs-on: ubuntu-latest
+    permissions:
+      contents: write
+      actions: write
+    steps:
+      - name: Checkout
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      - name: Version and tag
+        id: version
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+        run: |
+          version="$(jq -r .version package.json)"
+          if ! printf '%s' "$version" | grep -Eq '^[0-9]+\.[0-9]+\.[0-9]+$'; then
+            echo "package.json's version \"${version}\" isn't x.y.z."
+            exit 1
+          fi
+          tag="v${version}"
+          echo "version=${version}" >> "$GITHUB_OUTPUT"
+          echo "tag=${tag}" >> "$GITHUB_OUTPUT"
+          if gh api "repos/${GH_REPO}/git/ref/tags/${tag}" >/dev/null 2>&1; then
+            echo "::notice title=Already released::${tag} already exists, so there's nothing to do."
+            echo "exists=true" >> "$GITHUB_OUTPUT"
+          else
+            echo "exists=false" >> "$GITHUB_OUTPUT"
+          fi
+
+      - name: Make the tag and the release
+        if: steps.version.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ steps.version.outputs.version }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          notes="docs/releases/${VERSION}.md"
+          if [ ! -f "$notes" ]; then
+            echo "No release notes at ${notes}: add them in the release pull request."
+            exit 1
+          fi
+          gh release create "$TAG" --target "$GITHUB_SHA" \
+            --title "Tohyee ${TAG}" --notes-file "$notes"
+
+      - name: Start the release builds
+        if: steps.version.outputs.exists == 'false'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ steps.version.outputs.tag }}
+        run: |
+          for workflow in release-server-bundle.yml windows-installer.yml android-app.yml; do
+            gh workflow run "$workflow" --ref "$TAG"
+          done

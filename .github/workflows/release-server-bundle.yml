@@ -12,10 +12,14 @@ name: Release server bundle
 # only; the publish job, which runs none of the repo's code, attaches the
 # built files to the release.
 
+# Also run by release-on-version.yml (workflow_dispatch on the new tag),
+# because a tag made by the workflow's own token doesn't start workflows.
+
 on:
   push:
     tags:
       - "v*"
+  workflow_dispatch:
 
 permissions:
   contents: read
@@ -42,6 +46,10 @@ jobs:
 
       - name: Validate tag matches package version
         run: |
+          if [ "${GITHUB_REF_TYPE}" != "tag" ]; then
+            echo "Run this on a v* tag, not a branch."
+            exit 1
+          fi
           expected_tag="v$(node -p "require('./package.json').version")"
           if [ "${GITHUB_REF_NAME}" != "${expected_tag}" ]; then
             echo "Tag ${GITHUB_REF_NAME} does not match package version ${expected_tag}."
