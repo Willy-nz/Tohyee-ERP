@@ -271,8 +271,11 @@ describeWithDatabase("analytics shaped tables", () => {
     await inOrganisation(ORG, actor(), (tx) =>
       tx.query("update analytics_load_runs set started_at = $1 where id = any($2::bigint[])", [tomorrow, scheduled.map((run) => run.id)]),
     );
+    // People who only look at reports don't see how the data is prepared.
+    expect((await shapingRoute.GET(apiRequest(`/api/analytics/shaping?organisationId=${ORG}`, { cookie: viewerCookie }), noContext)).status).toBe(403);
+    expect((await sourcesRoute.GET(apiRequest(`/api/analytics/sources?organisationId=${ORG}`, { cookie: viewerCookie }), noContext)).status).toBe(403);
     const listed = await body(
-      await shapingRoute.GET(apiRequest(`/api/analytics/shaping?organisationId=${ORG}`, { cookie: viewerCookie }), noContext),
+      await shapingRoute.GET(apiRequest(`/api/analytics/shaping?organisationId=${ORG}`, { cookie: ownerCookie }), noContext),
     );
     expect(listed.data.shapes[0].lastLoad).toMatchObject({ status: "ok", trigger: "schedule", shapeId });
     expect(await queryAnalytics(ORG, "select amount::varchar as amount from matched_contacts where email = 'person@example.test'")).toEqual([{ amount: "20.25" }]);

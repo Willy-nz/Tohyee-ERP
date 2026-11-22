@@ -523,10 +523,11 @@ export const CRM_MENUS: Menu[] = (
 /** The Chat app (TCH1): one page, the organisation's chat. */
 export const CHAT_MENUS: Menu[] = [{ label: "Chat", href: "/chat", groups: [], area: ["/chat"] }];
 
+// Where the data comes from and how it's shaped is for whoever keeps the books: people who only look see Reports.
 export const ANALYTICS_MENUS: Menu[] = [
   { label: "Reports", href: "/analytics", area: ["/analytics", "/analytics/dashboards"] },
-  { label: "Data sources", href: "/analytics/sources", area: ["/analytics/sources"], minRole: "viewer" as const },
-  { label: "Prepare data", href: "/analytics/shaping", area: ["/analytics/shaping"], minRole: "viewer" as const },
+  { label: "Data sources", href: "/analytics/sources", area: ["/analytics/sources"], minRole: "bookkeeper" as const },
+  { label: "Prepare data", href: "/analytics/shaping", area: ["/analytics/shaping"], minRole: "bookkeeper" as const },
 ].map((menu) => ({ ...menu, groups: [], module: "analytics" as const }));
 
 /** The AI assistant's page; shown to everyone (the page itself checks what they may do). */

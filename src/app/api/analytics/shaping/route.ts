@@ -3,9 +3,10 @@ import { analyticsMember } from "@/lib/analytics/http";
 import { listShapedTables, createShapedTable, runShapedTableAndDependents } from "@/lib/analytics/shaped-tables";
 import { listTables } from "@/lib/analytics/engine";
 
+/** The prepared tables and what they're made from. Bookkeepers and up: people who only look at reports don't see how the data is shaped. */
 export const GET = route(async (request) => {
-  const { organisation } = await analyticsMember(request, searchParams(request).get("organisationId"), "viewer");
-  const shapes = await withOrganisation(request, organisation.id, "viewer", listShapedTables);
+  const { organisation } = await analyticsMember(request, searchParams(request).get("organisationId"), "bookkeeper");
+  const shapes = await withOrganisation(request, organisation.id, "bookkeeper", listShapedTables);
   const tables = await listTables(organisation.id);
   return json({
     shapes,
