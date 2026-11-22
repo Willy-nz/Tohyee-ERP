@@ -397,7 +397,12 @@ Server-wide:
   the main server with a secret header made fresh at each start
   (`src/lib/server-admin/`). `/api/admin/*` and the `/server` pages refuse
   anything without it, so they can't be reached over the network or through
-  the Cloudflare Tunnel even with a server admin's session. On Windows the
+  the Cloudflare Tunnel even with a server admin's session. The one exception
+  is Update now (`/api/server-update`, UPD1-UPD6), which a server admin can
+  use from anywhere: it only backs up and leaves a version number for the
+  Windows updater (a SYSTEM scheduled task, `installer/windows/tohyee-updater.ps1`),
+  which installs nothing but GitHub's latest release, checked against its
+  SHA-256. On Windows the
   server settings are a native app (`installer/windows/tray`, .NET Framework
   4.8, which Windows 10 and 11 include): a tray icon that shows whether the
   services are running and a window that signs in as a server admin (with

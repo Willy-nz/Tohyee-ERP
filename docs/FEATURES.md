@@ -1910,6 +1910,11 @@ that something happened.
   server start is recorded (version, previous version, upgrades). Elsewhere
   the server settings show the update and how to install it by hand. Not
   yet tried on a real Windows computer.
+  **Update now in Tohyee** (UPD1-UPD6): a server admin can also update a
+  Windows server from any device (their menu, Update Tohyee), without signing
+  in to the server computer. Tohyee backs everything up, then the Tohyee
+  updater (a scheduled task run as SYSTEM) installs GitHub's latest release
+  after checking its SHA-256. Not yet tried on a real Windows computer.
 - **Server stats** in the Windows server app: CPU, memory,
   requests, people using Tohyee, database connections, disk space and each
   organisation's database size, with graphs of the last 24 hours.

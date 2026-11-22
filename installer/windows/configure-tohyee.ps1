@@ -259,6 +259,8 @@ try {
   <env name="TOHYEE_BACKUP_DIR" value="$(X (Join-Path $DataRoot 'backups'))"/>
   <env name="TOHYEE_LOG_DIR" value="$(X $LogDir)"/>
   <env name="TOHYEE_ANALYTICS_DIR" value="$(X (Join-Path $DataRoot 'analytics'))"/>
+  <env name="TOHYEE_UPDATE_REQUEST_DIR" value="$(X (Join-Path $DataRoot 'update-request'))"/>
+  <env name="TOHYEE_UPDATE_STATUS_DIR" value="$(X (Join-Path $DataRoot 'update-status'))"/>
   <env name="TEMP" value="$(X $TempDir)"/>
   <env name="TMP" value="$(X $TempDir)"/>
 $addressServiceEnv</service>
@@ -290,10 +292,16 @@ $addressServiceEnv</service>
   Invoke-Checked 'icacls.exe' @($InstallDir, '/grant', "$($account):(OI)(CI)RX", '/T', '/C', '/Q')
   Invoke-Checked 'icacls.exe' @($DataRoot, '/grant', "$($account):(RX)", '/Q')
   Invoke-Checked 'icacls.exe' @($ServiceDir, '/grant', "$($account):(OI)(CI)RX", '/T', '/Q')
-  foreach ($dir in @($LogDir, (Join-Path $DataRoot 'backups'), (Join-Path $DataRoot 'analytics'), $TempDir)) {
+  foreach ($dir in @($LogDir, (Join-Path $DataRoot 'backups'), (Join-Path $DataRoot 'analytics'), $TempDir, (Join-Path $DataRoot 'update-request'))) {
     New-Item -ItemType Directory -Force -Path $dir | Out-Null
     Invoke-Checked 'icacls.exe' @($dir, '/grant', "$($account):(OI)(CI)M", '/T', '/Q')
   }
+  # Update now in Tohyee (UPD1-UPD6): Tohyee leaves a request in update-request
+  # (above) and reads how it's going from update-status, which only the
+  # updater (SYSTEM) writes. update-download stays Administrators and SYSTEM only.
+  $updateStatusDir = Join-Path $DataRoot 'update-status'
+  New-Item -ItemType Directory -Force -Path $updateStatusDir, (Join-Path $DataRoot 'update-download') | Out-Null
+  Invoke-Checked 'icacls.exe' @($updateStatusDir, '/grant', "$($account):(OI)(CI)RX", '/T', '/Q')
   # Folders already chosen in Tohyee (a OneDrive backup folder, say), from before this change.
   $env:PGPASSWORD = $settings['POSTGRES_PASSWORD']
   $chosen = & $psql -h localhost -p $pgPort -U tohyee -d tohyee -tA -F '|' -c @"
@@ -310,6 +318,24 @@ select 'RX', f.value from server_settings s, jsonb_each_text(coalesce(s.value->'
     if ($LASTEXITCODE -ne 0) { Write-Host "Could not give the Tohyee service access to $folder; choose it again in the server app." }
     else { Write-Host "The Tohyee service can use $folder." }
   }
+
+  # --- Tohyee updater (scheduled task, SYSTEM) -----------------------------------
+  # Every minute it looks for a request from Update now in Tohyee; only when
+  # there is one does it start tohyee-updater.ps1 (see that script for its checks).
+  $updaterScript = Join-Path $InstallDir 'scripts\tohyee-updater.ps1'
+  $requestFile = Join-Path $DataRoot 'update-request\request.json'
+  $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  $updaterAction = New-ScheduledTaskAction -Execute (Join-Path $env:SystemRoot 'System32\cmd.exe') `
+    -Argument "/d /c if exist ""$requestFile"" ""$powershell"" -NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""$updaterScript"""
+  $updaterTrigger = New-ScheduledTaskTrigger -Once -At (Get-Date).AddMinutes(1) -RepetitionInterval (New-TimeSpan -Minutes 1)
+  $updaterBoot = New-ScheduledTaskTrigger -AtStartup
+  $updaterPrincipal = New-ScheduledTaskPrincipal -UserId 'SYSTEM' -LogonType ServiceAccount -RunLevel Highest
+  $updaterSettings = New-ScheduledTaskSettingsSet -MultipleInstances IgnoreNew -ExecutionTimeLimit (New-TimeSpan -Minutes 45) `
+    -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -StartWhenAvailable -Hidden
+  Register-ScheduledTask -TaskName 'Tohyee updater' -TaskPath '\Tohyee\' -Action $updaterAction `
+    -Trigger @($updaterTrigger, $updaterBoot) -Principal $updaterPrincipal -Settings $updaterSettings -Force `
+    -Description 'Installs a Tohyee update a server admin asked for in Tohyee (Update now). Checks GitHub and the SHA-256 itself.' | Out-Null
+  Write-Host 'The Tohyee updater is set up (scheduled task \Tohyee\Tohyee updater).'
 
   Invoke-Checked $serviceExe @('start')
 

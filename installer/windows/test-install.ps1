@@ -280,6 +280,29 @@ try {
   $stats = Invoke-RestMethod -Uri "$adminUrl/api/admin/stats" -WebSession $again
   Write-Host "Stats: $($stats.computer.cores) cores, $(@($stats.disks).Count) disk(s), PostgreSQL $($stats.postgresVersion)"
   if (-not $stats.computer.cores -or @($stats.disks).Count -lt 1) { throw 'The stats are missing the computer or its disks.' }
+
+  Write-Host '== Update now in Tohyee: the updater (UPD1-UPD6)'
+  $task = Get-ScheduledTask -TaskName 'Tohyee updater' -TaskPath '\Tohyee\' -ErrorAction SilentlyContinue
+  if (-not $task) { throw 'The Tohyee updater scheduled task was not set up.' }
+  if ($task.Principal.UserId -notin @('SYSTEM', 'NT AUTHORITY\SYSTEM')) { throw "The Tohyee updater runs as $($task.Principal.UserId), not SYSTEM." }
+  # On the main address (not the server computer's own), with a server admin's session.
+  $remote = Invoke-RestMethod -Uri "$url/api/server-update" -WebSession $again
+  if ($remote.canUpdateHere -ne $true) { throw "Update now isn't offered on this Windows server: $($remote.notHere)" }
+  # A request for an old version: the updater must pick it up, refuse it, and say so.
+  $statusFile = Join-Path $dataRoot 'update-status\status.json'
+  Remove-Item -LiteralPath $statusFile -Force -ErrorAction SilentlyContinue
+  Set-Content -LiteralPath (Join-Path $dataRoot 'update-request\request.json') -Value '{"version":"0.0.1","requestedBy":"ci@example.com"}' -Encoding ASCII
+  Start-ScheduledTask -TaskName 'Tohyee updater' -TaskPath '\Tohyee\'
+  for ($i = 0; $i -lt 60 -and -not (Test-Path -LiteralPath $statusFile); $i++) { Start-Sleep -Seconds 2 }
+  if (-not (Test-Path -LiteralPath $statusFile)) { throw 'The Tohyee updater did not answer the request.' }
+  $updater = Get-Content -LiteralPath $statusFile -Raw | ConvertFrom-Json
+  Write-Host "Updater: $($updater.state) v$($updater.version): $($updater.message)"
+  if ($updater.state -ne 'skipped') { throw "Expected the updater to skip v0.0.1, got '$($updater.state)'." }
+  if (Test-Path -LiteralPath (Join-Path $dataRoot 'update-request\request.json')) { throw 'The updater left the request behind.' }
+  $remote = Invoke-RestMethod -Uri "$url/api/server-update" -WebSession $again
+  if ($remote.updater.state -ne 'skipped') { throw 'Tohyee could not read what the updater said.' }
+  Write-Host 'The updater picked up the request, refused the old version and Tohyee read its answer.'
+
   $cloudflared = Join-Path $installDir 'cloudflared\cloudflared.exe'
   if (-not (Test-Path $cloudflared)) { throw 'cloudflared.exe was not installed.' }
   Write-Host (& $cloudflared --version)
@@ -288,6 +311,7 @@ try {
   Start-Process -FilePath (Join-Path $installDir 'unins000.exe') -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART') -Wait
   for ($i = 0; $i -lt 60 -and (Test-Path (Join-Path $installDir 'unins000.exe')); $i++) { Start-Sleep -Seconds 2 }
   if (Get-Service -Name 'Tohyee', 'TohyeePostgres' -ErrorAction SilentlyContinue) { throw 'Services still exist after uninstalling.' }
+  if (Get-ScheduledTask -TaskName 'Tohyee updater' -TaskPath '\Tohyee\' -ErrorAction SilentlyContinue) { throw 'The updater task still exists after uninstalling.' }
   if (-not (Test-Path (Join-Path $dataRoot 'pgdata\PG_VERSION'))) { throw 'Uninstalling removed the data.' }
   Write-Host 'Uninstalled; services removed, data kept.'
 } catch {
