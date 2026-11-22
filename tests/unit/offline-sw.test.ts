@@ -144,9 +144,11 @@ describe("the farm illustrations in offline pages", () => {
     const rules = sandbox.self.TohyeeSw!;
     expect(rules.isStaticAsset("/illustrations/icons/mob-in.svg")).toBe(true);
     expect(rules.isStaticAsset("/illustrations/icons/rain-gauge.svg")).toBe(true);
+    expect(rules.isStaticAsset("/illustrations/icons/mob-in.png")).toBe(true);
+    expect(rules.isStaticAsset("/illustrations/icons/rain-gauge.png")).toBe(true);
     expect(rules.isStaticAsset("/illustrations/icon-review.html")).toBe(false);
-    expect(rules.assetUrlsFromHtml('<img src="/illustrations/icons/mob-in.svg"><img src="/illustrations/icons/mob-in.svg"><script src="/_next/static/chunks/test.js"></script>'))
-      .toEqual(["/_next/static/chunks/test.js", "/illustrations/icons/mob-in.svg"]);
+    expect(rules.assetUrlsFromHtml('<img src="/illustrations/icons/mob-in.png"><img src="/illustrations/icons/mob-in.png"><script src="/_next/static/chunks/test.js"></script>'))
+      .toEqual(["/_next/static/chunks/test.js", "/illustrations/icons/mob-in.png"]);
   });
 });
 
