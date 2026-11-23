@@ -298,9 +298,28 @@ export function fitLine(points: Array<[number, number]>): [[number, number], [nu
   return [[low, at(low)], [high, at(high)]];
 }
 
+/** A chart with nothing to plot yet: a short line in the middle saying what to add. */
+export function promptOption(kit: ChartKit, text: string): EChartsOption {
+  return {
+    ...kit.common,
+    legend: { show: false },
+    series: [],
+    graphic: [
+      {
+        type: "text",
+        left: "center",
+        top: "middle",
+        style: { text, fill: kit.theme.mutedText, font: `13px ${kit.base.textStyle.fontFamily}`, align: "center", width: 260, overflow: "break" },
+      },
+    ],
+  };
+}
+
 export function scatterOption(kit: ChartKit): EChartsOption {
   const { spec, rows, theme, format } = kit;
   const [xSeries, ySeries, sizeSeries] = spec.series;
+  // Picking Scatter on a chart with one value: say what's missing rather than fail (the report won't save it so).
+  if (!xSeries || !ySeries) return promptOption(kit, "Add a second value: the first goes across and the second up. A third sizes the dots as bubbles.");
   const bubble = Boolean(sizeSeries);
   const points = rows.flatMap((row, index) => {
     const x = kit.displayNumber(row[xSeries.field]);

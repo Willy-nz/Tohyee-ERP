@@ -204,7 +204,12 @@ export type PlatformOrderExtras = {
   fulfilmentStatus: string | null;
   shippingCharged: string | null;
   fulfilmentOrderStatuses: string[] | null;
+  /** Where it's going (SHP1): never the street, postcode or name. Null when its address hasn't one (or Shopify kept it back). */
+  shippingPlace?: PlatformShippingPlace | null;
 };
+
+/** An order's region (Shopify's province, e.g. Otago), town or city, and country code, from its shipping address (SHP1). */
+export type PlatformShippingPlace = { region: string | null; town: string | null; country: string | null };
 
 export type PlatformLocation = { externalId: string; name: string; active: boolean };
 
@@ -369,6 +374,8 @@ export interface SalesPlatformConnector {
   fetchOrders(context: ConnectorContext, token: AccessToken, request: OrdersRequest): Promise<OrdersResult>;
   /** One order, or null when the platform doesn't have it. Network. */
   fetchOrder(context: ConnectorContext, token: AccessToken, orderId: string, parts?: OrdersRequest["parts"]): Promise<PlatformOrder | null>;
+  /** Where these orders are going (SHP3), by order ID; an order the platform doesn't have is left out. Network. */
+  fetchShippingPlaces?(context: ConnectorContext, token: AccessToken, orderIds: readonly string[]): Promise<Map<string, PlatformShippingPlace>>;
   /** Read-only extras: stock, shop stats, discounts, gift cards (Shopify only). Network. */
   fetchExtras?(context: ConnectorContext, token: AccessToken, request: ExtrasRequest): Promise<ExtrasResult>;
   /** Payouts issued since `issuedFrom` with their balance transactions (SPC15). Network. */

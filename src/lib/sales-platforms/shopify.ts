@@ -15,6 +15,7 @@ import {
   type PlatformSent,
   type PlatformPayout,
   type PlatformRefund,
+  type PlatformShippingPlace,
   type PlatformTaxLine,
   type PlatformTransaction,
   type PlatformVariant,
@@ -26,7 +27,7 @@ import {
 } from "@/lib/sales-platforms/connector";
 import { platformFetch } from "@/lib/sales-platforms/http";
 import { FULFILMENT_ORDERS_NOT_APPROVED, SHOPIFY_ALL_SCOPES } from "@/lib/sales-platforms/parts";
-import { type OrderParts, fetchShopifyExtras, isAccessDenied, orderExtraFields, shopifyOrderExtrasFromGraphql } from "@/lib/sales-platforms/shopify-data";
+import { type OrderParts, fetchShopifyExtras, isAccessDenied, orderExtraFields, shopifyOrderExtrasFromGraphql, shopifyShippingPlace } from "@/lib/sales-platforms/shopify-data";
 import { SHOPIFY_AUTH_METHODS } from "@/lib/sales-platforms/types";
 import { requireOneOf, requireString } from "@/lib/validation";
 
@@ -661,7 +662,7 @@ function orderQuery(parts: OrderParts): string {
     totalPriceSet { ${MONEY} }
     customer { ${CUSTOMER_FIELDS} }
     billingAddress { countryCodeV2 firstName lastName name }
-    shippingAddress { firstName lastName name }
+    shippingAddress { firstName lastName name province city countryCodeV2 }
     lineItems(first: ${LINES_PER_ORDER}) {
       nodes {
         id name sku quantity isGiftCard requiresShipping
@@ -705,6 +706,12 @@ const ORDERS_QUERY = `query TohyeeOrders($first: Int!, $after: String, $query: S
     pageInfo { hasNextPage endCursor }
   }
 }`;
+
+/** Where orders are going (SHP3): about 1 point an order, so 100 at a time costs little. */
+const SHIPPING_PLACES_QUERY = `query TohyeeShippingPlaces($ids: [ID!]!) {
+  nodes(ids: $ids) { ... on Order { id shippingAddress { province city countryCodeV2 } } }
+}`;
+export const SHIPPING_PLACES_PER_QUERY = 100;
 
 const PAYOUTS_QUERY = `query TohyeePayouts($first: Int!, $after: String, $query: String) {
   shopifyPaymentsAccount {
@@ -959,6 +966,19 @@ export const shopifyConnector: SalesPlatformConnector = {
 
   fetchOrder(context, token, orderId, parts) {
     return fetchOneOrder(context.storeDomain, token, orderId, { ...NO_PARTS, ...parts });
+  },
+
+  async fetchShippingPlaces(context, token, orderIds) {
+    const places = new Map<string, PlatformShippingPlace>();
+    for (let at = 0; at < orderIds.length; at += SHIPPING_PLACES_PER_QUERY) {
+      const ids = orderIds.slice(at, at + SHIPPING_PLACES_PER_QUERY).map((id) => `gid://shopify/Order/${id}`);
+      const data = await graphql(context.storeDomain, token, SHIPPING_PLACES_QUERY, { ids });
+      for (const node of Array.isArray(data.nodes) ? data.nodes.map(record) : []) {
+        if (typeof node.id !== "string") continue;
+        places.set(shopifyId(node.id, "order"), shopifyShippingPlace(node.shippingAddress) ?? { region: null, town: null, country: null });
+      }
+    }
+    return places;
   },
 
   fetchExtras(context, token, request) {

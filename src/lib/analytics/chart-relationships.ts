@@ -1,4 +1,5 @@
 import type { EChartsOption } from "echarts";
+import { promptOption } from "@/lib/analytics/chart-distributions";
 import type { ChartKit } from "@/lib/analytics/chart-visuals";
 import { contrast } from "@/lib/charts/colour-check";
 import { MARKS, tooltipHtml, type TooltipRow } from "@/lib/charts/theme";
@@ -186,6 +187,8 @@ export function heatmapOption(kit: ChartKit): EChartsOption {
   const detail = spec.detail ?? "breakdown";
   const grid = heatCells(rows, kit.categories, field, detail);
   const values = grid.cells.map((cell) => Number(cell.value));
+  // ECharts can't draw a heat map with no cells (it has no colour scale).
+  if (!values.length) return promptOption(kit, "Nothing to show for these dates.");
   const labels = format.labels ?? {};
   const full = kit.fullFormatters[0];
   return {
@@ -212,7 +215,7 @@ export function heatmapOption(kit: ChartKit): EChartsOption {
       axisLabel: { ...(kit.categoryAxis.axisLabel as object), width: kit.compact ? 80 : 120, overflow: "truncate" },
       splitLine: { show: false },
     },
-    visualMap: (values.length ? visualMap(kit, values) : undefined) as EChartsOption["visualMap"],
+    visualMap: visualMap(kit, values) as EChartsOption["visualMap"],
     series: [
       {
         type: "heatmap",

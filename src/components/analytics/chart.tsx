@@ -2,7 +2,7 @@
 
 import { useEffect, useId, useMemo, useRef, useState } from "react";
 import type { ECharts, EChartsOption } from "echarts";
-import { chartRows, formatChartValue, projectedRows, toEChartsOption, type ChartSpec, type KpiSummary } from "@/lib/analytics/chart-spec";
+import { chartProblem, chartRows, formatChartValue, projectedRows, toEChartsOption, type ChartSpec, type KpiSummary } from "@/lib/analytics/chart-spec";
 import { CHART_TOKENS, chartThemeFromTokens, readChartTheme, type ChartTheme } from "@/lib/charts/theme";
 import { useReportThemeKey } from "@/components/analytics/report-theme";
 import { isMapKind, loadNzMaps } from "@/components/analytics/nz-maps";
@@ -68,18 +68,24 @@ export function Chart({ spec, rows, height, onPick, highlight }: ChartProps) {
   const [theme, setTheme] = useState(DEFAULT_THEME);
   // A report theme changes the variables the chart reads.
   const themeKey = useReportThemeKey();
-  const option = useMemo(() => {
-    const drawn = toEChartsOption(spec, rows, theme);
-    return highlight && isChartOption(drawn) ? faded(drawn, rows.length, new Set(highlight)) : drawn;
+  // A chart that can't be drawn yet (no Group by, say) says why instead of taking the page down with it.
+  const drawing = useMemo((): { option: EChartsOption | KpiSummary | null; problem: string | null } => {
+    try {
+      const drawn = toEChartsOption(spec, rows, theme);
+      return { option: highlight && isChartOption(drawn) ? faded(drawn, rows.length, new Set(highlight)) : drawn, problem: null };
+    } catch (error) {
+      return { option: null, problem: chartProblem(spec, error) };
+    }
   }, [spec, rows, theme, highlight]);
+  const option = drawing.option;
   const pickRef = useRef(onPick);
   useEffect(() => {
     pickRef.current = onPick;
   }, [onPick]);
   const optionRef = useRef(option);
   // Whether a linear projection is drawn, or why not, and its figures for the table.
-  const projectionNote = useMemo(() => chartRows(spec, rows).projection?.note ?? null, [spec, rows]);
-  const projected = useMemo(() => projectedRows(spec, rows), [spec, rows]);
+  const projectionNote = useMemo(() => (drawing.problem ? null : chartRows(spec, rows).projection?.note ?? null), [drawing.problem, spec, rows]);
+  const projected = useMemo(() => (drawing.problem ? [] : projectedRows(spec, rows)), [drawing.problem, spec, rows]);
   const title = spec.title || spec.series.map((series) => series.label).join(", ") || "Chart";
 
   useEffect(() => {
@@ -98,7 +104,7 @@ export function Chart({ spec, rows, height, onPick, highlight }: ChartProps) {
   useEffect(() => {
     optionRef.current = option;
     const chart = chartRef.current;
-    if (isKpi || !chart || !isChartOption(option)) return;
+    if (isKpi || !chart || !option || !isChartOption(option)) return;
     if (!isMap) {
       chart.setOption(option, { notMerge: true });
       return;
@@ -122,7 +128,7 @@ export function Chart({ spec, rows, height, onPick, highlight }: ChartProps) {
       if (disposed) return;
       chart = echarts.init(container, undefined, { renderer: "svg" });
       chartRef.current = chart;
-      if (isChartOption(optionRef.current)) chart.setOption(optionRef.current);
+      if (optionRef.current && isChartOption(optionRef.current)) chart.setOption(optionRef.current);
       chart.on("click", (params) => {
         if (typeof params.dataIndex === "number") pickRef.current?.(params.dataIndex);
       });
@@ -137,11 +143,12 @@ export function Chart({ spec, rows, height, onPick, highlight }: ChartProps) {
     // A chart that becomes a map is drawn again once the boundaries are in.
   }, [isKpi, isMap]);
 
-  const summary = isKpi && isKpiSummary(option) ? option : null;
+  const summary = isKpi && option && isKpiSummary(option) ? option : null;
   const previous = summary?.previous ?? null;
   return (
     <section className={styles.chart} aria-labelledby={`${id}-title`}>
       <h2 id={`${id}-title`} className={styles.visuallyHidden}>{title}</h2>
+      {drawing.problem ? <p className={styles.problem} role="status">{drawing.problem}</p> : null}
       {summary ? (
         <div className={styles.kpi} aria-label={title}>
           {spec.title ? <span className={styles.kpiTitle}>{spec.title}</span> : null}

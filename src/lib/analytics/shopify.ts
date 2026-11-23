@@ -44,7 +44,8 @@ export async function readShopifyTables(tx: OrgTx): Promise<TableCopy[]> {
             i.invoice_number, i.invoice_date::text, i.status as invoice_status, i.subtotal::text as net, i.tax_total::text as gst,
             i.total::text as total, coalesce(i.currency_code, od.currency) as currency,
             od.discounts_total::text, od.shipping_charged::text, od.fulfilment_status,
-            array_to_string(od.fulfilment_order_statuses, ', ') as fulfilment_orders
+            array_to_string(od.fulfilment_order_statuses, ', ') as fulfilment_orders,
+            od.shipping_region, od.shipping_town, od.shipping_country
        from (select * from sales_platform_documents where platform = 'shopify' and record_kind = 'order') d
        full join sales_platform_order_details od
          on od.connection_id = d.connection_id and od.order_external_id = d.external_id
@@ -58,10 +59,13 @@ export async function readShopifyTables(tx: OrgTx): Promise<TableCopy[]> {
       v("store"), v("order_id"), v("order_name"), v("processed_at", "TIMESTAMP"), v("state"), v("contact_id", "BIGINT"), v("sales_order_id", "BIGINT"),
       v("invoice_id", "BIGINT"), v("invoice_number"), v("invoice_date", "DATE"), v("invoice_status"), v("net", MONEY), v("gst", MONEY), v("total", MONEY),
       v("currency"), v("discounts", MONEY), v("shipping_charged", MONEY), v("fulfilment_status"), v("fulfilment_orders"),
+      // SHP4: where it's going (region for the region map, town for the district one), never the street or name.
+      v("shipping_region"), v("shipping_town"), v("shipping_country"),
     ],
     rows: orders.map((r) => [
       r.store, r.order_id, r.order_name, r.processed_at, r.state, r.contact_id, r.sales_order_id, r.invoice_id, r.invoice_number, r.invoice_date,
       r.invoice_status, r.net, r.gst, r.total, r.currency, r.discounts_total, r.shipping_charged, r.fulfilment_status, r.fulfilment_orders,
+      r.shipping_region, r.shipping_town, r.shipping_country,
     ]),
   });
 

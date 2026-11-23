@@ -1,6 +1,6 @@
 import type { ChartFormat, KpiRule, TableStyle } from "@/lib/analytics/chart-format";
 import type { PivotRow, ResultColumn } from "@/lib/analytics/query";
-import { cmp, dec, sum, toFixedString } from "@/lib/money/decimal";
+import { cmp, dec, isDecimalString, sum, toFixedString } from "@/lib/money/decimal";
 import { CHART_TOKENS } from "@/lib/charts/theme";
 
 /**
@@ -9,9 +9,16 @@ import { CHART_TOKENS } from "@/lib/charts/theme";
  * colours, so they use display numbers.
  */
 
-/** Whether a rule matches a value, compared exactly. */
+/**
+ * Whether a rule matches a value, compared exactly. A rule whose value is
+ * still being typed ("-", say) or a blank value matches nothing, rather than
+ * failing the chart or table.
+ */
 export function ruleMatches(rule: KpiRule, value: string): boolean {
-  const order = cmp(dec(value), dec(rule.value));
+  const given = String(value ?? "").trim();
+  const against = String(rule.value ?? "").trim();
+  if (!isDecimalString(given) || !isDecimalString(against)) return false;
+  const order = cmp(dec(given), dec(against));
   if (rule.op === ">=") return order >= 0;
   if (rule.op === ">") return order > 0;
   if (rule.op === "<=") return order <= 0;
@@ -165,7 +172,8 @@ export function tableTotals(
       totals[column.key] = null;
       continue;
     }
-    const values = rows.map((row) => row[column.key]).filter((value): value is string => value !== null && value !== undefined);
+    // Blanks (and anything that isn't a figure) are left out of the total.
+    const values = rows.map((row) => String(row[column.key] ?? "").trim()).filter((value) => isDecimalString(value));
     const decimals = values.map((value) => dec(value));
     // Kept to the places the values have (0.10 + 0.20 is 0.30).
     totals[column.key] = decimals.length ? toFixedString(sum(decimals), Math.max(...decimals.map((value) => value.scale))) : null;

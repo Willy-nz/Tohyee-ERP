@@ -11,6 +11,7 @@ import type {
   PlatformLocation,
   PlatformOrderExtras,
   PlatformSalesBreakdown,
+  PlatformShippingPlace,
   PlatformStockLevel,
 } from "@/lib/sales-platforms/connector";
 import { PlatformError } from "@/lib/sales-platforms/connector";
@@ -565,6 +566,22 @@ const APPLICATION_KINDS: Record<string, PlatformDiscountApplication["kind"]> = {
 };
 
 /**
+ * Where an order is going, from its shippingAddress (SHP1): the region
+ * (Shopify's province, e.g. "Otago"), the town or city and the country code,
+ * trimmed and kept short. Never the street, postcode or name. Null when
+ * there's no shipping address (a pickup or a digital order).
+ */
+export function shopifyShippingPlace(address: unknown): PlatformShippingPlace | null {
+  if (!address || typeof address !== "object") return null;
+  const a = record(address);
+  const short = (value: unknown, max: number) => text(value)?.trim().slice(0, max) || null;
+  const code = text(a.countryCodeV2)?.toUpperCase() ?? null;
+  const place = { region: short(a.province, 80), town: short(a.city, 80), country: code && /^[A-Z]{2}$/.test(code) ? code : null };
+  // Shopify sends the address with its fields empty when it keeps customers' details back.
+  return place.region || place.town || place.country ? place : null;
+}
+
+/**
  * The order's extras from its GraphQL node. Each discount's amount is what
  * Shopify allocated to the lines and shipping lines from that discount (the
  * application itself only gives its rate or amount).
@@ -578,6 +595,7 @@ export function shopifyOrderExtrasFromGraphql(node: unknown, parts: OrderParts):
     fulfilmentStatus: null,
     shippingCharged: null,
     fulfilmentOrderStatuses: null,
+    shippingPlace: shopifyShippingPlace(n.shippingAddress),
   };
   if (parts.discounts) {
     const allocated = new Map<number, Decimal[]>();

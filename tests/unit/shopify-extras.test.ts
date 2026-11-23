@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import { loadKeyOf } from "@/lib/analytics/freshness";
 import { tableLabel } from "@/lib/analytics/labels";
 import { SHOPIFY_TABLES, isShopifyTable } from "@/lib/analytics/shopify-tables";
+import { shopifyShippingPlace } from "@/lib/sales-platforms/shopify-data";
 import { PlatformError } from "@/lib/sales-platforms/connector";
 import {
   SHOPIFY_ALL_SCOPES,
@@ -231,5 +232,15 @@ describe("SPD11: Shopify in Analytics", () => {
     expect(loadKeyOf("shopify_orders")).toEqual({ tableName: "shopify_*", sourceless: true });
     expect(tableLabel("shopify_gift_cards")).toBe("Shopify gift cards");
     expect(isShopifyTable("tohyee_invoices")).toBe(false);
+  });
+});
+
+describe("SHP1: where an order is going", () => {
+  it("keeps the region, town and country code, trimmed, and nothing else from the address", () => {
+    expect(shopifyShippingPlace({ firstName: "Tama", address1: "1 Main St", zip: "9016", province: " Otago ", city: "Dunedin", countryCodeV2: "nz" })).toEqual({ region: "Otago", town: "Dunedin", country: "NZ" });
+    // No shipping address (a pickup), or Shopify keeping the details back.
+    expect(shopifyShippingPlace(null)).toBeNull();
+    expect(shopifyShippingPlace({ province: null, city: "", countryCodeV2: null })).toBeNull();
+    expect(shopifyShippingPlace({ province: "x".repeat(200), countryCodeV2: "NZL" })).toEqual({ region: "x".repeat(80), town: null, country: null });
   });
 });

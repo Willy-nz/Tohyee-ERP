@@ -1,6 +1,6 @@
 import type { ResultColumn } from "@/lib/analytics/query";
 import { formatCurrency, formatDate, formatMoney, formatQuantity } from "@/lib/format";
-import { dec, mul, roundHalfUp, toFixedString } from "@/lib/money/decimal";
+import { dec, isDecimalString, mul, roundHalfUp, toFixedString } from "@/lib/money/decimal";
 import { makeNumberFormatter } from "@/lib/analytics/chart-format";
 
 /**
@@ -9,8 +9,10 @@ import { makeNumberFormatter } from "@/lib/analytics/chart-format";
  * Money has the minus first, as everywhere else in Tohyee: -$27.00.
  * True and false are Yes and No.
  */
-export function showValue(value: string | null, column: Pick<ResultColumn, "format"> & { number?: ResultColumn["number"]; valueLabels?: ResultColumn["valueLabels"] }): string {
-  if (value === null) return "";
+export function showValue(given: string | number | null | undefined, column: Pick<ResultColumn, "format"> & { number?: ResultColumn["number"]; valueLabels?: ResultColumn["valueLabels"] }): string {
+  if (given === null || given === undefined) return "";
+  // Figures come as decimal text; anything else is shown as it is rather than failing the table.
+  const value = String(given);
   // A coded value in words, e.g. "Current liability".
   if (column.valueLabels && Object.prototype.hasOwnProperty.call(column.valueLabels, value)) return column.valueLabels[value];
   // The field's own format, for numbers: shown, never used to work anything out.
@@ -30,8 +32,9 @@ export function showValue(value: string | null, column: Pick<ResultColumn, "form
     case "boolean":
       return booleanText(value);
     case "percent":
+      if (!isDecimalString(value.trim())) return value;
       // A share as a fraction (0.250000 is 25.0%), to one place, worked out exactly.
-      return `${formatQuantity(toFixedString(roundHalfUp(mul(dec(value), dec("100")), 1), 1))}%`;
+      return `${formatQuantity(toFixedString(roundHalfUp(mul(dec(value.trim()), dec("100")), 1), 1))}%`;
     default:
       return value;
   }
