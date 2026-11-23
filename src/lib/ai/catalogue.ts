@@ -18,6 +18,7 @@ import { PHOTO_READ_TOOLS, PHOTO_WRITE_TOOLS } from "@/lib/ai/photo-tools";
 import { REPORT_READ_TOOLS, REPORT_WRITE_TOOLS } from "@/lib/ai/report-tools";
 import { SALES_PLATFORM_READ_TOOLS } from "@/lib/ai/sales-platform-tools";
 import { SIGNING_READ_TOOLS } from "@/lib/ai/signing-tools";
+import { SPREADING_ACTION_TOOLS, SPREADING_READ_TOOLS } from "@/lib/ai/spreading-tools";
 import { TAX_READ_TOOLS, TAX_WRITE_TOOLS } from "@/lib/ai/tax-tools";
 import { type AiTool, READ_TOOLS } from "@/lib/ai/tools";
 import { WRITE_TOOLS } from "@/lib/ai/write-tools";
@@ -45,6 +46,7 @@ export const AI_TOOLS: readonly AiTool[] = [
   ...SALES_PLATFORM_READ_TOOLS,
   ...CATCH_UP_READ_TOOLS,
   ...SIGNING_READ_TOOLS,
+  ...SPREADING_READ_TOOLS,
   ...ANALYTICS_READ_TOOLS,
   ...TEAM_CHAT_READ_TOOLS,
   ...WRITE_TOOLS,
@@ -62,6 +64,7 @@ export const AI_TOOLS: readonly AiTool[] = [
   ...CATCH_UP_WRITE_TOOLS,
   ...DOCUMENT_ACTION_TOOLS,
   ...SETTINGS_ACTION_TOOLS,
+  ...SPREADING_ACTION_TOOLS,
   ...TEAM_CHAT_WRITE_TOOLS,
 ];
 

@@ -259,6 +259,7 @@ describeWithDatabase("connect your own AI (MCP)", () => {
         "budget_vs_actual",
         "cash_flow_forecast",
         "consolidated_report",
+        "explain_spreading_difference",
         "farm_benchmarks",
         "farm_notebook",
         "farm_timeline",
@@ -290,6 +291,8 @@ describeWithDatabase("connect your own AI (MCP)", () => {
         "get_sales_order",
         "get_sales_platform_status",
         "get_signing_request",
+        "get_spreadable_lines",
+        "get_spreading_worksheet",
         "get_supplier_credit_note",
         "gst_return",
         "list_accounts",
@@ -350,6 +353,7 @@ describeWithDatabase("connect your own AI (MCP)", () => {
         "paddock_greenness",
         "pasture_cover",
         "preview_depreciation",
+        "preview_spreading_month",
         "profit_and_loss",
         "query_dataset",
         "rainfall",
@@ -487,6 +491,10 @@ describeWithDatabase("connect your own AI (MCP)", () => {
       trial_balance: { asAt: "2026-06-30" },
     };
     args.preview_depreciation = { periodEnd: "2026-06-30" };
+    // Spreading isn't turned on here: the two that need it say so; the lines of a bill that isn't there are none.
+    args.preview_spreading_month = { kind: "prepayment", month: "2026-06" };
+    args.explain_spreading_difference = { kind: "prepayment" };
+    args.get_spreadable_lines = { billId: "999999" };
     args.query_dataset = { name: "no_such_table" };
     // Tools with a minimum role (income tax, owners and admins) aren't offered to the viewer's key; ird-documents tests them.
     const refusedGroups = new Set<string>();

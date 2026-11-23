@@ -75,7 +75,7 @@ export async function previewSpreadMonth(tx: OrgTx, kindInput: unknown, monthInp
   const month = parseMonth(monthInput);
   const settings = await getSpreadingSettings(tx);
   const holding = settings[kind];
-  if (!holding) throw new ValidationError("Turn Spreading on first: it needs an account to hold this in.");
+  if (!holding) throw new ValidationError("Spreading isn't turned on yet. An admin turns it on under Accounting › Month end.");
   const runId = await activeRun(tx, kind, month);
   const result = await tx.query<{ item_id: string; description: string; line_kind: "share" | "difference"; amount: string; target_code: string; target_name: string; tracking: TrackingTags | null }>(
     `select m.item_id::text, i.description, m.line_kind, m.amount::text, t.code as target_code, t.name as target_name, i.tracking

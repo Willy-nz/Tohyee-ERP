@@ -140,3 +140,33 @@
   gap: 0.5rem;
   margin-top: 1rem;
 }
+
+.behind {
+  display: grid;
+  gap: 0.5rem;
+}
+
+.behindLists {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(16rem, 1fr));
+  gap: 1rem 2rem;
+}
+
+.behindLists h3 {
+  margin: 0 0 0.5rem;
+  font-size: 0.95rem;
+}
+
+.behindList {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 0.4rem;
+}
+
+.behindList li {
+  display: flex;
+  justify-content: space-between;
+  gap: 1rem;
+}

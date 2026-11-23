@@ -592,7 +592,7 @@ that something happened.
   year's depreciation by type, disposals this year, and ties to the ledger
   account by account. Tax depreciation beside book, pooling and low-value
   write-offs aren't built.
-- **Spreading** (Accounting, Month end; SW1-SW23, following common practice,
+- **Spreading** (Accounting, Month end; SW1-SW24, following common practice,
   not yet reviewed by the owner): one worksheet in place of the spreadsheet
   for costs **paid in advance**, **income in advance**, costs **not billed
   yet** and income **not invoiced yet**. Each kind has one balance sheet
@@ -624,6 +624,12 @@ that something happened.
   its own, shows what it holds instead of checking this ledger, and each
   month's journal downloads as a CSV file; in either mode the worksheet
   downloads as a file and items can be brought in from one, all or none.
+  A tab that's out has **See what's behind it** (SW24): the entries coded
+  to its account from outside the worksheet beside what the worksheet
+  expects there. An AI key can read the worksheet, preview a month and
+  list a bill's lines, and at Make and post add an item, post a month, end
+  an item early and mark one done or arrived; undoing a month or an
+  arrival and removing an item need Full access and confirm first.
 - **Projects and time tracking** (Sales; PJ1-PJ13, not yet approved by the owner), like project tracking in other accounting software: a **project** for a customer with an optional
   estimate and deadline, **In progress** or **Closed** (only by closing and
   reopening). **Tasks** are hourly (a rate), fixed price or non-chargeable,
