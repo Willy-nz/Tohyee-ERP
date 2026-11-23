@@ -12,6 +12,7 @@ import { useWorkspace } from "@/components/workspace";
 import { api, apiDownload, errorMessage } from "@/lib/client/api";
 import { formatDate } from "@/lib/format";
 import { DATE_RANGES, OPERATORS } from "@/lib/saved-searches/catalogue";
+import { startFromAddress } from "@/lib/saved-searches/from-list";
 import type { PublicRecordType as RecordType } from "@/lib/saved-searches/org-catalogue";
 import type {
   SearchDefinition,
@@ -37,6 +38,22 @@ type Draft = {
 
 function fieldOf(type: RecordType, key: string) {
   return type.fields.find((field) => field.key === key) ?? null;
+}
+
+/** A new search, begun from a list's "Save this view" when the address carries one; anything this kind of record doesn't have is left off. */
+function startedFrom(type: RecordType, start: string | null): Draft {
+  const draft = blank(type);
+  const from = startFromAddress(start);
+  if (!from) return draft;
+  const filters = from.filters.filter((filter) => {
+    const field = fieldOf(type, filter.field);
+    return (
+      field !== null &&
+      OPERATORS[field.type].some((each) => each.op === filter.op)
+    );
+  });
+  const sort = from.sort && fieldOf(type, from.sort.field) ? from.sort : null;
+  return { ...draft, definition: { ...draft.definition, filters, sort } };
 }
 
 function blank(type: RecordType): Draft {
@@ -107,7 +124,7 @@ export function SavedSearches({ organisationId }: { organisationId: string }) {
           definition: found.definition,
         }
       : !wantedId && wantedType
-        ? blank(wantedType)
+        ? startedFrom(wantedType, params.get("start"))
         : null;
 
   return (
@@ -165,7 +182,7 @@ export function SavedSearches({ organisationId }: { organisationId: string }) {
           key={
             initial.id
               ? `s:${initial.id}:${found?.updatedAt ?? ""}`
-              : `t:${initial.type.key}`
+              : `t:${initial.type.key}:${params.get("start") ?? ""}`
           }
           organisationId={organisationId}
           initial={initial}

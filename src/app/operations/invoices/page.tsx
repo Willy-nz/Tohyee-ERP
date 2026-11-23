@@ -15,6 +15,7 @@ import { Button, Empty, Notice, Page, PageHeader, ui } from "@/components/ui";
 import { api, errorMessage } from "@/lib/client/api";
 import { formatDate } from "@/lib/format";
 import type { InvoiceStatus, InvoiceSummary } from "@/lib/invoices/service";
+import { savedSearchFromList } from "@/lib/saved-searches/from-list";
 
 type InvoicePage = { invoices: InvoiceSummary[]; nextBeforeId: string | null; nextOffset: number | null };
 
@@ -162,7 +163,7 @@ function Invoices({ organisationId }: { organisationId: string }) {
       </div>
       <ListSearch label="Search invoices" placeholder="Number, customer or reference" onSearch={setSearch} />
       <p className={ui.muted}>
-        Need more filters, or want to keep one? <Link href="/operations/saved-searches?type=invoice">Saved searches</Link>
+        Need more filters, or want to keep this one? <Link href={savedSearchFromList("invoice", { status: filter.status, awaitingPayment: filter.awaitingPayment, sort })}>Save this view</Link>
       </p>
       <InvoiceList key={`${filter.label}:${search}:${sort?.column}:${sort?.direction}`} organisationId={organisationId} filter={filter} search={search} sort={sort} onSort={setSort} />
     </div>
