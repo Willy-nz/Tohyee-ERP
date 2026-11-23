@@ -36,7 +36,7 @@ export async function explainSpreadDifference(tx: OrgTx, kindInput: unknown): Pr
   const kind = parseKind(kindInput);
   const worksheet = await getSpreadWorksheet(tx);
   const account = worksheet.settings[kind];
-  if (!account) throw new ValidationError("Turn Spreading on first.");
+  if (!account) throw new ValidationError("Spreading isn't turned on yet. An admin turns it on under Accounting › Month end.");
   const asset = kind === "prepayment" || kind === "accrued_income";
   const sign = asset ? "l.debit_amount - l.credit_amount" : "l.credit_amount - l.debit_amount";
   // A voided entry and its exact reversal cancel on the account, so neither helps find a difference.
