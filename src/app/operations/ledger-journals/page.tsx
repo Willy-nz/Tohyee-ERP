@@ -85,6 +85,7 @@ const REVERSED_BY: Partial<Record<Journal["origin"], string>> = {
   expense_claim_payment: "The payment was voided: reversed by",
   fixed_asset_depreciation: "The depreciation run was rolled back: reversed by",
   fixed_asset_disposal: "The disposal was undone: reversed by",
+  spreading: "The month was undone on the Spreading worksheet: reversed by",
   payroll: "The pay run was voided: reversed by",
   livestock_valuation: "The livestock valuation was replaced: reversed by",
   livestock_rations: "The rations movement was voided: reversed by",

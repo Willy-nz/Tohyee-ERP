@@ -24,6 +24,7 @@ export type JournalSourceType =
   | "expense_claim_payment"
   | "fixed_asset_depreciation"
   | "fixed_asset_disposal"
+  | "spreading"
   | "journal";
 
 export type JournalSource = {
@@ -101,6 +102,9 @@ sources (journal_id, source_type, link_id, number, contact_id) as (
   select j, 'fixed_asset_disposal', f.id, f.asset_number, null::bigint
     from fixed_asset_disposals d join fixed_assets f on f.id = d.asset_id
     cross join lateral (values (d.journal_id), (d.undo_journal_id)) v(j) where j is not null
+  union all
+  select j, 'spreading', s.id, to_char(s.month, 'FMMonth YYYY'), null::bigint
+    from spread_runs s cross join lateral (values (s.journal_id), (s.undo_journal_id)) v(j) where j is not null
 )`;
 
 /** Columns to select alongside a journal `j` joined to `sources s` and `contacts sc` (all left joins). */
@@ -138,6 +142,7 @@ const NAMES: Record<Exclude<JournalSourceType, "journal">, { label: string; href
   expense_claim_payment: { label: "payment of expense claim", href: (id) => `/operations/expense-claims/${id}` },
   fixed_asset_depreciation: { label: "depreciation run", href: (id) => `/operations/fixed-assets/depreciation?run=${id}` },
   fixed_asset_disposal: { label: "disposal of", href: (id) => `/operations/fixed-assets/${id}` },
+  spreading: { label: "spreading for", href: () => "/operations/spreading" },
 };
 
 const ORIGIN_NAMES: Record<string, string> = {

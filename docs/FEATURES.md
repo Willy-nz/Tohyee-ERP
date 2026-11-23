@@ -592,6 +592,25 @@ that something happened.
   year's depreciation by type, disposals this year, and ties to the ledger
   account by account. Tax depreciation beside book, pooling and low-value
   write-offs aren't built.
+- **Spreading** (Accounting, Month end; SW1-SW14, following common practice,
+  not yet reviewed by the owner): one worksheet in place of the spreadsheet
+  for costs **paid in advance**, **income in advance**, costs **not billed
+  yet** and income **not invoiced yet**. Each kind has one balance sheet
+  account, set when an admin turns it on (1200 Prepayments, and Accrued
+  income, Income in advance and Accrued expenses, added if missing). A
+  bookkeeper adds an item (what, the amount without GST, the income or
+  expense account) and how to spread it: evenly by month, by days, all in
+  one month, their own amounts, or when it's done. A grid shows a row an
+  item and a column a month. **Month end** previews a kind's month and posts
+  it as one journal on the month's last day; months go in order, a locked
+  month is refused and never moved, and the latest month can be undone with
+  the exact reversal. An accrual is marked when its bill or invoice arrives,
+  and what it came to over or under goes in that month. Ending early moves
+  what's left into one month. Each tab says whether the worksheet matches
+  its account in the ledger. Not built yet: ticking "Spread this" on a bill
+  or invoice line (the person codes it to the kind's account for now),
+  tracking on the journals, the sales-platform orders paid and not sent yet
+  shown beside income in advance, and a stand-alone mode with file export.
 - **Projects and time tracking** (Sales; PJ1-PJ13, not yet approved by the owner), like project tracking in other accounting software: a **project** for a customer with an optional
   estimate and deadline, **In progress** or **Closed** (only by closing and
   reopening). **Tasks** are hourly (a rate), fixed price or non-chargeable,

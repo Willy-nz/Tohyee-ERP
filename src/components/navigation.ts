@@ -251,6 +251,8 @@ export const MENUS: Menu[] = [
             { href: "/operations/ledger-journals", label: "Journals" },
             { href: "/operations/accounts", label: "Chart of accounts" },
           ]),
+          // Prepayments, income in advance and accruals: a month-end job, so it sits with closing.
+          ...section("Month end", [{ href: "/operations/spreading", label: "Spreading" }]),
           ...section("Year end", [
             { href: "/operations/period-close", label: "Period close" },
             { href: "/operations/reports/accountant-pack", label: "Year-end pack" },
@@ -555,7 +557,7 @@ export const AREAS: Record<string, string[]> = {
   Payroll: ["/operations/payroll"],
   Banking: ["/operations/bank-accounts", "/operations/bank-rules", "/operations/exchange-rates", "/operations/fx-revaluation"],
   Reports: ["/operations/reports", "/operations/budgets", "/operations/project-reports"],
-  Accounting: ["/operations/accounts", "/operations/ledger-journals", "/operations/inventory", "/operations/fixed-assets", "/operations/livestock", "/operations/period-close"],
+  Accounting: ["/operations/accounts", "/operations/ledger-journals", "/operations/inventory", "/operations/fixed-assets", "/operations/livestock", "/operations/period-close", "/operations/spreading"],
   Tax: ["/operations/gst-return", "/operations/gst-audit", "/operations/tax", "/operations/income-tax", "/operations/rd"],
   Settings: ["/operations/settings", "/operations/members", "/operations/modules"],
 };

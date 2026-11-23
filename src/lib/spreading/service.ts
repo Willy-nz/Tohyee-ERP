@@ -14,7 +14,7 @@ import {
   type SpreadMonth,
   spreadSchedule,
 } from "@/lib/spreading/rules";
-import { asRecord, optionalId, optionalSource, optionalString, requireArray, requireId, requireIdempotencyKey, requireOneOf, requireString } from "@/lib/validation";
+import { asRecord, optionalId, optionalSource, requireArray, requireId, requireIdempotencyKey, requireOneOf, requireString } from "@/lib/validation";
 
 /**
  * The Spreading worksheet's records (examples SW1-SW14): the account each

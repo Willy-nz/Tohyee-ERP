@@ -144,6 +144,7 @@ describe("menu sub-headings", () => {
         "Ledger",
         [
           ["Ledger", ["Journals", "Chart of accounts"]],
+          ["Month end", ["Spreading"]],
           ["Year end", ["Period close", "Year-end pack", "Financial statements", "Signing and performance reports"]],
           ["Inventory", ["Products and services", "Stock"]],
         ],
@@ -177,7 +178,7 @@ describe("menu sub-headings", () => {
     expect(links.find((link) => link.href === "/operations/gst-return")?.module).toBe("gst");
     expect(links.find((link) => link.href === "/operations/livestock")?.module).toBe("livestock");
     expect(links.find((link) => link.href === "/operations/settings/sales-platforms")?.minRole).toBeUndefined();
-    expect(links).toHaveLength(27);
+    expect(links).toHaveLength(28);
   });
 
   it("shows each new menu as current on its own pages", () => {

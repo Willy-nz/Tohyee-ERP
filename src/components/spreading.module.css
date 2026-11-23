@@ -1,0 +1,96 @@
+.kinds {
+  margin: 0;
+  padding-left: 1.1rem;
+  display: grid;
+  gap: 0.35rem;
+}
+
+.tie {
+  display: flex;
+  flex-wrap: wrap;
+  align-items: center;
+  justify-content: space-between;
+  gap: 0.5rem 1rem;
+  margin: 0.75rem 0;
+}
+
+.tieResult {
+  display: inline-flex;
+  align-items: center;
+  gap: 0.35rem;
+}
+
+.grid th,
+.grid td {
+  white-space: nowrap;
+  vertical-align: top;
+}
+
+.grid .sticky {
+  position: sticky;
+  left: 0;
+  z-index: 1;
+  background: var(--surface, #fff);
+  white-space: normal;
+  min-width: 11rem;
+}
+
+.posted {
+  color: var(--text-muted, #667085);
+}
+
+.rowActions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 0.4rem;
+  margin-top: 0.5rem;
+}
+
+.rowForm {
+  display: grid;
+  gap: 0.4rem;
+  min-width: 12rem;
+}
+
+.rowForm label {
+  display: grid;
+  gap: 0.2rem;
+  font-size: 0.875rem;
+}
+
+.form {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(14rem, 1fr));
+  gap: 0.75rem 1rem;
+}
+
+.own {
+  display: grid;
+  gap: 0.4rem;
+  margin-top: 0.75rem;
+  max-width: 24rem;
+}
+
+.ownRow {
+  display: grid;
+  grid-template-columns: 1fr 1fr;
+  gap: 0.5rem;
+}
+
+.linkButton {
+  background: none;
+  border: 0;
+  padding: 0.4rem 0;
+  color: var(--link, #1d4ed8);
+  cursor: pointer;
+  font: inherit;
+  text-decoration: underline;
+}
+
+/* On a phone the first column scrolls with the rest, so the months aren't hidden behind it. */
+@media (max-width: 700px) {
+  .grid .sticky {
+    position: static;
+    min-width: 9.5rem;
+  }
+}
