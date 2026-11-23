@@ -8,8 +8,10 @@ export const migration: Migration = {
 -- the item remembers the line it came from and the journal that moved the
 -- line's amount into the kind's balance sheet account.
 alter table spread_items
-  add column bill_line_id bigint references bill_lines(id),
-  add column invoice_line_id bigint references sales_invoice_lines(id),
+  -- No foreign key on the two line ids: one would stop the lines tables' own
+  -- guards refusing TRUNCATE with their message. Approved lines are never deleted.
+  add column bill_line_id bigint,
+  add column invoice_line_id bigint,
   add column move_journal_id bigint references ledger_journals(id),
   add column move_undo_journal_id bigint references ledger_journals(id),
   -- The line's tracking, carried to each month's journal.
