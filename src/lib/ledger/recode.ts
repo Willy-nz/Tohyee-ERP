@@ -209,10 +209,11 @@ export async function recodeLine(
   if (line.account_type === "fixed_asset") {
     throw new ValidationError("That line is on a fixed asset account. Change it through the fixed asset register, or with a journal.");
   }
-  if (documentType === "bill" || documentType === "invoice") {
-    // Its amount was moved off this account to be spread (SW15-SW17): recoding it would leave the move pointing at the old account.
-    const spread = await tx.query(`select 1 from spread_items where ${documentType === "bill" ? "bill_line_id" : "invoice_line_id"} = $1 and removed_at is null`, [lineId]);
-    if (spread.rows[0]) throw new ValidationError("That line is on the Spreading worksheet. Remove it from the worksheet first, then recode it.");
+  {
+    // Its amount was moved off this account to be spread (SW15-SW17, SW19): recoding it would leave the move pointing at the old account.
+    const column = documentType === "bill" ? "bill_line_id" : documentType === "invoice" ? "invoice_line_id" : "bank_line_id";
+    const spread = await tx.query(`select 1 from spread_items where ${column} = $1 and removed_at is null`, [lineId]);
+    if (spread.rows[0]) throw new ValidationError("That line is on the Spreading worksheet. Take it off the worksheet first, then recode it.");
   }
 
   const to = (

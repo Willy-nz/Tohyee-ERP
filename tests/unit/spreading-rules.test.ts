@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addMonths, daysByMonth, endEarly, monthEndDate, monthsBegun, spreadPosting, spreadSchedule, splitAt } from "@/lib/spreading/rules";
+import { addMonths, catchUp, daysByMonth, endEarly, monthEndDate, monthsBegun, spreadPosting, spreadSchedule, splitAt } from "@/lib/spreading/rules";
 
 const amounts = (rows: Array<{ amount: string }>) => rows.map((row) => row.amount);
 const total = (rows: Array<{ amount: string }>) => rows.reduce((sum, row) => sum + Math.round(Number(row.amount) * 100), 0) / 100;
@@ -85,6 +85,20 @@ describe("spreading: changes and directions", () => {
     expect(() => endEarly(insurance, "2027-02", "2027-02")).toThrow(/after the last one posted/);
     // Nothing posted yet: all of it lands in the month chosen.
     expect(endEarly(insurance, null, "2026-08")).toEqual([{ month: "2026-08", amount: "1200.00" }]);
+  });
+
+  it("SW18: months already posted are caught up in the next month to post", () => {
+    const late = catchUp(insurance, "2026-10");
+    expect(late.caughtUp).toEqual({ months: 4, amount: "400.00", into: "2026-11" });
+    expect(late.schedule).toHaveLength(8);
+    expect(late.schedule[0]).toEqual({ month: "2026-11", amount: "500.00" });
+    expect(late.schedule[1]).toEqual({ month: "2026-12", amount: "100.00" });
+    expect(total(late.schedule)).toBe(1200);
+    // Nothing posted, or it starts later: unchanged.
+    expect(catchUp(insurance, null)).toEqual({ schedule: insurance, caughtUp: null });
+    expect(catchUp(insurance, "2026-06").caughtUp).toBeNull();
+    // All of it is in posted months: one amount in the next month.
+    expect(catchUp(insurance, "2027-08").schedule).toEqual([{ month: "2027-09", amount: "1200.00" }]);
   });
 
   it("SW11: what has landed and what's left after a month", () => {

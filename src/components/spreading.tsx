@@ -7,9 +7,10 @@ import { useConfirm } from "@/components/confirm-dialog";
 import { DateInput } from "@/components/date-input";
 import { useApiData } from "@/components/hooks";
 import { InfoTip } from "@/components/info-tip";
+import { caughtUpText } from "@/components/spread-this";
 import { Badge, Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
-import { api, errorMessage, newIdempotencyKey } from "@/lib/client/api";
+import { api, apiDownload, errorMessage, newIdempotencyKey } from "@/lib/client/api";
 import { todayInBrowser } from "@/lib/format";
 import { dec, sum, toFixedString } from "@/lib/money/decimal";
 import { addMonths, SPREAD_KIND_LABELS, SPREAD_KINDS, type SpreadKind, type SpreadMethod } from "@/lib/spreading/rules";
@@ -74,6 +75,17 @@ function total(amounts: string[]): string {
   return toFixedString(sum(amounts.map((amount) => dec(amount))), 2);
 }
 
+/** Fetches a CSV file from the export route and hands it to the browser to save. */
+async function downloadFile(organisationId: string, body: Record<string, unknown>, fileName: string): Promise<void> {
+  const blob = await apiDownload("/api/spreading/export", { organisationId, ...body });
+  const url = URL.createObjectURL(blob);
+  const link = document.createElement("a");
+  link.href = url;
+  link.download = fileName;
+  link.click();
+  URL.revokeObjectURL(url);
+}
+
 function isAccrual(kind: SpreadKind): boolean {
   return kind === "accrued_expense" || kind === "accrued_income";
 }
@@ -113,9 +125,10 @@ export function Spreading({ organisationId }: { organisationId: string }) {
     setMessage(null);
     try {
       // A request with no body (removing an item) says which organisation in its address.
-      if (body) await api(path, { method, body: { organisationId, source: "ui", ...body } });
+      let caughtUp: Parameters<typeof caughtUpText>[0] = null;
+      if (body) caughtUp = (await api<{ caughtUp?: Parameters<typeof caughtUpText>[0] }>(path, { method, body: { organisationId, source: "ui", ...body } }))?.caughtUp ?? null;
       else await api(`${path}?organisationId=${encodeURIComponent(organisationId)}`, { method });
-      setMessage(text);
+      setMessage(`${text}${caughtUpText(caughtUp)}`);
       sheet.reload();
       return true;
     } catch (caught) {
@@ -180,29 +193,78 @@ export function Spreading({ organisationId }: { organisationId: string }) {
       </div>
 
       <div className={styles.tie}>
-        <span>
-          {KIND_HELP[kind].what} {KIND_HELP[kind].code}{" "}
-          <strong>
-            {tie.account?.code} {tie.account?.name}
-          </strong>
-          .
-        </span>
-        <span className={styles.tieResult}>
-          {matches ? <Badge tone="green">Matches the ledger</Badge> : <Badge tone="red">Out by {tie.difference.replace("-", "")}</Badge>}
-          <InfoTip label="What this checks">
-            The worksheet holds <Money value={tie.worksheet} /> and the account holds <Money value={tie.ledger} />. When they differ, something was coded to the account that isn&apos;t on
-            the worksheet, or the other way round.
-          </InfoTip>
-        </span>
+        {worksheet.booksElsewhere ? (
+          <span>
+            {KIND_HELP[kind].what} The worksheet holds{" "}
+            <strong>
+              <Money value={tie.worksheet} />
+            </strong>
+            : compare it with {tie.account?.code} {tie.account?.name} in your other software.
+          </span>
+        ) : (
+          <>
+            <span>
+              {KIND_HELP[kind].what} {KIND_HELP[kind].code}{" "}
+              <strong>
+                {tie.account?.code} {tie.account?.name}
+              </strong>
+              .
+            </span>
+            <span className={styles.tieResult}>
+              {matches ? <Badge tone="green">Matches the ledger</Badge> : <Badge tone="red">Out by {tie.difference.replace("-", "")}</Badge>}
+              <InfoTip label="What this checks">
+                The worksheet holds <Money value={tie.worksheet} /> and the account holds <Money value={tie.ledger} />. When they differ, something was coded to the account that
+                isn&apos;t on the worksheet, or the other way round.
+              </InfoTip>
+            </span>
+          </>
+        )}
       </div>
 
       <MonthEnd key={`${kind}:${nextMonth(worksheet, kind)}:${worksheet.posted[kind]?.runId ?? ""}`} organisationId={organisationId} kind={kind} worksheet={worksheet} busy={busy} send={send} />
 
       <Card title={SPREAD_KIND_LABELS[kind]}>
         {items.length === 0 ? <Empty picture="calendar">Nothing here yet.</Empty> : <ItemsGrid items={items} kind={kind} busy={busy} send={send} canEdit={can("bookkeeper")} />}
+        {kind === "income_in_advance"
+          ? worksheet.shopHeld.map((row) => (
+              <p key={row.account.id} className={styles.shopHeld}>
+                <span>
+                  Shop orders paid and not sent yet: <Money value={row.held} />. <Link href="/operations/to-send">To send</Link>
+                </span>
+                <span className={ui.muted}>
+                  {row.counted ? "They release when they're sent, and are counted in the check above." : `Held in ${row.account.code} ${row.account.name}, so not counted here.`}
+                </span>
+              </p>
+            ))
+          : null}
+        {items.length > 0 ? (
+          <button
+            type="button"
+            className={styles.linkButton}
+            onClick={() => void downloadFile(organisationId, { what: "worksheet", kind }, `spreading-${kind}.csv`).catch((caught) => setError(errorMessage(caught)))}
+          >
+            Download as a file
+          </button>
+        ) : null}
       </Card>
 
-      {can("bookkeeper") ? <AddItem key={kind} organisationId={organisationId} kind={kind} busy={busy} send={send} /> : null}
+      {can("bookkeeper") ? <AddItem key={kind} organisationId={organisationId} kind={kind} busy={busy} send={send} onImported={(text) => { setMessage(text); sheet.reload(); }} /> : null}
+      {can("admin") ? (
+        <label className={styles.setting}>
+          <input
+            type="checkbox"
+            checked={worksheet.booksElsewhere}
+            disabled={busy}
+            onChange={(event) =>
+              void send("PUT", "/api/spreading/settings", { booksElsewhere: event.target.checked }, event.target.checked ? "The worksheet now runs on its own. Download each month's journal to enter in your other software." : "The worksheet is checked against the ledger again.")
+            }
+          />
+          <span>
+            Our books are kept in other software
+            <span className={ui.muted}> · the worksheet runs on its own, and each month&apos;s journal is downloaded as a file</span>
+          </span>
+        </label>
+      ) : null}
     </>
   );
 }
@@ -289,9 +351,14 @@ function MonthEnd({ organisationId, kind, worksheet, busy, send }: { organisatio
               </tbody>
             </table>
           </div>
-          <button type="button" className={styles.linkButton} aria-expanded={showJournal} onClick={() => setShowJournal(!showJournal)}>
-            {showJournal ? "Hide the journal" : "Show the journal"}
-          </button>
+          <div className={styles.rowActions}>
+            <button type="button" className={styles.linkButton} aria-expanded={showJournal} onClick={() => setShowJournal(!showJournal)}>
+              {showJournal ? "Hide the journal" : "Show the journal"}
+            </button>
+            <button type="button" className={styles.linkButton} onClick={() => void downloadFile(organisationId, { what: "journal", kind, month }, `spreading-${kind}-${month}.csv`).catch(() => undefined)}>
+              Download the journal
+            </button>
+          </div>
           {showJournal ? (
             <div className={ui.tableWrap}>
               <table className={`${ui.table} ${ui.stackOnPhone}`}>
@@ -391,7 +458,7 @@ function ItemsGrid({ items, kind, busy, send, canEdit }: { items: SpreadItem[]; 
                       </div>
                       {item.source ? (
                         <div>
-                          <Link href={`/operations/${item.source.kind === "bill" ? "bills" : "invoices"}/${item.source.documentId}`}>{item.source.label}</Link>
+                          <Link href={`/operations/${item.source.kind === "bill" ? "bills" : item.source.kind === "invoice" ? "invoices" : "bank-transactions"}/${item.source.documentId}`}>{item.source.label}</Link>
                         </div>
                       ) : null}
                       <Badge tone={status.tone}>{status.label}</Badge>
@@ -418,6 +485,19 @@ function ItemsGrid({ items, kind, busy, send, canEdit }: { items: SpreadItem[]; 
                           {canEnd ? (
                             <Button size="small" variant="secondary" disabled={busy} onClick={() => setActing({ id: item.id, action: "end" })}>
                               End early
+                            </Button>
+                          ) : null}
+                          {item.canUnsettle ? (
+                            <Button
+                              size="small"
+                              variant="secondary"
+                              disabled={busy}
+                              onClick={async () => {
+                                if (!(await confirm(`Undo "${KIND_HELP[kind].arrived.toLowerCase()}" for ${item.description}? It goes back to waiting.`))) return;
+                                void send("POST", `/api/spreading/items/${item.id}/unsettle`, {}, `${item.description} is waiting again.`);
+                              }}
+                            >
+                              Undo {KIND_HELP[kind].arrived.toLowerCase()}
                             </Button>
                           ) : null}
                           {canRemove ? (
@@ -512,7 +592,24 @@ function ItemsGrid({ items, kind, busy, send, canEdit }: { items: SpreadItem[]; 
   );
 }
 
-function AddItem({ organisationId, kind, busy, send }: { organisationId: string; kind: SpreadKind; busy: boolean; send: Send }) {
+function AddItem({ organisationId, kind, busy, send, onImported }: { organisationId: string; kind: SpreadKind; busy: boolean; send: Send; onImported: (text: string) => void }) {
+  const [importing, setImporting] = useState(false);
+  const [importError, setImportError] = useState<string | null>(null);
+  const [importKey, setImportKey] = useState(() => newIdempotencyKey("import"));
+
+  async function bringIn(file: File) {
+    setImportError(null);
+    try {
+      const csv = await file.text();
+      const done = await api<{ added: number }>("/api/spreading/import", { method: "POST", body: { organisationId, idempotencyKey: importKey, csv } });
+      setImportKey(newIdempotencyKey("import"));
+      setImporting(false);
+      onImported(`${done.added} ${done.added === 1 ? "item" : "items"} brought in.`);
+    } catch (caught) {
+      setImportError(errorMessage(caught));
+    }
+  }
+
   const accounts = useAccounts(organisationId);
   const [open, setOpen] = useState(false);
   const [description, setDescription] = useState("");
@@ -529,8 +626,33 @@ function AddItem({ organisationId, kind, busy, send }: { organisationId: string;
 
   if (!open) {
     return (
-      <div>
-        <Button onClick={() => setOpen(true)}>Add {SPREAD_KIND_LABELS[kind].toLowerCase()}</Button>
+      <div className={ui.stack}>
+        <div className={styles.rowActions}>
+          <Button onClick={() => setOpen(true)}>Add {SPREAD_KIND_LABELS[kind].toLowerCase()}</Button>
+          <Button variant="secondary" onClick={() => setImporting(!importing)}>
+            Bring in from a file
+          </Button>
+        </div>
+        {importing ? (
+          <Card title="Bring in from a file" description="A CSV file with a row for each item, any of the four kinds. All of them are added, or none if a row has a problem.">
+            {importError ? <Notice tone="error">{importError}</Notice> : null}
+            <div className={ui.stack}>
+              <button type="button" className={styles.linkButton} onClick={() => void downloadFile(organisationId, { what: "template" }, "spreading-import.csv").catch((caught) => setImportError(errorMessage(caught)))}>
+                Download a file to fill in
+              </button>
+              <input
+                type="file"
+                accept=".csv,text/csv"
+                aria-label="CSV file"
+                onChange={(event) => {
+                  const file = event.target.files?.[0];
+                  if (file) void bringIn(file);
+                  event.target.value = "";
+                }}
+              />
+            </div>
+          </Card>
+        ) : null}
       </div>
     );
   }

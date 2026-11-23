@@ -27,10 +27,41 @@ const METHODS: Array<{ value: SpreadMethod; label: string }> = [
   { value: "when_done", label: "When it's done" },
 ];
 
-export function SpreadThisCard({ organisationId, billId, invoiceId }: { organisationId: string; billId?: string; invoiceId?: string }) {
+type Accrual = { id: string; description: string; accrued: string; targetCode: string; targetName: string };
+
+/** What the server says when months that had already posted were caught up (SW18). */
+export function caughtUpText(caughtUp: { months: number; amount: string; into: string } | null | undefined): string {
+  if (!caughtUp) return "";
+  const [year, month] = caughtUp.into.split("-");
+  const name = ["January", "February", "March", "April", "May", "June", "July", "August", "September", "October", "November", "December"][Number(month) - 1];
+  return ` ${caughtUp.months === 1 ? "One month has" : `${caughtUp.months} months have`} already been posted, so ${caughtUp.amount} is caught up in ${name} ${year}.`;
+}
+
+export function SpreadThisCard({
+  organisationId,
+  billId,
+  invoiceId,
+  bankTransactionId,
+  always,
+}: {
+  organisationId: string;
+  billId?: string;
+  invoiceId?: string;
+  bankTransactionId?: string;
+  /** Say why there's nothing to spread instead of showing nothing (when a button opened it). */
+  always?: boolean;
+}) {
   const { can } = useWorkspace();
-  const found = useApiData<{ holding: SpreadAccount | null; lines: SourceLine[] }>("/api/spreading/lines", { organisationId, billId: billId ?? null, invoiceId: invoiceId ?? null });
+  const found = useApiData<{ holding: SpreadAccount | null; lines: SourceLine[]; accruals: Accrual[] }>("/api/spreading/lines", {
+    organisationId,
+    billId: billId ?? null,
+    invoiceId: invoiceId ?? null,
+    bankTransactionId: bankTransactionId ?? null,
+  });
   const [open, setOpen] = useState<string | null>(null);
+  // "spread" puts the line on the worksheet; "accrual" says it's the bill or invoice an accrual was waiting for (SW20).
+  const [mode, setMode] = useState<"spread" | "accrual">("spread");
+  const [accrualId, setAccrualId] = useState("");
   const [method, setMethod] = useState<SpreadMethod>("by_month");
   const [startDate, setStartDate] = useState("");
   const [endDate, setEndDate] = useState("");
@@ -42,11 +73,18 @@ export function SpreadThisCard({ organisationId, billId, invoiceId }: { organisa
 
   const holding = found.data?.holding ?? null;
   const lines = (found.data?.lines ?? []).filter((line) => line.itemId || !line.reason);
-  if (!holding || lines.length === 0) return null;
-  const isBill = Boolean(billId);
+  const accruals = found.data?.accruals ?? [];
+  if (!holding || lines.length === 0) {
+    if (!always || !found.data) return null;
+    return <Notice>{holding ? "Nothing on this can be spread: it needs a line on an expense or income account." : "Turn Spreading on first, under Accounting."}</Notice>;
+  }
+  const isCost = lines[0].isCost;
+  const lineKey = billId ? "billLineId" : invoiceId ? "invoiceLineId" : "bankLineId";
   const dated = method === "by_month" || method === "by_days";
 
-  function start(line: SourceLine) {
+  function start(line: SourceLine, as: "spread" | "accrual") {
+    setMode(as);
+    setAccrualId(accruals[0]?.id ?? "");
     setOpen(line.lineId);
     setError(null);
     setMessage(null);
@@ -58,13 +96,19 @@ export function SpreadThisCard({ organisationId, billId, invoiceId }: { organisa
     setBusy(true);
     setError(null);
     try {
-      const body: Record<string, unknown> = { organisationId, source: "ui", idempotencyKey: itemKey, method, [isBill ? "billLineId" : "invoiceLineId"]: line.lineId };
-      if (dated) Object.assign(body, { startDate, endDate });
-      if (method === "one_month") body.month = month;
-      await api("/api/spreading/items", { method: "POST", body });
-      setItemKey(newIdempotencyKey("spread"));
+      if (mode === "accrual") {
+        const accrual = accruals.find((each) => each.id === accrualId);
+        await api(`/api/spreading/items/${accrualId}/settle`, { method: "POST", body: { organisationId, source: "ui", [lineKey]: line.lineId } });
+        setMessage(`${accrual?.description ?? "The accrual"} is marked at ${line.amount}.`);
+      } else {
+        const body: Record<string, unknown> = { organisationId, source: "ui", idempotencyKey: itemKey, method, [lineKey]: line.lineId };
+        if (dated) Object.assign(body, { startDate, endDate });
+        if (method === "one_month") body.month = month;
+        const made = await api<{ caughtUp: { months: number; amount: string; into: string } | null }>("/api/spreading/items", { method: "POST", body });
+        setItemKey(newIdempotencyKey("spread"));
+        setMessage(`${line.description} is on the Spreading worksheet.${caughtUpText(made.caughtUp)}`);
+      }
       setOpen(null);
-      setMessage(`${line.description} is on the Spreading worksheet.`);
       found.reload();
     } catch (caught) {
       setError(errorMessage(caught));
@@ -75,12 +119,12 @@ export function SpreadThisCard({ organisationId, billId, invoiceId }: { organisa
 
   return (
     <Card
-      title={isBill ? "Paid for ahead?" : "Invoiced ahead?"}
-      description={
-        isBill
+      title={isCost ? "Paid for ahead?" : invoiceId ? "Invoiced ahead?" : "Paid ahead?"}
+      description={`${
+        isCost
           ? `Spread a line over the months it covers. Its cost without GST waits in ${holding.code} ${holding.name} and each month takes its share.`
           : `Spread a line over the months you earn it. Its amount without GST waits in ${holding.code} ${holding.name} and each month takes its share.`
-      }
+      }${accruals.length > 0 ? (isCost ? " Or say it's the bill for something on Not billed yet." : " Or say it's for something on Not invoiced yet.") : ""}`}
     >
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
@@ -98,12 +142,42 @@ export function SpreadThisCard({ organisationId, billId, invoiceId }: { organisa
               {line.itemId ? (
                 <Link href="/operations/spreading">On the Spreading worksheet</Link>
               ) : can("bookkeeper") && open !== line.lineId ? (
-                <Button size="small" variant="secondary" onClick={() => start(line)}>
-                  Spread this
-                </Button>
+                <span className={styles.rowActions}>
+                  <Button size="small" variant="secondary" onClick={() => start(line, "spread")}>
+                    Spread this
+                  </Button>
+                  {accruals.length > 0 ? (
+                    <Button size="small" variant="secondary" onClick={() => start(line, "accrual")}>
+                      {isCost ? "It's for something not billed yet" : "It's for something not invoiced yet"}
+                    </Button>
+                  ) : null}
+                </span>
               ) : null}
             </div>
-            {open === line.lineId ? (
+            {open === line.lineId && mode === "accrual" ? (
+              <div className={styles.sourceForm}>
+                <div className={styles.form}>
+                  <Field label="Which one" hint="It's marked at this line's amount, and any difference goes in the month's journal.">
+                    <select value={accrualId} onChange={(event) => setAccrualId(event.target.value)}>
+                      {accruals.map((accrual) => (
+                        <option key={accrual.id} value={accrual.id}>
+                          {accrual.description} ({accrual.accrued} so far)
+                        </option>
+                      ))}
+                    </select>
+                  </Field>
+                </div>
+                <div className={styles.rowActions}>
+                  <Button disabled={busy || !accrualId} onClick={() => void save(line)}>
+                    Save
+                  </Button>
+                  <Button variant="secondary" onClick={() => setOpen(null)}>
+                    Cancel
+                  </Button>
+                </div>
+              </div>
+            ) : null}
+            {open === line.lineId && mode === "spread" ? (
               <div className={styles.sourceForm}>
                 <div className={styles.form}>
                   <Field label="How">

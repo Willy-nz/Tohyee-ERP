@@ -8,6 +8,8 @@ import * as undoRoute from "@/app/api/spreading/runs/[runId]/undo/route";
 import * as settingsRoute from "@/app/api/spreading/settings/route";
 import { createAccount } from "@/lib/accounts/service";
 import type { SessionUser } from "@/lib/auth/sessions";
+import { listBankAccounts } from "@/lib/bank/accounts";
+import { createBankTransaction, voidBankTransaction } from "@/lib/bank/transactions";
 import { approveBill, createBill, voidBill } from "@/lib/bills/service";
 import { createContact } from "@/lib/contacts/service";
 import { coreQuery } from "@/lib/db/transactions";
@@ -29,7 +31,9 @@ import {
   removeSpreadItem,
   saveSpreadingSettings,
   settleSpreadItem,
+  unsettleSpreadItem,
 } from "@/lib/spreading/service";
+import { importSpreadItems, monthJournalFile, worksheetFile } from "@/lib/spreading/files";
 import { listSourceLines } from "@/lib/spreading/sources";
 import { apiRequest, createTestOrganisation, createTestUser, describeWithDatabase, inOrganisation, key, sessionCookieFor, startTestServer, type TestServer } from "../helpers/test-server";
 
@@ -193,7 +197,9 @@ describeWithDatabase("spreading", () => {
     expect((await w.post("prepayment", "2026-07")).total).toBe("100.00");
     expect((await w.worksheet()).posted.income_in_advance?.month).toBe("2026-07");
     // A new item can't start in a month its kind has posted.
-    await expect(w.add({ kind: "income_in_advance", description: "Late", targetAccountCode: "4000", amount: "100", method: "one_month", month: "2026-07" })).rejects.toThrow(/posted to 2026-07/);
+    // A new item for a month its kind has posted is caught up in the next one (SW18).
+    const late = await w.add({ kind: "income_in_advance", description: "Late", targetAccountCode: "4000", amount: "100", method: "one_month", month: "2026-07" });
+    expect(late.months).toEqual([{ month: "2026-08", lineKind: "share", amount: "100.00", runId: null }]);
     expect((await w.undo(empty.id)).undoJournalId).toBeNull();
   });
 
@@ -476,6 +482,175 @@ describeWithDatabase("spreading", () => {
       [held, "200.00", "0.00"],
     ]);
     await expect(w.as((tx) => voidInvoice(tx, invoice.id, { idempotencyKey: key("void"), voidDate: "2026-10-01" }))).rejects.toThrow(/on the Spreading worksheet/);
+  });
+
+  it("SW18: months already posted are caught up in the next month, however the item was added", async () => {
+    const w = await setup();
+    await w.insurance();
+    for (const month of ["2026-07", "2026-08", "2026-09", "2026-10"]) await w.post("prepayment", month);
+    await w.journal("2026-07-01", "LATE-BILL", [
+      ["1200", "1200.00", "0"],
+      ["2000", "0", "1200.00"],
+    ]);
+    const result = await w.asAroha((tx) => createSpreadItem(tx, { idempotencyKey: key("item"), kind: "prepayment", description: "Second policy", targetAccountCode: "6080", amount: "1200.00", startDate: "2026-07-01", endDate: "2027-06-30" }));
+    expect(result.caughtUp).toEqual({ months: 4, amount: "400.00", into: "2026-11" });
+    expect(result.item.months).toHaveLength(8);
+    expect(result.item.months[0]).toMatchObject({ month: "2026-11", amount: "500.00" });
+    const november = await w.post("prepayment", "2026-11");
+    expect(november.total).toBe("600.00");
+    expect((await w.item(result.item.id)).left).toBe("700.00");
+    expect((await w.tie("prepayment")).difference).toBe("0.00");
+  });
+
+  it("SW19: Spread this on a spend money line, which then can't be voided or recoded", async () => {
+    const w = await setup();
+    const bank = (await w.as((tx) => listBankAccounts(tx))).find((account) => account.code === "1000")!;
+    const supplier = (await w.as((tx) => createContact(tx, { idempotencyKey: key("contact"), name: "FMG", isSupplier: true }))).contact;
+    const spend = (
+      await w.as((tx) =>
+        createBankTransaction(tx, { idempotencyKey: key("spend"), kind: "spend", accountId: bank.id, contactId: supplier.id, date: "2026-07-01", amountsMode: "inclusive", lines: [{ description: "Insurance", accountCode: "6080", taxCode: "GST", amount: "690.00" }] }),
+      )
+    ).bankTransaction;
+    const [line] = await w.as((tx) => listSourceLines(tx, "bank", spend.id));
+    expect(line).toMatchObject({ kind: "prepayment", accrualKind: "accrued_expense", amount: "600.00", reason: null, label: "Money spent 2026-07-01, FMG" });
+    const item = await w.add({ bankLineId: line.lineId, startDate: "2026-07-01", endDate: "2027-06-30" });
+    expect(item).toMatchObject({ kind: "prepayment", amount: "600.00", description: "Insurance" });
+    expect(item.source).toMatchObject({ kind: "bank", documentId: spend.id });
+    expect(await w.balance("6080")).toBe("0.00");
+    expect(await w.balance("1200")).toBe("600.00");
+    expect(await w.balance("2100")).toBe("90.00");
+    expect((await w.tie("prepayment")).difference).toBe("0.00");
+    await expect(w.as((tx) => voidBankTransaction(tx, spend.id, { idempotencyKey: key("void"), voidDate: "2026-07-01" }))).rejects.toThrow(/on the Spreading worksheet/);
+    await expect(w.as((tx) => recodeLine(tx, { idempotencyKey: key("recode"), documentType: "bank_transaction", documentId: spend.id, lineOrder: 1, accountCode: "6000", reason: "Wrong account" }))).rejects.toThrow(/on the Spreading worksheet/);
+    await w.asAroha((tx) => removeSpreadItem(tx, item.id));
+    expect(await w.balance("6080")).toBe("600.00");
+    expect((await w.as((tx) => voidBankTransaction(tx, spend.id, { idempotencyKey: key("void"), voidDate: "2026-07-01" }))).bankTransaction.status).toBe("voided");
+  });
+
+  it("SW20, SW21: the bill for an accrual, and undoing it", async () => {
+    const w = await setup();
+    const held = w.settings.accrued_expense!.code;
+    await w.as((tx) => createAccount(tx, { code: "6470", name: "Rates", accountType: "expense" }));
+    const rates = await w.add({ kind: "accrued_expense", description: "Rates", targetAccountCode: "6470", amount: "1200.00", startDate: "2026-07-01", endDate: "2026-10-31" });
+    for (const month of ["2026-07", "2026-08", "2026-09"]) await w.post("accrued_expense", month);
+    const council = (await w.as((tx) => createContact(tx, { idempotencyKey: key("contact"), name: "Clutha District Council", isSupplier: true }))).contact;
+    const bill = (
+      await w.as((tx) =>
+        createBill(tx, { idempotencyKey: key("bill"), contactId: council.id, billDate: "2026-10-05", dueDate: "2026-11-20", supplierInvoiceNumber: "R-55", amountsMode: "exclusive", lines: [{ description: "Rates instalment", quantity: "1", unitPrice: "920.00", accountCode: "6470", taxCode: "GST" }] }),
+      )
+    ).bill;
+    await w.as((tx) => approveBill(tx, bill.id, { idempotencyKey: key("approve") }));
+    const [line] = await w.as((tx) => listSourceLines(tx, "bill", bill.id));
+    // The bill's card offers the accrual.
+    const listed = await linesRoute.GET(apiRequest(`/api/spreading/lines?organisationId=${w.org}&billId=${bill.id}`, { cookie: await sessionCookieFor(viewer) }), noContext);
+    expect(((await listed.json()) as { accruals: unknown[] }).accruals).toEqual([{ id: rates.id, description: "Rates", accrued: "900.00", targetCode: "6470", targetName: "Rates" }]);
+    // An invoice can't settle a cost.
+    const billed = await w.asAroha((tx) => settleSpreadItem(tx, rates.id, { billLineId: line.lineId }));
+    expect(billed).toMatchObject({ settledMonth: "2026-10", settledAmount: "920.00", left: "-20.00", canUnsettle: true });
+    expect(billed.source).toMatchObject({ kind: "bill", documentId: bill.id });
+    // October's 300.00 share was dropped for the 20.00 difference.
+    expect(billed.months.at(-1)).toMatchObject({ month: "2026-10", lineKind: "difference", amount: "20.00" });
+    const move = await w.as((tx) => tx.query<{ id: string }>("select move_journal_id::text as id from spread_items where id = $1", [rates.id]));
+    expect(await w.lines(move.rows[0].id)).toEqual([
+      [held, "920.00", "0.00"],
+      ["6470", "0.00", "920.00"],
+    ]);
+    expect(await w.balance(held)).toBe("20.00");
+    expect((await w.tie("accrued_expense")).difference).toBe("0.00");
+    await expect(w.as((tx) => voidBill(tx, bill.id, { idempotencyKey: key("void"), voidDate: "2026-10-05" }))).rejects.toThrow(/on the Spreading worksheet/);
+
+    // SW21: undone, the dropped month is back and the bill's cost is on Rates again.
+    const undone = await w.asAroha((tx) => unsettleSpreadItem(tx, rates.id));
+    expect(undone).toMatchObject({ settledMonth: null, settledAmount: null, source: null, left: "900.00" });
+    expect(undone.months.at(-1)).toMatchObject({ month: "2026-10", lineKind: "share", amount: "300.00", runId: null });
+    expect(await w.balance(held)).toBe("-900.00");
+    expect(await w.balance("6470")).toBe("1820.00");
+    expect((await w.tie("accrued_expense")).difference).toBe("0.00");
+    await expect(w.asAroha((tx) => unsettleSpreadItem(tx, rates.id))).rejects.toThrow(/hasn't been marked/);
+
+    // Marked again, then October posts the difference; after that it can't be undone until October is.
+    await w.asAroha((tx) => settleSpreadItem(tx, rates.id, { billLineId: line.lineId }));
+    const october = await w.post("accrued_expense", "2026-10");
+    expect(await w.lines(october.journalId)).toEqual([
+      ["6470", "20.00", "0.00"],
+      [held, "0.00", "20.00"],
+    ]);
+    expect(await w.balance(held)).toBe("0.00");
+    expect(await w.balance("6470")).toBe("920.00");
+    expect(await w.item(rates.id)).toMatchObject({ finished: true, canUnsettle: false, left: "0.00" });
+    await expect(w.asAroha((tx) => unsettleSpreadItem(tx, rates.id))).rejects.toThrow(/Undo that month first/);
+  });
+
+  it("SW22: shop orders paid and not sent are one line that the check counts when they share the account", async () => {
+    const w = await setup();
+    const held = w.settings.income_in_advance!;
+    await w.journal("2026-10-01", "SUB", [
+      ["1100", "2750.00", "0"],
+      [held.code, "0", "2750.00"],
+    ]);
+    await w.add({ kind: "income_in_advance", description: "Year's subscription", targetAccountCode: "4000", amount: "2400.00", startDate: "2026-10-01", endDate: "2027-09-30" });
+    expect((await w.tie("income_in_advance")).difference).toBe("350.00");
+    // What Sales when sent holds for an order, as it records it.
+    const other = (await w.as((tx) => createAccount(tx, { code: "2590", name: "Deposits held", accountType: "current_liability" }))).id;
+    const holdLine = async (accountId: string, external: string, amount: string, recognised: string, closed = false) =>
+      w.as(async (tx) => {
+        const connection = await tx.query<{ id: string }>(
+          `insert into sales_platform_connections (platform, store_domain, auth_method, webhook_key, connected_by_email, credentials_ciphertext)
+           values ('shopify', $1, 'token', $2, 'jade@example.com', 'not-a-real-secret') returning id::text`,
+          [`${external}.example.myshopify.com`, `${external}-`.padEnd(40, "k")],
+        );
+        const income = await tx.query<{ id: string }>("select id::text from accounts where code = '4000'");
+        await tx.query(
+          `insert into sales_platform_held_lines (connection_id, order_external_id, line_kind, line_external_id, description, income_account_id, held_account_id, quantity, amount, recognised_amount, closed)
+           values ($1, $2, 'line', $2, 'Paw print pendant', $3, $4, 1, $5::numeric, $6::numeric, $7)`,
+          [connection.rows[0].id, external, income.rows[0].id, accountId, amount, recognised, closed],
+        );
+      });
+    await holdLine(held.id, "order-1", "400.00", "50.00");
+    await holdLine(held.id, "order-2", "999.00", "999.00", true);
+    await holdLine(other, "order-3", "80.00", "0.00");
+    const sheet = await w.worksheet();
+    expect(sheet.shopHeld).toEqual([
+      { account: { id: held.id, code: held.code, name: held.name }, held: "350.00", counted: true },
+      { account: { id: other, code: "2590", name: "Deposits held" }, held: "80.00", counted: false },
+    ]);
+    expect(await w.tie("income_in_advance")).toMatchObject({ worksheet: "2750.00", ledger: "2750.00", difference: "0.00" });
+  });
+
+  it("SW23: books kept elsewhere: the month's journal and the worksheet as files, and items brought in from one", async () => {
+    const w = await setup();
+    expect((await w.worksheet()).booksElsewhere).toBe(false);
+    await w.as((tx) => saveSpreadingSettings(tx, { booksElsewhere: true }));
+    // Saving the accounts again leaves the choice alone.
+    await w.as((tx) => saveSpreadingSettings(tx, {}));
+    expect((await w.worksheet()).booksElsewhere).toBe(true);
+
+    const csv = ["Kind,What,Amount,Account code,How,From,To,Month", "Paid in advance,Farm insurance,1200.00,6080,Evenly by month,1/7/2026,30/6/2027,", "income in advance,Event deposit,500,4000,All in one month,,,2027-03", ",,,,,,,"].join("\r\n");
+    const importKey = key("import");
+    expect(await w.asAroha((tx) => importSpreadItems(tx, { idempotencyKey: importKey, csv }))).toEqual({ added: 2 });
+    // The same file again adds nothing.
+    expect(await w.asAroha((tx) => importSpreadItems(tx, { idempotencyKey: importKey, csv }))).toEqual({ added: 0 });
+    const items = (await w.worksheet()).items;
+    expect(items.map((item) => [item.kind, item.description, item.amount, item.months.length])).toEqual([
+      ["prepayment", "Farm insurance", "1200.00", 12],
+      ["income_in_advance", "Event deposit", "500.00", 1],
+    ]);
+    // One bad row and none are added.
+    const bad = ["Kind,What,Amount,Account code,How,From,To,Month", "Paid in advance,Levy,100,6080,Evenly by month,2026-07-01,2026-12-31,", "Paid in advance,Oops,100,9999,All in one month,,,2026-08"].join("\n");
+    await expect(w.asAroha((tx) => importSpreadItems(tx, { idempotencyKey: key("import"), csv: bad }))).rejects.toThrow("Row 3: There's no account 9999.");
+    expect((await w.worksheet()).items).toHaveLength(2);
+    await expect(w.asAroha((tx) => importSpreadItems(tx, { idempotencyKey: key("import"), csv: "What,Amount\nA,1" }))).rejects.toThrow(/Missing: Kind, Account code/);
+
+    // July's journal before and after posting is the same two rows.
+    const expected = "Date,Reference,Description,Account code,Account name,Debit,Credit\r\n2026-07-31,SPREAD-PAID-2026-07,Farm insurance - July 2026,6080,Insurance,100.00,\r\n2026-07-31,SPREAD-PAID-2026-07,Farm insurance - July 2026,1200,Prepayments,,100.00\r\n";
+    const before = await w.as((tx) => monthJournalFile(tx, "prepayment", "2026-07"));
+    expect(before).toEqual({ fileName: "spreading-paid-in-advance-2026-07.csv", csv: expected });
+    await w.post("prepayment", "2026-07");
+    expect((await w.as((tx) => monthJournalFile(tx, "prepayment", "2026-07"))).csv).toBe(expected);
+    const sheet = await w.as((tx) => worksheetFile(tx, "prepayment"));
+    const lines = sheet.csv.trim().split("\r\n");
+    expect(lines[0]).toBe("What,Account code,Account name,How,From,To,Amount,Left,2026-07,2026-08,2026-09,2026-10,2026-11,2026-12,2027-01,2027-02,2027-03,2027-04,2027-05,2027-06");
+    expect(lines[1]).toBe(`Farm insurance,6080,Insurance,Evenly by month,2026-07-01,2027-06-30,1200.00,1100.00,${Array(12).fill("100.00").join(",")}`);
   });
 
   it("the API: viewers read, bookkeepers add and post, admins change the accounts", async () => {
