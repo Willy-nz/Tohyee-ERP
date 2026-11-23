@@ -5,7 +5,8 @@ import { todayIsoDate } from "@/lib/dates";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { dec, toFixedString } from "@/lib/money/decimal";
-import { type FieldType, fieldOf, RECORD_TYPES, type RecordType, recordType } from "@/lib/saved-searches/catalogue";
+import { type FieldType, fieldOf, type RecordType, recordType } from "@/lib/saved-searches/catalogue";
+import { loadRecordTypes } from "@/lib/saved-searches/org-catalogue";
 import { buildSearch, parseDefinition, type SearchDefinition } from "@/lib/saved-searches/query";
 import { asRecord, optionalId, requireId, requireString } from "@/lib/validation";
 
@@ -42,14 +43,14 @@ function isAdmin(tx: OrgTx): boolean {
   return tx.actor.role === undefined || roleAtLeast(tx.actor.role, "admin");
 }
 
-function requireType(key: unknown): RecordType {
-  const type = recordType(key);
-  if (!type) throw new ValidationError(`Choose what to search: ${RECORD_TYPES.map((each) => each.label).join(", ")}.`);
+function requireType(types: readonly RecordType[], key: unknown): RecordType {
+  const type = recordType(key, types);
+  if (!type) throw new ValidationError(`Choose what to search: ${types.map((each) => each.label).join(", ")}.`);
   return type;
 }
 
-function toSaved(tx: OrgTx, row: Row): SavedSearch | null {
-  const type = recordType(row.record_type);
+function toSaved(tx: OrgTx, types: readonly RecordType[], row: Row): SavedSearch | null {
+  const type = recordType(row.record_type, types);
   // A search for a kind of record this version no longer has is left out, not broken.
   if (!type) return null;
   let definition: SearchDefinition;
@@ -79,7 +80,8 @@ const SELECT = "select id::text, record_type, name, definition, shared, owner_us
 /** This person's searches and the shared ones, by name. */
 export async function listSavedSearches(tx: OrgTx): Promise<SavedSearch[]> {
   const result = await tx.query<Row>(`${SELECT} where shared or owner_user_id = $1 or (owner_user_id is null and owner_email = $2) order by lower(name), id`, [tx.actor.userId, tx.actor.email]);
-  return result.rows.map((row) => toSaved(tx, row)).filter((search): search is SavedSearch => search !== null);
+  const types = await loadRecordTypes(tx);
+  return result.rows.map((row) => toSaved(tx, types, row)).filter((search): search is SavedSearch => search !== null);
 }
 
 async function loadRow(tx: OrgTx, idInput: unknown, lock = false): Promise<Row> {
@@ -92,7 +94,7 @@ async function loadRow(tx: OrgTx, idInput: unknown, lock = false): Promise<Row> 
 }
 
 export async function getSavedSearch(tx: OrgTx, idInput: unknown): Promise<SavedSearch> {
-  const saved = toSaved(tx, await loadRow(tx, idInput));
+  const saved = toSaved(tx, await loadRecordTypes(tx), await loadRow(tx, idInput));
   if (!saved) throw new NotFoundError("That saved search wasn't found.");
   return saved;
 }
@@ -108,13 +110,13 @@ export async function saveSavedSearch(tx: OrgTx, bodyInput: unknown): Promise<Sa
     const row = await loadRow(tx, id, true);
     if (!(isMine(tx, row) || isAdmin(tx))) throw new ForbiddenError("Only the person who made a shared search, or an admin, can change it. Save your own copy instead.");
     // A saved search keeps its kind of record: another kind is another search.
-    const type = requireType(row.record_type);
+    const type = requireType(await loadRecordTypes(tx), row.record_type);
     const definition = parseDefinition(type, body.definition);
     await tx.query("update saved_searches set name = $2, definition = $3::jsonb, shared = $4, updated_at = now(), updated_by_email = $5 where id = $1", [id, name, JSON.stringify(definition), shared, tx.actor.email]);
     await writeAuditEvent(tx, { eventType: "saved_search.changed", entityType: "saved_search", entityId: id, details: { name, shared, recordType: type.key } });
     return getSavedSearch(tx, id);
   }
-  const type = requireType(body.recordType);
+  const type = requireType(await loadRecordTypes(tx), body.recordType);
   const definition = parseDefinition(type, body.definition);
   const inserted = await tx.query<{ id: string }>(
     `insert into saved_searches (record_type, name, definition, shared, owner_user_id, owner_email, updated_by_email) values ($1, $2, $3::jsonb, $4, $5, $6, $6) returning id::text`,
@@ -148,7 +150,7 @@ const PAGE = 100;
 
 /** Runs a definition against the live books. `today` can be given by a test; otherwise it's the business's date. */
 export async function runSearch(tx: OrgTx, input: { recordType: unknown; definition: unknown; offset?: unknown; limit?: unknown; today?: string }): Promise<SearchResult> {
-  const type = requireType(input.recordType);
+  const type = requireType(await loadRecordTypes(tx), input.recordType);
   const definition = parseDefinition(type, input.definition ?? {});
   const offsetRaw = Number(input.offset ?? 0);
   const offset = Number.isInteger(offsetRaw) && offsetRaw >= 0 && offsetRaw <= 1_000_000 ? offsetRaw : 0;

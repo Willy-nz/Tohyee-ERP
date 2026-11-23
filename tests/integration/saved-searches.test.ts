@@ -4,11 +4,17 @@ import * as exportRoute from "@/app/api/saved-searches/export/route";
 import * as searchesRoute from "@/app/api/saved-searches/route";
 import * as runRoute from "@/app/api/saved-searches/run/route";
 import type { SessionUser } from "@/lib/auth/sessions";
+import { listBankAccounts } from "@/lib/bank/accounts";
+import { createBankTransaction } from "@/lib/bank/transactions";
 import { createContact } from "@/lib/contacts/service";
+import { createCustomField } from "@/lib/custom-fields/service";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { coreQuery } from "@/lib/db/transactions";
 import { approveInvoice, createInvoice } from "@/lib/invoices/service";
+import { updateOrganisationSettings } from "@/lib/organisations/settings";
+import { loadRecordTypes } from "@/lib/saved-searches/org-catalogue";
 import { runSearch, type SavedSearch, type SearchResult } from "@/lib/saved-searches/service";
+import { createTrackingValue, getTrackingSetup } from "@/lib/tracking/service";
 import { apiRequest, createTestOrganisation, createTestUser, describeWithDatabase, inOrganisation, key, sessionCookieFor, startTestServer, type TestServer } from "../helpers/test-server";
 
 const noContext = undefined as unknown;
@@ -147,5 +153,78 @@ describeWithDatabase("saved searches", () => {
     expect((await remove("viewer", mine.id)).status).toBe(200);
     expect((await remove("owner", shared.id)).status).toBe(200);
     expect(await list("owner")).toEqual([]);
+  });
+
+  it("searches contacts, items and money spent, and by this organisation's own tracking and custom fields", async () => {
+    await as((tx) => updateOrganisationSettings(tx, { advancedFeatures: true }));
+    const department = (await as((tx) => getTrackingSetup(tx))).categories.find((category) => category.kind === "department")!.id;
+    const value = async (name: string) => (await as((tx) => createTrackingValue(tx, { categoryId: department, name }))).categories.find((category) => category.id === department)!.values.find((each) => each.name === name)!.id;
+    const farm = await value("Farm");
+    const shop = await value("Shop");
+    const fields = await as((tx) => createCustomField(tx, { record: "document", label: "Reference", type: "text", usedOn: ["invoice"] }));
+    const poField = fields.fields.find((field) => field.label === "Reference")!.id;
+    const listFields = await as((tx) => createCustomField(tx, { record: "document", label: "Channel", type: "list", usedOn: ["invoice"], options: ["Market", "Online"] }));
+    const channel = listFields.fields.find((field) => field.label === "Channel")!;
+    const online = channel.options.find((option) => option.name === "Online")!.id;
+
+    const types = await as((tx) => loadRecordTypes(tx));
+    const invoiceFields = types.find((type) => type.key === "invoice")!.fields;
+    // A custom field named like a built-in one says so; tracking on a document is "on any line".
+    expect(invoiceFields.filter((field) => field.key.startsWith("cf_") || field.key.startsWith("tr_")).map((field) => [field.key, field.label, field.type])).toEqual([
+      [`cf_${poField}`, "Reference (custom)", "text"],
+      [`cf_${channel.id}`, "Channel", "choice"],
+      [`tr_${department}`, "Department (on any line)", "choice"],
+    ]);
+    expect(types.find((type) => type.key === "journal_line")!.fields.some((field) => field.key === `tr_${department}` && field.label === "Department")).toBe(true);
+
+    const customer = (await as((tx) => createContact(tx, { idempotencyKey: key("contact"), name: "Market Stall", email: "stall@example.nz", isCustomer: true }))).contact;
+    const made = (
+      await as((tx) =>
+        createInvoice(tx, {
+          idempotencyKey: key("invoice"),
+          contactId: customer.id,
+          invoiceDate: "2026-11-21",
+          dueDate: "2026-12-05",
+          amountsMode: "exclusive",
+          customFields: { [poField]: "PO-77", [channel.id]: online },
+          lines: [
+            { description: "Milk", quantity: "1", unitPrice: "100.00", accountCode: "4000", taxCode: "GST", tracking: { [department]: farm } },
+            { description: "Cheese", quantity: "1", unitPrice: "50.00", accountCode: "4000", taxCode: "GST", tracking: { [department]: shop } },
+          ],
+        }),
+      )
+    ).invoice;
+    await as((tx) => approveInvoice(tx, made.id, { idempotencyKey: key("approve") }));
+
+    const byShop = await run("invoice", { filters: [{ field: `tr_${department}`, op: "is", value: shop }], columns: ["contact", `tr_${department}`, `cf_${poField}`, `cf_${channel.id}`, "total"] });
+    expect(byShop.rows.map((row) => row.cells)).toEqual([["Market Stall", "Farm, Shop", "PO-77", online, "172.50"]]);
+    expect(byShop.columns[3].choices).toEqual({ [channel.options[0].id]: "Market", [online]: "Online" });
+    // "Isn't" means no line has it: the three untracked invoices.
+    expect((await run("invoice", { filters: [{ field: `tr_${department}`, op: "is_not", value: shop }] })).matches).toBe(3);
+    expect((await run("invoice", { filters: [{ field: `cf_${channel.id}`, op: "is", value: online }, { field: `cf_${poField}`, op: "starts", value: "po-" }] })).matches).toBe(1);
+    await expect(run("invoice", { filters: [{ field: `tr_${department}`, op: "is", value: "999999" }] })).rejects.toThrow(/isn't one of its choices/);
+    // On a ledger line the tracking is the line's own.
+    const lines = await run("journal_line", { filters: [{ field: `tr_${department}`, op: "is", value: farm }], columns: ["description", "credit", `tr_${department}`] });
+    // An invoice's ledger lines are described by its customer.
+    expect(lines.rows.map((row) => row.cells)).toEqual([["Market Stall", "100.00", farm]]);
+    expect(lines.columns[2].choices).toMatchObject({ [farm]: "Farm" });
+
+    // Contacts: customers and suppliers, not people who are only sales prospects.
+    await as((tx) => tx.query("insert into contacts (command_source, idempotency_key, request_hash, name, is_customer, is_supplier, is_prospect) values ('test', $1, 'x', 'Maybe Later Ltd', false, false, true)", [key("contact")]));
+    const contacts = await run("contact", { filters: [{ field: "customer", op: "is", value: "true" }], columns: ["name", "email"], sort: { field: "name", direction: "asc" } });
+    expect(contacts.rows.map((row) => row.cells[0])).toEqual(["Coast Farm 100%", "Hill Station", "Market Stall"]);
+    expect((await run("contact", { filters: [{ field: "name", op: "contains", value: "maybe" }] })).matches).toBe(0);
+    expect((await run("contact", { filters: [{ field: "email", op: "not_empty" }] })).rows.map((row) => row.cells[0])).toEqual(["Market Stall"]);
+
+    const bank = (await as((tx) => listBankAccounts(tx))).find((account) => account.code === "1000")!;
+    const supplier = (await as((tx) => createContact(tx, { idempotencyKey: key("contact"), name: "Fuel Co", isSupplier: true }))).contact;
+    await as((tx) => createBankTransaction(tx, { idempotencyKey: key("spend"), kind: "spend", accountId: bank.id, contactId: supplier.id, date: "2026-11-22", amountsMode: "inclusive", lines: [{ description: "Diesel", accountCode: "6000", taxCode: "GST", amount: "115.00", tracking: { [department]: farm } }] }));
+    const spent = await run("bank_transaction", { filters: [{ field: "kind", op: "is", value: "spend" }, { field: `tr_${department}`, op: "is", value: farm }], columns: ["date", "contact", "total", "kind"] });
+    expect(spent.rows.map((row) => row.cells)).toEqual([["2026-11-22", "Fuel Co", "115.00", "spend"]]);
+    expect(spent.rows[0].href).toMatch(/^\/operations\/bank-transactions\/\d+$/);
+    expect(spent.totals).toEqual([null, null, "115.00", null]);
+
+    // Items: none in a new organisation, and the search still runs.
+    expect(await run("item", { filters: [{ field: "type", op: "is", value: "stock" }] })).toMatchObject({ matches: 0, rows: [] });
   });
 });
