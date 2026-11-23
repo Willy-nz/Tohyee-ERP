@@ -1,0 +1,25 @@
+.heading {
+  display: inline-flex;
+  align-items: center;
+  gap: 4px;
+  padding: 0;
+  border: 0;
+  background: none;
+  color: inherit;
+  font: inherit;
+  font-weight: inherit;
+  cursor: pointer;
+}
+
+.heading:hover {
+  text-decoration: underline;
+}
+
+.arrow {
+  width: 1ch;
+  font-size: 0.7em;
+}
+
+.numeric {
+  text-align: right;
+}

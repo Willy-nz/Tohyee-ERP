@@ -16,6 +16,9 @@ export const GET = route(async (request) => {
       contactId: params.get("contactId"),
       search: params.get("search"),
       beforeId: params.get("beforeId"),
+      sort: params.get("sort"),
+      direction: params.get("direction"),
+      offset: params.get("offset"),
       limit: params.get("limit"),
     }),
   );

@@ -16,6 +16,7 @@ import { parseIsoDate } from "@/lib/dates";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { listSearchPattern } from "@/lib/lists/search";
+import { listSort } from "@/lib/lists/sort";
 import { assertSameRequest, requestHash } from "@/lib/idempotency";
 import {
   AMOUNTS_MODES,
@@ -1000,6 +1001,9 @@ function assertDraft(bill: Bill, action: "edited" | "deleted"): void {
   }
 }
 
+/** The columns the list can be sorted by, as the screen names them. */
+const BILL_SORT_COLUMNS: Record<string, string> = { number: "b.supplier_invoice_number", contact: "lower(c.name)", date: "b.bill_date", due: "b.due_date", total: "b.total" };
+
 /**
  * Newest first, 50 at a time; `status` filters, `awaitingPayment` keeps only
  * approved bills with something still due, `contactId` keeps one supplier's
@@ -1007,14 +1011,16 @@ function assertDraft(bill: Bill, action: "edited" | "deleted"): void {
  */
 export async function listBills(
   tx: OrgTx,
-  filters: { status?: unknown; awaitingPayment?: unknown; contactId?: unknown; search?: unknown; beforeId?: unknown; limit?: unknown } = {},
-): Promise<{ bills: BillSummary[]; nextBeforeId: string | null }> {
+  filters: { status?: unknown; awaitingPayment?: unknown; contactId?: unknown; search?: unknown; beforeId?: unknown; limit?: unknown; sort?: unknown; direction?: unknown; offset?: unknown } = {},
+): Promise<{ bills: BillSummary[]; nextBeforeId: string | null; nextOffset: number | null }> {
   const status =
     filters.status == null || filters.status === "" ? null : requireOneOf(filters.status, "status", BILL_STATUSES);
   const awaitingPayment = optionalBoolean(filters.awaitingPayment, "awaitingPayment") ?? false;
   const contactId = optionalId(filters.contactId, "contactId");
   const search = listSearchPattern(filters.search);
-  const beforeId = optionalId(filters.beforeId, "beforeId");
+  // Sorted by a column, the list pages by position; otherwise newest first, paged from the last id.
+  const sort = listSort(filters, BILL_SORT_COLUMNS);
+  const beforeId = sort ? null : optionalId(filters.beforeId, "beforeId");
   const limitRaw = Number(filters.limit ?? 50);
   const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 200 ? limitRaw : 50;
   const result = await tx.query<BillRow>(
@@ -1023,15 +1029,32 @@ export async function listBills(
         and (not $3::boolean or (b.status = 'approved' and paid.amount_paid + credited.amount_credited < b.total))
         and ($4::bigint is null or b.contact_id = $4)
         and ($5::text is null or b.supplier_invoice_number ilike $5 or c.name ilike $5)
-      order by b.id desc
-      limit ${limit + 1}`,
+      order by ${sort ? `${sort.orderBy}, ` : ""}b.id desc
+      limit ${limit + 1}${sort ? ` offset ${sort.offset}` : ""}`,
     [status, beforeId, awaitingPayment, contactId, search],
   );
   const rows = result.rows.slice(0, limit);
   return {
     bills: rows.map(toSummary),
-    nextBeforeId: result.rows.length > limit ? rows[rows.length - 1].id : null,
+    nextBeforeId: !sort && result.rows.length > limit ? rows[rows.length - 1].id : null,
+    nextOffset: sort && result.rows.length > limit ? sort.offset + limit : null,
   };
+}
+
+/** How many bills each tab of the list holds (All, Drafts, Approved, Awaiting payment, Voided). */
+export type BillListCounts = { all: number; draft: number; approved: number; awaitingPayment: number; voided: number };
+
+export async function countBillsByTab(tx: OrgTx): Promise<BillListCounts> {
+  const result = await tx.query<{ all: string; draft: string; approved: string; awaiting: string; voided: string }>(
+    `select count(*) as all,
+        count(*) filter (where b.status = 'draft') as draft,
+        count(*) filter (where b.status = 'approved') as approved,
+        count(*) filter (where b.status = 'approved' and paid.amount_paid + credited.amount_credited < b.total) as awaiting,
+        count(*) filter (where b.status = 'voided') as voided
+      from ${SUMMARY_FROM}`,
+  );
+  const row = result.rows[0];
+  return { all: Number(row.all), draft: Number(row.draft), approved: Number(row.approved), awaitingPayment: Number(row.awaiting), voided: Number(row.voided) };
 }
 
 /**

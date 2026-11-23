@@ -14,6 +14,7 @@ import { parseIsoDate } from "@/lib/dates";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { listSearchPattern } from "@/lib/lists/search";
+import { listSort } from "@/lib/lists/sort";
 import { assertSameRequest, requestHash } from "@/lib/idempotency";
 import {
   AMOUNTS_MODES,
@@ -1030,6 +1031,9 @@ function assertDraft(invoice: Invoice, action: "edited" | "deleted"): void {
   }
 }
 
+/** The columns the list can be sorted by, as the screen names them. */
+const INVOICE_SORT_COLUMNS: Record<string, string> = { number: "i.invoice_number", contact: "lower(c.name)", date: "i.invoice_date", due: "i.due_date", total: "i.total" };
+
 /**
  * Newest first, 50 at a time; `status` filters, `awaitingPayment` keeps only
  * approved invoices with something still due (after payments and credit),
@@ -1037,14 +1041,16 @@ function assertDraft(invoice: Invoice, action: "edited" | "deleted"): void {
  */
 export async function listInvoices(
   tx: OrgTx,
-  filters: { status?: unknown; awaitingPayment?: unknown; contactId?: unknown; search?: unknown; beforeId?: unknown; limit?: unknown } = {},
-): Promise<{ invoices: InvoiceSummary[]; nextBeforeId: string | null }> {
+  filters: { status?: unknown; awaitingPayment?: unknown; contactId?: unknown; search?: unknown; beforeId?: unknown; limit?: unknown; sort?: unknown; direction?: unknown; offset?: unknown } = {},
+): Promise<{ invoices: InvoiceSummary[]; nextBeforeId: string | null; nextOffset: number | null }> {
   const status =
     filters.status == null || filters.status === "" ? null : requireOneOf(filters.status, "status", INVOICE_STATUSES);
   const awaitingPayment = optionalBoolean(filters.awaitingPayment, "awaitingPayment") ?? false;
   const contactId = optionalId(filters.contactId, "contactId");
   const search = listSearchPattern(filters.search);
-  const beforeId = optionalId(filters.beforeId, "beforeId");
+  // Sorted by a column, the list pages by position; otherwise newest first, paged from the last id.
+  const sort = listSort(filters, INVOICE_SORT_COLUMNS);
+  const beforeId = sort ? null : optionalId(filters.beforeId, "beforeId");
   const limitRaw = Number(filters.limit ?? 50);
   const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 200 ? limitRaw : 50;
   const result = await tx.query<InvoiceRow>(
@@ -1053,15 +1059,32 @@ export async function listInvoices(
         and (not $3::boolean or (i.status = 'approved' and paid.amount_paid + credited.amount_credited < i.total))
         and ($4::bigint is null or i.contact_id = $4)
         and ($5::text is null or i.invoice_number ilike $5 or c.name ilike $5 or i.reference ilike $5)
-      order by i.id desc
-      limit ${limit + 1}`,
+      order by ${sort ? `${sort.orderBy}, ` : ""}i.id desc
+      limit ${limit + 1}${sort ? ` offset ${sort.offset}` : ""}`,
     [status, beforeId, awaitingPayment, contactId, search],
   );
   const rows = result.rows.slice(0, limit);
   return {
     invoices: rows.map(toSummary),
-    nextBeforeId: result.rows.length > limit ? rows[rows.length - 1].id : null,
+    nextBeforeId: !sort && result.rows.length > limit ? rows[rows.length - 1].id : null,
+    nextOffset: sort && result.rows.length > limit ? sort.offset + limit : null,
   };
+}
+
+/** How many invoices each tab of the list holds (All, Drafts, Approved, Awaiting payment, Voided). */
+export type InvoiceListCounts = { all: number; draft: number; approved: number; awaitingPayment: number; voided: number };
+
+export async function countInvoicesByTab(tx: OrgTx): Promise<InvoiceListCounts> {
+  const result = await tx.query<{ all: string; draft: string; approved: string; awaiting: string; voided: string }>(
+    `select count(*) as all,
+        count(*) filter (where i.status = 'draft') as draft,
+        count(*) filter (where i.status = 'approved') as approved,
+        count(*) filter (where i.status = 'approved' and paid.amount_paid + credited.amount_credited < i.total) as awaiting,
+        count(*) filter (where i.status = 'voided') as voided
+      from ${SUMMARY_FROM}`,
+  );
+  const row = result.rows[0];
+  return { all: Number(row.all), draft: Number(row.draft), approved: Number(row.approved), awaitingPayment: Number(row.awaiting), voided: Number(row.voided) };
 }
 
 /**
