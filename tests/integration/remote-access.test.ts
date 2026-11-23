@@ -294,7 +294,8 @@ describeWithDatabase("remote access: a Tohyee address, your own domain (Cloudfla
       expect(stored.rows).toHaveLength(2);
       for (const row of stored.rows) {
         expect(row.secret_ciphertext).not.toContain("release-secret-123");
-        expect(row.secret_ciphertext).not.toContain("eyJ");
+        // The whole token, not its first three letters: the ciphertext is random text, and "eyJ" turns up in it by chance.
+        expect(row.secret_ciphertext).not.toContain(token("YWRkcmVzcw"));
         expect(row.secret_ciphertext).not.toContain(request?.body?.installId as string);
         expect(JSON.stringify(row.value)).not.toContain(request?.body?.installId as string);
       }
