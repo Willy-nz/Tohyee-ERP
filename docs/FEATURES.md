@@ -592,7 +592,7 @@ that something happened.
   year's depreciation by type, disposals this year, and ties to the ledger
   account by account. Tax depreciation beside book, pooling and low-value
   write-offs aren't built.
-- **Spreading** (Accounting, Month end; SW1-SW24, following common practice,
+- **Spreading** (Accounting, Month end; SW1-SW25, following common practice,
   not yet reviewed by the owner): one worksheet in place of the spreadsheet
   for costs **paid in advance**, **income in advance**, costs **not billed
   yet** and income **not invoiced yet**. Each kind has one balance sheet
@@ -630,6 +630,13 @@ that something happened.
   list a bill's lines, and at Make and post add an item, post a month, end
   an item early and mark one done or arrived; undoing a month or an
   arrival and removing an item need Full access and confirm first.
+  An item can carry **tracking and custom fields** (SW25): chosen when
+  it's added or with Spread this (which starts from the line's own
+  tracking), changed later with Tracking on its row for the months not yet
+  posted, and put on the income or expense line of each month's journal.
+  The journal's own custom fields are filled in on Month end. A required
+  tracking category stops a month until the item has one, and the preview
+  names the item.
 - **Projects and time tracking** (Sales; PJ1-PJ13, not yet approved by the owner), like project tracking in other accounting software: a **project** for a customer with an optional
   estimate and deadline, **In progress** or **Closed** (only by closing and
   reopening). **Tasks** are hourly (a rate), fixed price or non-chargeable,

@@ -23335,7 +23335,7 @@ dropdown.
 - **APS10** A name that isn't a salesperson shows **0.00** everywhere,
   never the whole report.
 
-## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW24; planned with the owner 23 Nov 2026, built by Claude; the details follow common practice and are not yet reviewed)
+## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW25; planned with the owner 23 Nov 2026, built by Claude; the details follow common practice and are not yet reviewed)
 
 Income or a cost often belongs to other months than the one it was billed
 or paid in. The Spreading worksheet replaces the spreadsheet kept for that.
@@ -23507,6 +23507,19 @@ added when Spreading is turned on.
   reversal are left off. For the two accruals the expected list is the
   bills or invoices marked as arrived by hand, which take their amount back
   out of the account.
+- **SW25 Tracking and custom fields.** An item can carry what a journal
+  line can: a value for each tracking category (Department: Farm) and the
+  custom fields used on journal lines. They're chosen when the item is
+  added, or with "Spread this" (which starts from the bill's or invoice's
+  own tracking), and can be changed later for the months not yet posted.
+  Each month's journal puts them on the item's income or expense line: Dr
+  6080 **100.00** (Department: Farm) / Cr 1200 **100.00**. The balance
+  sheet line has none, as on the move in SW15. The custom fields of the
+  journal itself are filled in on Month end before posting. The rules for a
+  manual journal apply: a tracking category that must be filled in on
+  income and expense lines stops the month until the item has one, and the
+  preview names the item. Months already posted keep what they were posted
+  with.
 
 ## Where Shopify orders go (SHP1-SHP5; 23 Nov 2026; following common practice, not yet reviewed)
 

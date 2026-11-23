@@ -22,7 +22,8 @@ import { planVoidJournals, voidJournals } from "@/lib/ledger/void-journals";
 import { recodeLine } from "@/lib/ledger/recode";
 import { updatePeriodControls } from "@/lib/ledger/period-controls";
 import { updateOrganisationSettings } from "@/lib/organisations/settings";
-import { createTrackingValue, getTrackingSetup } from "@/lib/tracking/service";
+import { createCustomField } from "@/lib/custom-fields/service";
+import { createTrackingValue, getTrackingSetup, updateTrackingCategory } from "@/lib/tracking/service";
 import { postSpreadMonth, previewSpreadMonth, undoSpreadRun } from "@/lib/spreading/runs";
 import type { SpreadKind } from "@/lib/spreading/rules";
 import {
@@ -35,6 +36,7 @@ import {
   saveSpreadingSettings,
   settleSpreadItem,
   unsettleSpreadItem,
+  updateSpreadItemTags,
 } from "@/lib/spreading/service";
 import { explainSpreadDifference } from "@/lib/spreading/explain";
 import { importSpreadItems, monthJournalFile, worksheetFile } from "@/lib/spreading/files";
@@ -759,6 +761,71 @@ describeWithDatabase("spreading", () => {
     const removal = (await call(full, "remove_spreading_item", { itemId: made.item.id })) as { confirmHash: string };
     expect(await call(full, "remove_spreading_item", { itemId: made.item.id, confirmHash: removal.confirmHash, idempotencyKey: "ai-spread-remove-1" })).toEqual({ removed: true });
     expect((await w.worksheet()).items).toEqual([]);
+  });
+
+  it("SW25: tracking and custom fields on an item go on each month's income or expense line", async () => {
+    const w = await setup();
+    await w.as((tx) => updateOrganisationSettings(tx, { advancedFeatures: true }));
+    const department = (await w.as((tx) => getTrackingSetup(tx))).categories.find((c) => c.kind === "department")!.id;
+    const values = async (name: string) => (await w.as((tx) => createTrackingValue(tx, { categoryId: department, name }))).categories.find((c) => c.id === department)!.values.find((v) => v.name === name)!.id;
+    const farm = await values("Farm");
+    const runoff = await values("Runoff");
+    const lineSetup = await w.as((tx) => createCustomField(tx, { record: "line", label: "Policy number", type: "text", usedOn: ["journal"] }));
+    const policy = lineSetup.fields.find((field) => field.label === "Policy number")!.id;
+    const headerSetup = await w.as((tx) => createCustomField(tx, { record: "document", label: "Checked by", type: "text", usedOn: ["journal"] }));
+    const checkedBy = headerSetup.fields.find((field) => field.label === "Checked by")!.id;
+    await w.journal("2026-07-01", "INS-BILL", [
+      ["1200", "2400.00", "0"],
+      ["2000", "0", "2400.00"],
+    ]);
+    const fields = { kind: "prepayment", targetAccountCode: "6080", amount: "1200.00", startDate: "2026-07-01", endDate: "2027-06-30" };
+    const tagged = await w.add({ ...fields, description: "Farm insurance", tracking: { [department]: farm }, customFields: { [policy]: "FMG-1" } });
+    expect(tagged).toMatchObject({ tracking: { [department]: farm }, customFields: { [policy]: "FMG-1" } });
+    const plain = await w.add({ ...fields, description: "Runoff insurance" });
+    expect(plain).toMatchObject({ tracking: {}, customFields: {} });
+    // A value that isn't the category's, or a field that isn't for journal lines, is refused when it's typed.
+    await expect(w.add({ ...fields, description: "Bad", tracking: { [department]: "999999" } })).rejects.toThrow(/isn't a Department value/);
+    await expect(w.add({ ...fields, description: "Bad", customFields: { [checkedBy]: "x" } })).rejects.toThrow(/no line custom field/);
+
+    const july = await w.post("prepayment", "2026-07");
+    const posted = await w.as((tx) => getJournal(tx, july.journalId as string));
+    expect(posted.lines.map((line) => [line.accountCode, line.debitAmount, line.tracking, line.customFields])).toEqual([
+      ["6080", "100.00", { [department]: farm }, { [policy]: "FMG-1" }],
+      ["1200", "0.00", {}, {}],
+      ["6080", "100.00", {}, {}],
+      ["1200", "0.00", {}, {}],
+    ]);
+
+    // Department becomes a must on income and expense lines: August waits until the item has one, and says which.
+    await w.as((tx) => updateTrackingCategory(tx, department, { isRequired: true }));
+    const preview = await w.as((tx) => previewSpreadMonth(tx, "prepayment", "2026-08"));
+    expect(preview.blocked).toBe("Runoff insurance needs a Department. Set it on the item, then post.");
+    const before = await w.journals();
+    await expect(w.post("prepayment", "2026-08")).rejects.toThrow("Runoff insurance needs a Department. Set it on the item, then post.");
+    expect(await w.journals()).toBe(before);
+    const changed = await w.asAroha((tx) => updateSpreadItemTags(tx, plain.id, { tracking: { [department]: runoff } }));
+    expect(changed.tracking).toEqual({ [department]: runoff });
+    expect((await w.as((tx) => previewSpreadMonth(tx, "prepayment", "2026-08"))).blocked).toBeNull();
+    // The journal's own custom field is filled in at Month end.
+    const august = (await w.asAroha((tx) => postSpreadMonth(tx, { idempotencyKey: key("month"), kind: "prepayment", month: "2026-08", customFields: { [checkedBy]: "Aroha" } }))).run;
+    const augustJournal = await w.as((tx) => getJournal(tx, august.journalId as string));
+    expect(augustJournal.customFields).toEqual({ [checkedBy]: "Aroha" });
+    expect(augustJournal.lines.map((line) => [line.accountCode, line.tracking])).toEqual([
+      ["6080", { [department]: farm }],
+      ["1200", {}],
+      ["6080", { [department]: runoff }],
+      ["1200", {}],
+    ]);
+    // July keeps what it was posted with.
+    expect((await w.as((tx) => getJournal(tx, july.journalId as string))).lines[2].tracking).toEqual({});
+    // Undoing August reverses it tag for tag.
+    const undone = await w.undo(august.id);
+    expect((await w.as((tx) => getJournal(tx, undone.undoJournalId as string))).lines.map((line) => [line.accountCode, line.creditAmount, line.tracking])).toEqual([
+      ["6080", "100.00", { [department]: farm }],
+      ["1200", "0.00", {}],
+      ["6080", "100.00", { [department]: runoff }],
+      ["1200", "0.00", {}],
+    ]);
   });
 
   it("the API: viewers read, bookkeepers add and post, admins change the accounts", async () => {

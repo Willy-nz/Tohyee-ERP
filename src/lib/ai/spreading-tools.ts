@@ -15,6 +15,7 @@ import {
   removeSpreadItem,
   settleSpreadItem,
   unsettleSpreadItem,
+  updateSpreadItemTags,
 } from "@/lib/spreading/service";
 import { listSourceLines } from "@/lib/spreading/sources";
 import { ValidationError } from "@/lib/errors";
@@ -33,6 +34,10 @@ const KIND = {
 } as const;
 const MONTH = { type: "string", pattern: "^\\d{4}-\\d{2}$", description: "A month as YYYY-MM." } as const;
 const MONEY = { type: "string", description: "A decimal without GST, e.g. \"1200.00\"." } as const;
+const TAGS = {
+  tracking: { type: "object", additionalProperties: { type: "string" }, description: "Tracking for each month's income or expense line: category id to value id, from list_tracking." },
+  customFields: { type: "object", additionalProperties: true, description: "Custom fields used on journal lines, field id to value, from get_custom_fields." },
+} as const;
 const LINE_IDS = {
   billLineId: { type: "string", description: "A bill line's id from get_spreadable_lines, instead of typing the amount and account." },
   invoiceLineId: { type: "string", description: "An invoice line's id from get_spreadable_lines." },
@@ -90,7 +95,7 @@ export const SPREADING_ACTION_TOOLS: AiTool[] = [
     name: "add_spreading_item",
     title: "Add something to spread",
     description:
-      "Adds an item to the Spreading worksheet; nothing posts until its months are posted. Either type it (kind, description, amount without GST, targetAccountCode: the expense or income account) when the bill or invoice was coded to the kind's balance sheet account, or give one line id to do \"Spread this\" on an approved bill, invoice or bank line, which moves the line's amount there with one journal on its date. method: by_month (default) and by_days need startDate and endDate; one_month needs month; own_amounts needs ownAmounts adding up to the amount; when_done waits to be marked done. Months already posted are caught up in the next month (caughtUp says so).",
+      "Adds an item to the Spreading worksheet; nothing posts until its months are posted. Either type it (kind, description, amount without GST, targetAccountCode: the expense or income account) when the bill or invoice was coded to the kind's balance sheet account, or give one line id to do \"Spread this\" on an approved bill, invoice or bank line, which moves the line's amount there with one journal on its date. method: by_month (default) and by_days need startDate and endDate; one_month needs month; own_amounts needs ownAmounts adding up to the amount; when_done waits to be marked done. Months already posted are caught up in the next month (caughtUp says so). tracking and customFields go on each month's income or expense line; Spread this starts from the line's own tracking.",
     level: "post",
     input: {
       kind: KIND,
@@ -103,6 +108,7 @@ export const SPREADING_ACTION_TOOLS: AiTool[] = [
       month: MONTH,
       ownAmounts: { type: "array", maxItems: 120, items: { type: "object", properties: { month: MONTH, amount: MONEY }, required: ["month", "amount"], additionalProperties: false } },
       contactId: ID("contact"),
+      ...TAGS,
       ...LINE_IDS,
     },
     required: [],
@@ -114,9 +120,21 @@ export const SPREADING_ACTION_TOOLS: AiTool[] = [
     description:
       "Month end on the Spreading worksheet: posts one kind's month as one journal dated the month's last day (check preview_spreading_month first). Months go in order; a locked month is refused and isn't moved.",
     level: "post",
-    input: { kind: KIND, month: MONTH },
+    input: { kind: KIND, month: MONTH, customFields: { type: "object", additionalProperties: true, description: "Custom fields of the journal itself (used on journals), field id to value. Left out, they take their defaults." } },
     required: ["kind", "month"],
-    act: (tx, args, command) => postSpreadMonth(tx, { ...command, kind: args.kind, month: args.month }),
+    act: (tx, args, command) => postSpreadMonth(tx, { ...command, kind: args.kind, month: args.month, ...(args.customFields !== undefined ? { customFields: args.customFields } : {}) }),
+  }),
+  tool({
+    name: "update_spreading_item_tags",
+    title: "Change a Spreading item's tracking and custom fields",
+    description: "Sets the tracking and journal-line custom fields an item puts on each month's income or expense line. Applies to months not yet posted; send the whole set for whichever of the two you change.",
+    level: "post",
+    input: { itemId: ID("worksheet item"), ...TAGS },
+    required: ["itemId"],
+    act: (tx, args) => {
+      const { itemId, ...body } = args;
+      return updateSpreadItemTags(tx, itemId, body);
+    },
   }),
   tool({
     name: "end_spreading_item_early",
