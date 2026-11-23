@@ -1,0 +1,43 @@
+.bars {
+  display: grid;
+  grid-auto-flow: column;
+  grid-auto-columns: minmax(0, 1fr);
+  gap: 8px;
+  margin: 0 0 12px;
+  padding: 0;
+  list-style: none;
+}
+
+.column {
+  display: grid;
+  grid-template-rows: auto 96px auto;
+  gap: 4px;
+  min-width: 0;
+  text-align: center;
+  font-size: 0.85rem;
+}
+
+.value {
+  font-weight: 600;
+}
+
+.track {
+  display: flex;
+  align-items: flex-end;
+  justify-content: center;
+  border-bottom: 1px solid var(--border);
+}
+
+.bar {
+  width: min(48px, 70%);
+  min-height: 2px;
+  border-radius: 4px 4px 0 0;
+  background: var(--chart-1, var(--accent));
+}
+
+.period {
+  overflow: hidden;
+  color: var(--muted);
+  text-overflow: ellipsis;
+  white-space: nowrap;
+}
