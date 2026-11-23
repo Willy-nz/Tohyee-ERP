@@ -23335,7 +23335,7 @@ dropdown.
 - **APS10** A name that isn't a salesperson shows **0.00** everywhere,
   never the whole report.
 
-## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW17; planned with the owner 23 Nov 2026, built by Claude; the details follow common practice and are not yet reviewed)
+## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW23; planned with the owner 23 Nov 2026, built by Claude; the details follow common practice and are not yet reviewed)
 
 Income or a cost often belongs to other months than the one it was billed
 or paid in. The Spreading worksheet replaces the spreadsheet kept for that.
@@ -23448,7 +23448,55 @@ added when Spreading is turned on.
   those months are undone first, or the item is ended early. A bill or
   invoice with a line on the worksheet can't be voided: the item is removed
   first.
-
+- **SW18 A month that's already posted.** SW1's insurance is added in
+  November, after Paid in advance has been posted to October. Its July to
+  October shares (400.00) can't go into posted months, and those months
+  aren't reopened: they're caught up in the next month to post. November's
+  journal carries **500.00** for it (400.00 + 100.00) and December on
+  carry 100.00. The same goes for any item, however it was added. (The
+  owner was asked on 23 Nov 2026 whether to refuse or catch up and hadn't
+  said; catching up in the current period is the common practice.)
+- **SW19 "Spread this" on a bank line.** Spend money on 1 Jul 2026, 690.00
+  including GST to 6080: Dr 6080 **600.00** / Dr 2100 **90.00** / Cr the
+  bank **690.00**. "Spread this" on the line works as on a bill (SW15): Dr
+  1200 **600.00** / Cr 6080 **600.00** on the transaction's date. Receive
+  money works as an invoice does (SW16). The transaction stays reconciled;
+  it can't be voided or recoded while its line is on the worksheet.
+- **SW20 The bill for an accrual.** SW6's rates bill is coded to 6470 Rates
+  as any bill is, and approved: Dr 6470 **920.00** / Dr 2100 **138.00** / Cr
+  2000 **1,058.00**. On the bill, "It's the bill for" Rates posts one
+  journal on the bill's date: Dr Accrued expenses **920.00** / Cr 6470
+  **920.00**, and marks the item billed at 920.00 in the bill's month
+  (October; or the next month to post, if October has posted). October's
+  journal carries the difference as in SW6: Dr 6470 **20.00** / Cr Accrued
+  expenses **20.00**. Rates has had 920.00 and Accrued expenses holds
+  nothing for it. An invoice for accrued income works the same way round,
+  and so do spend money and receive money.
+- **SW21 Undoing "bill arrived".** Until the difference has posted, marking
+  an accrual as billed or invoiced can be undone: the months that were
+  dropped come back (caught up as in SW18 if they've since been passed), and
+  a move made from a bill, invoice or bank line is reversed on its date.
+- **SW22 Shop orders paid and not sent yet.** With Sales when sent on
+  (SWS1-SWS15) and holding in the same Income in advance account, that
+  account also holds orders paid and not yet sent. They aren't worksheet
+  items and aren't spread: they release when they're sent. The Income in
+  advance tab shows their total on one line that can't be changed, with a
+  link to To send, and counts it when it checks the account: 2,400.00 on
+  the worksheet and 350.00 of orders not sent against 2,750.00 in the
+  account is "Matches". Held in a different account, the line is shown for
+  information and isn't counted.
+- **SW23 Books kept in other software.** An organisation that keeps its
+  books elsewhere can use the worksheet on its own. It says so in the
+  worksheet's settings. Nothing changes in how months are worked out and
+  posted, in order, with undo. Each month's journal is downloaded as a CSV
+  file (date, reference, description, account code and name, debit, credit)
+  to enter in the other software: July's Paid in advance file for SW1 has
+  two rows, 6080 debit **100.00** and 1200 credit **100.00**, dated 31 Jul
+  2026. The worksheet doesn't check itself against this ledger, which only
+  has the worksheet's own journals: it shows what it holds for each kind
+  (900.00 after September) to compare with the account in the other
+  software. Items can be brought in from a CSV file, one row an item, all
+  of them or none; and the worksheet can be downloaded as one.
 
 ## Where Shopify orders go (SHP1-SHP5; 23 Nov 2026; following common practice, not yet reviewed)
 

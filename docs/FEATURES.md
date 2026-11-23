@@ -592,7 +592,7 @@ that something happened.
   year's depreciation by type, disposals this year, and ties to the ledger
   account by account. Tax depreciation beside book, pooling and low-value
   write-offs aren't built.
-- **Spreading** (Accounting, Month end; SW1-SW17, following common practice,
+- **Spreading** (Accounting, Month end; SW1-SW23, following common practice,
   not yet reviewed by the owner): one worksheet in place of the spreadsheet
   for costs **paid in advance**, **income in advance**, costs **not billed
   yet** and income **not invoiced yet**. Each kind has one balance sheet
@@ -612,10 +612,18 @@ that something happened.
   on the bill's or invoice's date moves the line's amount without GST to
   Prepayments or Income in advance, the line's tracking goes on each month's
   journal, removing the item before a month has posted reverses the move,
-  and the bill or invoice can't be voided while its line is there. Not built
-  yet: Spread this on a bank line, linking an accrual to its bill, the
-  sales-platform orders paid and not sent yet shown beside income in
-  advance, and a stand-alone mode with file export.
+  and the bill or invoice can't be voided while its line is there. The
+  same button is on a spend or receive money transaction (**Spread**,
+  SW19). A bill, invoice or bank line can instead be marked as the one an
+  accrual was waiting for (SW20), which can be undone until its difference
+  has posted (SW21). An item added after some of its months have posted has
+  those months caught up in the next month to post (SW18). With Sales when
+  sent holding in the same Income in advance account, the orders paid and
+  not sent yet show as one line and are counted in the check (SW22). **Books
+  kept in other software** (SW23, an admin's tick box): the worksheet runs on
+  its own, shows what it holds instead of checking this ledger, and each
+  month's journal downloads as a CSV file; in either mode the worksheet
+  downloads as a file and items can be brought in from one, all or none.
 - **Projects and time tracking** (Sales; PJ1-PJ13, not yet approved by the owner), like project tracking in other accounting software: a **project** for a customer with an optional
   estimate and deadline, **In progress** or **Closed** (only by closing and
   reopening). **Tasks** are hourly (a rate), fixed price or non-chargeable,

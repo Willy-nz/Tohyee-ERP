@@ -1,7 +1,7 @@
 import type { Migration } from "@/lib/db/migrations/types";
 
 export const migration: Migration = {
-  version: "0302",
+  version: "0303",
   name: "shopify_shipping_place",
   sql: `
 -- Where each Shopify order is going, for the region map in Analytics
