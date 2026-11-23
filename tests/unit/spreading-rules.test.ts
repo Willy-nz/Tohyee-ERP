@@ -1,0 +1,108 @@
+import { describe, expect, it } from "vitest";
+import { addMonths, daysByMonth, endEarly, monthEndDate, monthsBegun, spreadPosting, spreadSchedule, splitAt } from "@/lib/spreading/rules";
+
+const amounts = (rows: Array<{ amount: string }>) => rows.map((row) => row.amount);
+const total = (rows: Array<{ amount: string }>) => rows.reduce((sum, row) => sum + Math.round(Number(row.amount) * 100), 0) / 100;
+
+describe("spreading: which months an amount lands in (SW1-SW5, SW12, SW13)", () => {
+  it("SW1: 1,200.00 for 1 Jul 2026 to 30 Jun 2027 is 100.00 a month, July to June", () => {
+    const schedule = spreadSchedule({ amount: "1200.00", method: "by_month", startDate: "2026-07-01", endDate: "2027-06-30" });
+    expect(schedule).toHaveLength(12);
+    expect(schedule[0]).toEqual({ month: "2026-07", amount: "100.00" });
+    expect(schedule[11]).toEqual({ month: "2027-06", amount: "100.00" });
+    expect(new Set(amounts(schedule))).toEqual(new Set(["100.00"]));
+  });
+
+  it("SW2: 1,000.00 over 12 months is 83.33 eleven times and 83.37 last, 1,000.00 exactly", () => {
+    const schedule = spreadSchedule({ amount: "1000.00", method: "by_month", startDate: "2026-07-01", endDate: "2027-06-30" });
+    expect(amounts(schedule).slice(0, 11)).toEqual(Array(11).fill("83.33"));
+    expect(schedule[11].amount).toBe("83.37");
+    expect(total(schedule)).toBe(1000);
+  });
+
+  it("SW3: 15 Jul 2026 to 14 Jul 2027 by month is twelve months, July to June", () => {
+    expect(monthsBegun("2026-07-15", "2027-07-14")).toEqual([
+      "2026-07", "2026-08", "2026-09", "2026-10", "2026-11", "2026-12", "2027-01", "2027-02", "2027-03", "2027-04", "2027-05", "2027-06",
+    ]);
+    // One more day begins a thirteenth month.
+    expect(monthsBegun("2026-07-15", "2027-07-15")).toHaveLength(13);
+    // A start on the 31st begins on the last day of a shorter month.
+    expect(monthsBegun("2026-01-31", "2026-02-28")).toEqual(["2026-01", "2026-02"]);
+    expect(monthsBegun("2026-01-31", "2026-02-27")).toEqual(["2026-01"]);
+  });
+
+  it("SW3: the same days by days give each calendar month its days out of 365", () => {
+    expect(daysByMonth("2026-07-15", "2027-07-14").map((entry) => entry.days)).toEqual([17, 31, 30, 31, 30, 31, 31, 28, 31, 30, 31, 30, 14]);
+    const schedule = spreadSchedule({ amount: "1200.00", method: "by_days", startDate: "2026-07-15", endDate: "2027-07-14" });
+    expect(amounts(schedule)).toEqual(["55.89", "101.92", "98.63", "101.92", "98.63", "101.92", "101.92", "92.05", "101.92", "98.63", "101.92", "98.63", "46.02"]);
+    expect(total(schedule)).toBe(1200);
+  });
+
+  it("SW5: all in one month", () => {
+    expect(spreadSchedule({ amount: "500.00", method: "one_month", month: "2027-03" })).toEqual([{ month: "2027-03", amount: "500.00" }]);
+    expect(() => spreadSchedule({ amount: "500.00", method: "one_month" })).toThrow(/Choose the month/);
+  });
+
+  it("SW12: when it's done has no months until it's finished, then all of it lands in that month", () => {
+    expect(spreadSchedule({ amount: "3000.00", method: "when_done" })).toEqual([]);
+    expect(spreadSchedule({ amount: "3000.00", method: "when_done", month: "2027-02" })).toEqual([{ month: "2027-02", amount: "3000.00" }]);
+  });
+
+  it("SW13: your own amounts must add up to the amount", () => {
+    const rows = [
+      { month: "2026-12", amount: "600.00" },
+      { month: "2026-10", amount: "250.00" },
+      { month: "2026-11", amount: "150.00" },
+    ];
+    expect(spreadSchedule({ amount: "1000.00", method: "own_amounts", ownAmounts: rows }).map((row) => row.month)).toEqual(["2026-10", "2026-11", "2026-12"]);
+    expect(() => spreadSchedule({ amount: "1000.00", method: "own_amounts", ownAmounts: rows.slice(0, 2) })).toThrow("Your amounts add up to 850.00, not 1000.00.");
+    expect(() => spreadSchedule({ amount: "500.00", method: "own_amounts", ownAmounts: [rows[0], { month: "2026-12", amount: "1.00" }] })).toThrow(/there twice/);
+  });
+
+  it("refuses an amount that isn't money, dates the wrong way round, and more than ten years", () => {
+    expect(() => spreadSchedule({ amount: "0", method: "one_month", month: "2026-07" })).toThrow(/more than zero/);
+    expect(() => spreadSchedule({ amount: "10.005", method: "one_month", month: "2026-07" })).toThrow(/dollars and cents/);
+    expect(() => spreadSchedule({ amount: "abc", method: "one_month", month: "2026-07" })).toThrow(/Give the amount/);
+    expect(() => spreadSchedule({ amount: "100.00", method: "by_month", startDate: "2026-07-02", endDate: "2026-07-01" })).toThrow(/can't be before/);
+    expect(() => spreadSchedule({ amount: "100.00", method: "by_month", startDate: "2026-07-01", endDate: "2037-07-01" })).toThrow(/ten years/);
+    expect(() => spreadSchedule({ amount: "100.00", method: "by_days", startDate: "2026-07-01", endDate: "2037-07-01" })).toThrow(/ten years/);
+  });
+
+  it("a cent over many months still adds up: the last month takes it", () => {
+    const schedule = spreadSchedule({ amount: "0.01", method: "by_month", startDate: "2026-07-01", endDate: "2026-09-30" });
+    expect(amounts(schedule)).toEqual(["0.00", "0.00", "0.01"]);
+  });
+});
+
+describe("spreading: changes and directions", () => {
+  const insurance = spreadSchedule({ amount: "1200.00", method: "by_month", startDate: "2026-07-01", endDate: "2027-06-30" });
+
+  it("SW8: ending early moves what's left into one month and leaves posted months alone", () => {
+    const ended = endEarly(insurance, "2027-02", "2027-03");
+    expect(ended).toHaveLength(9);
+    expect(ended.slice(0, 8)).toEqual(insurance.slice(0, 8));
+    expect(ended[8]).toEqual({ month: "2027-03", amount: "400.00" });
+    expect(() => endEarly(insurance, "2027-02", "2027-02")).toThrow(/after the last one posted/);
+    // Nothing posted yet: all of it lands in the month chosen.
+    expect(endEarly(insurance, null, "2026-08")).toEqual([{ month: "2026-08", amount: "1200.00" }]);
+  });
+
+  it("SW11: what has landed and what's left after a month", () => {
+    expect(splitAt(insurance, "2026-09")).toEqual({ through: "300.00", after: "900.00" });
+    expect(splitAt(insurance, null)).toEqual({ through: "0.00", after: "1200.00" });
+  });
+
+  it("each kind's journal runs the right way (SW1, SW4, SW6, SW7)", () => {
+    expect(spreadPosting("prepayment")).toEqual({ holding: "credit", target: "debit" });
+    expect(spreadPosting("income_in_advance")).toEqual({ holding: "debit", target: "credit" });
+    expect(spreadPosting("accrued_expense")).toEqual({ holding: "credit", target: "debit" });
+    expect(spreadPosting("accrued_income")).toEqual({ holding: "debit", target: "credit" });
+  });
+
+  it("months and month ends", () => {
+    expect(addMonths("2026-11", 2)).toBe("2027-01");
+    expect(addMonths("2027-01", -1)).toBe("2026-12");
+    expect(monthEndDate("2027-02")).toBe("2027-02-28");
+    expect(monthEndDate("2028-02")).toBe("2028-02-29");
+  });
+});

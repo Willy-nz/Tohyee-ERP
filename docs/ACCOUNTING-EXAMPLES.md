@@ -23334,3 +23334,95 @@ dropdown.
   date, as SR4). Aroha: **0.00**.
 - **APS10** A name that isn't a salesperson shows **0.00** everywhere,
   never the whole report.
+
+## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW14; planned with the owner 23 Nov 2026, built by Claude; the details follow common practice and are not yet reviewed)
+
+Income or a cost often belongs to other months than the one it was billed
+or paid in. The Spreading worksheet replaces the spreadsheet kept for that.
+There are four kinds, each with one balance sheet account:
+
+| | Billed or paid first | Earned or used first |
+|---|---|---|
+| Costs | **Paid in advance** (1200 Prepayments) | **Not billed yet** (Accrued expenses) |
+| Income | **Income in advance** | **Not invoiced yet** (Accrued income) |
+
+The owner decided (23 Nov 2026): four separate journals a month, one for
+each kind; spread evenly by month unless told otherwise; nothing posts by
+itself, a person presses Post after a preview; GST stays with the bill or
+invoice and only the amount that went to the account is spread; one month
+at a time, in order; a locked month is refused, never moved; and "when it's
+done" is a way to release beside the dated ones.
+
+In this first version an item is added on the worksheet, and the bill or
+invoice is coded to the kind's balance sheet account by the person, as they
+do today. Ticking "Spread this" on a bill or invoice line comes later.
+
+Made-up setup: GST registered, invoice basis. Accrued income (a current
+asset), Income in advance and Accrued expenses (current liabilities) are
+added when Spreading is turned on.
+
+- **SW1 Paid in advance, evenly by month.** An insurance bill dated 1 Jul
+  2026, 1,200.00 + GST 180.00, is coded to 1200: Dr 1200 **1,200.00** / Dr
+  2100 **180.00** / Cr 2000 **1,380.00**. The item: 1,200.00 to 6080
+  Insurance, covering 1 Jul 2026 to 30 Jun 2027. July's Paid in advance
+  journal, dated 31 Jul 2026: Dr 6080 **100.00** / Cr 1200 **100.00**. The
+  same each month to June 2027, when 1200 holds nothing for it.
+- **SW2 Rounding.** 1,000.00 over the same twelve months: **83.33** for
+  eleven months (916.63) and **83.37** in the last, 1,000.00 exactly.
+- **SW3 Part months.** Covering 15 Jul 2026 to 14 Jul 2027. By month: twelve
+  equal amounts, in July 2026 to June 2027 (a month counts once it's begun,
+  counting from the first day; one more day, to 15 Jul 2027, begins a
+  thirteenth). By days: each calendar month takes its days out of 365, so
+  1,200.00 gives July 2026 (17 days) **55.89**, a 31-day month **101.92**,
+  a 30-day month **98.63**, February **92.05**, and July 2027 (14 days) the
+  **46.02** left.
+- **SW4 Income in advance.** An invoice dated 1 Oct 2026 for a year's
+  subscription, 2,400.00 + GST 360.00, is coded to Income in advance: Dr
+  1100 **2,760.00** / Cr Income in advance **2,400.00** / Cr 2100
+  **360.00**. The item: 2,400.00 to 4000, 1 Oct 2026 to 30 Sep 2027. Each
+  month's Income in advance journal: Dr Income in advance **200.00** / Cr
+  4000 **200.00**.
+- **SW5 All in one month.** A 500.00 deposit invoiced in January for an
+  event on 14 Mar 2027 sits in Income in advance, and March's journal
+  releases all **500.00**.
+- **SW6 Not billed yet.** Rates estimated at 900.00 for 1 Jul to 30 Sep
+  2026. Each of those months' Not billed yet journal: Dr Rates **300.00** /
+  Cr Accrued expenses **300.00**. The bill arrives dated 5 Oct 2026, 920.00
+  + GST 138.00, and is coded to Accrued expenses: Dr Accrued expenses
+  **920.00** / Dr 2100 **138.00** / Cr 2000 **1,058.00**. The item is marked
+  billed at 920.00 in October, and October's journal carries the
+  difference: Dr Rates **20.00** / Cr Accrued expenses **20.00**. Accrued
+  expenses holds nothing for it (900.00 - 920.00 + 20.00), Rates has had
+  920.00, and no GST was claimed before the bill. Had the bill been 880.00
+  the difference runs the other way: Dr Accrued expenses **20.00** / Cr
+  Rates **20.00**.
+- **SW7 Not invoiced yet.** 1,500.00 of work done in November 2026,
+  invoiced in December. November's Not invoiced yet journal: Dr Accrued
+  income **1,500.00** / Cr 4000 **1,500.00**. The December invoice,
+  1,500.00 + GST 225.00, is coded to Accrued income: Dr 1100 **1,725.00** /
+  Cr Accrued income **1,500.00** / Cr 2100 **225.00**. Marked invoiced at
+  1,500.00: there's no difference, so nothing more posts for it.
+- **SW8 Ending early.** SW1's insurance is cancelled at the end of February
+  2027 with March to June (400.00) left. Ended early into March: March's
+  journal releases **400.00** and the item is finished. The eight months
+  already posted don't change.
+- **SW9 Not GST registered.** The same bill as SW1 with no GST to claim puts
+  1,380.00 on 1200, so 1,380.00 is spread: **115.00** a month.
+- **SW10 Locked month.** With the books locked to 31 Jul 2026, July's
+  journals can't be posted: the preview says so and nothing is posted. The
+  amount isn't moved to another month.
+- **SW11 Ties out.** After SW1's July to September the worksheet shows
+  **900.00** left and 1200 holds 900.00: "Matches". A manual journal of Dr
+  1200 50.00 makes it "Out by 50.00".
+- **SW12 When it's done.** 3,000.00 invoiced in advance for a job with no
+  end date sits in Income in advance and is in no month's journal. Marked
+  done in February 2027, February's journal releases all **3,000.00**.
+- **SW13 Your own amounts.** 1,000.00 as 250.00 in October, 150.00 in
+  November and 600.00 in December. Amounts that add up to 850.00 are
+  refused: "Your amounts add up to 850.00, not 1000.00."
+- **SW14 One month at a time, and undoing.** A kind's months post in order:
+  August can't be posted before July. A month with nothing in it for a kind
+  posts no journal and still counts as done. The latest month posted for a
+  kind can be undone: the exact reversal on the same date (which must be
+  open), without touching the other three kinds. Each journal's reference
+  is the kind and the month, e.g. SPREAD-PAID-2026-07.
