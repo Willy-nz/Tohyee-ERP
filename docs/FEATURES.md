@@ -342,8 +342,17 @@ that something happened.
   and only its maker or an admin changes or deletes a shared one. A search
   can only name fields from a fixed list for its kind of record, and what's
   typed is passed as a value, never as part of the query. Invoices and
-  Bills link to it. Not built yet: Home tiles, emailing on a schedule and
-  alerts.
+  Bills link to it. **Show on Home** (tenant migration 0306) puts a search
+  on Home with how many match now and its first money total: a private one
+  on its maker's Home, a shared one on everyone's. **Email me this** is each
+  person's own choice for a search they can open: every day, every week
+  (from Monday) or every month, and every time, only when there's something
+  in it, or only when there's something new in it. The hourly job (not
+  before 6 am; off with TOHYEE_SAVED_SEARCH_EMAILS=off) runs the search as
+  that person with the role they have that day, sends the count, the first
+  25 rows and the totals as plain text, and stops for someone who has left
+  or can no longer open the search. Nothing goes if the server can't send
+  email.
 - **Custom reports** (Reporting, tabs Home, Custom, Drafts, Published and
   Archived): start from the profit and loss or balance sheet, then change the
   title, the columns (1-12 months, quarters or years, a difference and %

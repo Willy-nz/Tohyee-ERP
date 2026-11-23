@@ -6,6 +6,7 @@ import { RequireOrganisation } from "@/components/books";
 import { useSearchParams } from "next/navigation";
 import { FarmHomeTiles } from "@/components/home/farm-home";
 import { HomeTiles } from "@/components/home/home";
+import { SavedSearchHome } from "@/components/saved-search-home";
 import { useModules } from "@/components/modules";
 import { Page, PageHeader, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
@@ -28,6 +29,7 @@ function Overview({ organisationId }: { organisationId: string }) {
           <HomeTiles organisationId={organisationId} />
         </>
       )}
+      {modules === null ? null : <SavedSearchHome organisationId={organisationId} />}
     </>
   );
 }

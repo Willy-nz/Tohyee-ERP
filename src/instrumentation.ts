@@ -226,6 +226,12 @@ export async function register() {
     startRepeatingInvoiceScheduler();
   }
 
+  // Saved searches people asked to be emailed (off with TOHYEE_SAVED_SEARCH_EMAILS=off).
+  {
+    const { startSavedSearchEmails } = await import("@/lib/saved-searches/emails");
+    startSavedSearchEmails();
+  }
+
   if (process.env.TOHYEE_EMAIL_OUTBOX !== "off") {
     const { startEmailOutbox } = await import("@/lib/email/outbox");
     startEmailOutbox();
