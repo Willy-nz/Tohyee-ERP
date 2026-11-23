@@ -1,5 +1,7 @@
 import { createAccount } from "@/lib/accounts/service";
 import { writeAuditEvent } from "@/lib/audit";
+import { loadCustomFieldContext, parseCustomInput, resolveCustomValues } from "@/lib/custom-fields/service";
+import type { CustomValues } from "@/lib/custom-fields/values";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { assertSameRequest, requestHash } from "@/lib/idempotency";
@@ -17,7 +19,7 @@ import {
   spreadSchedule,
 } from "@/lib/spreading/rules";
 import { loadSourceLine, postMove, reverseMove, type SourceKind, type SourceLine, sourceLabel } from "@/lib/spreading/sources";
-import type { TrackingTags } from "@/lib/tracking/service";
+import { checkNewTags, loadTrackingContext, parseTrackingInput, sortedTags, type TrackingTags } from "@/lib/tracking/service";
 import { asRecord, optionalId, optionalSource, requireArray, requireId, requireIdempotencyKey, requireOneOf, requireString } from "@/lib/validation";
 
 /**
@@ -198,6 +200,8 @@ export type SpreadItem = {
   /** The bill or invoice line "Spread this" was pressed on (SW15, SW16), or null when it was added on the worksheet. */
   source: { kind: SourceKind; documentId: string; label: string } | null;
   tracking: TrackingTags;
+  /** Custom fields for the income or expense line of each month's journal (SW25). */
+  customFields: CustomValues;
   createdByEmail: string;
   createdAt: string;
 };
@@ -214,6 +218,7 @@ type ItemRow = {
   bank_contact: string | null;
   move_journal_id: string | null;
   tracking: TrackingTags | null;
+  custom_fields: CustomValues | null;
   id: string;
   kind: SpreadKind;
   description: string;
@@ -235,7 +240,7 @@ type ItemRow = {
 const ITEM_SELECT = `select i.id::text, i.kind, i.description, i.contact_id::text, c.name as contact_name, t.id::text as target_id, t.code as target_code, t.name as target_name,
     i.amount::text, i.method, to_char(i.start_date, 'YYYY-MM-DD') as start_date, to_char(i.end_date, 'YYYY-MM-DD') as end_date,
     to_char(i.settled_month, 'YYYY-MM') as settled_month, i.settled_amount::text, i.created_by_email, i.created_at,
-    i.move_journal_id::text, i.tracking, b.id::text as bill_id, b.supplier_invoice_number as bill_number, bc.name as bill_supplier,
+    i.move_journal_id::text, i.tracking, i.custom_fields, b.id::text as bill_id, b.supplier_invoice_number as bill_number, bc.name as bill_supplier,
     si.id::text as invoice_id, si.invoice_number,
     k.id::text as bank_id, k.kind as bank_kind, to_char(k.transaction_date, 'YYYY-MM-DD') as bank_date, kc.name as bank_contact
   from spread_items i join accounts t on t.id = i.target_account_id left join contacts c on c.id = i.contact_id
@@ -289,6 +294,7 @@ function toItem(row: ItemRow, months: SpreadItemMonth[]): SpreadItem {
           ? { kind: "bank", documentId: row.bank_id, label: sourceLabel("bank", { documentId: row.bank_id, number: null, contactName: row.bank_contact, docKind: row.bank_kind, date: row.bank_date }) }
           : null,
     tracking: row.tracking ?? {},
+    customFields: row.custom_fields ?? {},
     createdByEmail: row.created_by_email,
     createdAt: new Date(row.created_at).toISOString(),
   };
@@ -341,6 +347,29 @@ async function writeMonths(tx: OrgTx, itemId: string, rows: SpreadMonth[], lineK
   }
 }
 
+/**
+ * The tracking and line custom fields typed for an item (SW25), checked as a
+ * journal line's are: real values, not archived, fields that are used on
+ * journal lines. `kept` lets an item keep what it already has.
+ */
+async function resolveTags(
+  tx: OrgTx,
+  body: Record<string, unknown>,
+  fallback: { tracking: TrackingTags; customFields: CustomValues },
+): Promise<{ tracking: TrackingTags; customFields: CustomValues }> {
+  let tracking = fallback.tracking;
+  if (body.tracking !== undefined) {
+    tracking = sortedTags(parseTrackingInput(body.tracking, "This item"));
+    checkNewTags(await loadTrackingContext(tx), tracking, "This item", new Set(Object.values(fallback.tracking)));
+  }
+  let customFields = fallback.customFields;
+  if (body.customFields !== undefined) {
+    const raw = parseCustomInput(body.customFields, "");
+    customFields = resolveCustomValues(await loadCustomFieldContext(tx), raw ?? {}, { record: "line", uses: ["journal"] });
+  }
+  return { tracking, customFields };
+}
+
 /** The bill, invoice or bank line named in a request, if any. */
 function parseSourceRef(body: Record<string, unknown>): { sourceKind: SourceKind; lineId: string } | null {
   const refs = (
@@ -386,7 +415,12 @@ export async function createSpreadItem(tx: OrgTx, bodyInput: unknown): Promise<{
       : null;
   const typedAmount = fromLine ? null : requireString(body.amount, "The amount", { maxLength: 20 }).replaceAll(",", "");
   const typedTarget = fromLine ? null : requireString(body.targetAccountCode, typedKind === "prepayment" || typedKind === "accrued_expense" ? "The expense account" : "The income account", { maxLength: 20 });
-  const hash = requestHash("spread_item", { kind: typedKind, description: typedDescription, method, contactId: typedContactId, startDate, endDate, month, ownAmounts, amount: typedAmount, targetAccountCode: typedTarget, from: fromLine });
+  const hash = requestHash("spread_item", {
+    kind: typedKind, description: typedDescription, method, contactId: typedContactId, startDate, endDate, month, ownAmounts, amount: typedAmount, targetAccountCode: typedTarget, from: fromLine,
+    // Left out of the hash when not given, so requests made before tags existed still replay.
+    ...(body.tracking !== undefined ? { tracking: body.tracking } : {}),
+    ...(body.customFields !== undefined ? { customFields: body.customFields } : {}),
+  });
 
   const earlier = await tx.query<{ id: string; request_hash: string }>("select id::text, request_hash from spread_items where command_source = $1 and idempotency_key = $2", [source, idempotencyKey]);
   if (earlier.rows[0]) {
@@ -415,19 +449,22 @@ export async function createSpreadItem(tx: OrgTx, bodyInput: unknown): Promise<{
     const contact = await tx.query("select 1 from contacts where id = $1", [contactId]);
     if (!contact.rows[0]) throw new ValidationError("That contact isn't in this organisation.");
   }
+  // "Spread this" starts from the line's own tracking; either way the person can say otherwise (SW25).
+  const tags = await resolveTags(tx, body, { tracking: line?.tracking ?? {}, customFields: {} });
   // Months that have already posted aren't reopened: their amounts go in the next month to post (SW18).
   const { schedule, caughtUp } = catchUp(planned, await latestPostedMonth(tx, kind));
 
   const inserted = await tx.query<{ id: string }>(
     `insert into spread_items (command_source, idempotency_key, request_hash, kind, description, contact_id, target_account_id, amount, method, start_date, end_date,
-                               created_by_user_id, created_by_email, bill_line_id, invoice_line_id, bank_line_id, tracking)
-     values ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb) returning id::text`,
+                               created_by_user_id, created_by_email, bill_line_id, invoice_line_id, bank_line_id, tracking, custom_fields)
+     values ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9, $10, $11, $12, $13, $14, $15, $16, $17::jsonb, $18::jsonb) returning id::text`,
     [
       source, idempotencyKey, hash, kind, description, contactId, target.id, amount, method, startDate, endDate, tx.actor.userId, tx.actor.email,
       line?.sourceKind === "bill" ? line.lineId : null,
       line?.sourceKind === "invoice" ? line.lineId : null,
       line?.sourceKind === "bank" ? line.lineId : null,
-      JSON.stringify(line?.tracking ?? {}),
+      JSON.stringify(tags.tracking),
+      JSON.stringify(tags.customFields),
     ],
   );
   const id = inserted.rows[0].id;
@@ -455,6 +492,17 @@ function postedThrough(item: SpreadItem): string | null {
 async function assertMonthOpen(tx: OrgTx, kind: SpreadKind, month: string): Promise<void> {
   const latest = await latestPostedMonth(tx, kind);
   if (latest && month <= latest) throw new ConflictError(`${SPREAD_KIND_LABELS[kind]} is already posted to ${latest}. Choose a later month, or undo back to ${month} first.`);
+}
+
+/** Changes an item's tracking and custom fields (SW25), for the months not yet posted. */
+export async function updateSpreadItemTags(tx: OrgTx, idInput: unknown, bodyInput: unknown): Promise<SpreadItem> {
+  const body = asRecord(bodyInput, "body");
+  await lockWorksheet(tx);
+  const item = await getSpreadItem(tx, idInput);
+  const tags = await resolveTags(tx, body, { tracking: item.tracking, customFields: item.customFields });
+  await tx.query("update spread_items set tracking = $2::jsonb, custom_fields = $3::jsonb, updated_at = now() where id = $1", [item.id, JSON.stringify(tags.tracking), JSON.stringify(tags.customFields)]);
+  await writeAuditEvent(tx, { eventType: "spread_item.tags_changed", entityType: "spread_item", entityId: item.id, details: { from: { tracking: item.tracking, customFields: item.customFields }, to: tags } });
+  return getSpreadItem(tx, item.id);
 }
 
 /** Ends an item early (SW8): what's left moves into one month. Posted months don't change. */

@@ -585,6 +585,7 @@ export const SCREEN_COVERAGE: Record<string, ScreenCoverage> = {
   "PUT /api/spreading/settings": {"next": "accounting"},
   "POST /api/spreading/items": {"tool": "add_spreading_item"},
   "DELETE /api/spreading/items/[itemId]": {"tool": "remove_spreading_item"},
+  "PUT /api/spreading/items/[itemId]": {"tool": "update_spreading_item_tags"},
   "POST /api/spreading/items/[itemId]/end-early": {"tool": "end_spreading_item_early"},
   "POST /api/spreading/items/[itemId]/done": {"tool": "mark_spreading_item_done"},
   "POST /api/spreading/items/[itemId]/settle": {"tool": "mark_spreading_accrual_arrived"},

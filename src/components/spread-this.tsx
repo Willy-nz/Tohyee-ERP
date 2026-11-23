@@ -11,6 +11,7 @@ import { api, errorMessage, newIdempotencyKey } from "@/lib/client/api";
 import type { SpreadMethod } from "@/lib/spreading/rules";
 import type { SpreadAccount } from "@/lib/spreading/service";
 import type { SourceLine } from "@/lib/spreading/sources";
+import { ItemTagInputs, type ItemTags, useTagSetups } from "./spreading-tags";
 import styles from "./spreading.module.css";
 
 /**
@@ -67,6 +68,8 @@ export function SpreadThisCard({
   const [endDate, setEndDate] = useState("");
   const [month, setMonth] = useState("");
   const [itemKey, setItemKey] = useState(() => newIdempotencyKey("spread"));
+  const setups = useTagSetups(organisationId);
+  const [tags, setTags] = useState<ItemTags>({ tracking: {}, customFields: {} });
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<string | null>(null);
   const [error, setError] = useState<string | null>(null);
@@ -88,6 +91,8 @@ export function SpreadThisCard({
     setOpen(line.lineId);
     setError(null);
     setMessage(null);
+    // Starts from the line's own tracking (SW25).
+    setTags({ tracking: line.tracking, customFields: {} });
     setStartDate(line.date);
     setMonth(line.date.slice(0, 7));
   }
@@ -104,6 +109,8 @@ export function SpreadThisCard({
         const body: Record<string, unknown> = { organisationId, source: "ui", idempotencyKey: itemKey, method, [lineKey]: line.lineId };
         if (dated) Object.assign(body, { startDate, endDate });
         if (method === "one_month") body.month = month;
+        body.tracking = tags.tracking;
+        if (Object.keys(tags.customFields).length > 0) body.customFields = tags.customFields;
         const made = await api<{ caughtUp: { months: number; amount: string; into: string } | null }>("/api/spreading/items", { method: "POST", body });
         setItemKey(newIdempotencyKey("spread"));
         setMessage(`${line.description} is on the Spreading worksheet.${caughtUpText(made.caughtUp)}`);
@@ -204,6 +211,7 @@ export function SpreadThisCard({
                       <input type="month" value={month} onChange={(event) => setMonth(event.target.value)} />
                     </Field>
                   ) : null}
+                  <ItemTagInputs setups={setups} value={tags} onChange={setTags} disabled={busy} />
                 </div>
                 {method === "when_done" ? <p className={ui.muted}>It waits until you mark it done on the worksheet. Then all of it lands in that month.</p> : null}
                 <div className={styles.rowActions}>

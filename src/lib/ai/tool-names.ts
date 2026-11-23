@@ -352,6 +352,7 @@ export const AI_TOOL_PLAIN_WORDS: readonly { name: string; level: AiAccessLevel;
   { name: "add_custom_field_option", level: "post", words: "Add a choice to a list field (owners and admins)" },
   { name: "update_custom_field_option", level: "full", words: "Rename or switch off a list choice (owners and admins), after confirming" },
   { name: "add_spreading_item", level: "post", words: "Add something to the Spreading worksheet, or do Spread this on a bill, invoice or bank line" },
+  { name: "update_spreading_item_tags", level: "post", words: "Change a Spreading item's tracking and custom fields" },
   { name: "post_spreading_month", level: "post", words: "Post a Spreading month as one journal" },
   { name: "end_spreading_item_early", level: "post", words: "End a Spreading item early" },
   { name: "mark_spreading_item_done", level: "post", words: "Mark a \"when it's done\" Spreading item done" },

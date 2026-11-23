@@ -2,7 +2,8 @@ import { writeAuditEvent } from "@/lib/audit";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { assertSameRequest, requestHash } from "@/lib/idempotency";
-import { getJournal, parseJournalBody, postJournalBody } from "@/lib/ledger/journals";
+import type { CustomValues } from "@/lib/custom-fields/values";
+import { checkManualTags, getJournal, parseJournalBody, postJournalBody } from "@/lib/ledger/journals";
 import { assertPostingDateAllowed, getPeriodControls } from "@/lib/ledger/period-controls";
 import { abs, add, dec, isNegative, isZero, toFixedString, ZERO_DECIMAL } from "@/lib/money/decimal";
 import { monthEndDate, SPREAD_KIND_LABELS, type SpreadKind, spreadPosting } from "@/lib/spreading/rules";
@@ -35,7 +36,7 @@ export function spreadReference(kind: SpreadKind, month: string): string {
   return `SPREAD-${REFERENCE[kind]}-${month}`;
 }
 
-type JournalLine = { accountCode: string; debitAmount: string; creditAmount: string; description: string; tracking?: TrackingTags };
+type JournalLine = { accountCode: string; debitAmount: string; creditAmount: string; description: string; tracking?: TrackingTags; customFields?: CustomValues };
 
 export type MonthPreviewRow = {
   itemId: string;
@@ -58,6 +59,8 @@ export type MonthPreview = {
   blocked: string | null;
   /** Already posted (the run to undo), or null. */
   runId: string | null;
+  /** The item each journal line is for, in order. */
+  lineItems: string[];
 };
 
 function isUniqueViolation(error: unknown): boolean {
@@ -77,8 +80,8 @@ export async function previewSpreadMonth(tx: OrgTx, kindInput: unknown, monthInp
   const holding = settings[kind];
   if (!holding) throw new ValidationError("Spreading isn't turned on yet. An admin turns it on under Accounting › Month end.");
   const runId = await activeRun(tx, kind, month);
-  const result = await tx.query<{ item_id: string; description: string; line_kind: "share" | "difference"; amount: string; target_code: string; target_name: string; tracking: TrackingTags | null }>(
-    `select m.item_id::text, i.description, m.line_kind, m.amount::text, t.code as target_code, t.name as target_name, i.tracking
+  const result = await tx.query<{ item_id: string; description: string; line_kind: "share" | "difference"; amount: string; target_code: string; target_name: string; tracking: TrackingTags | null; custom_fields: CustomValues | null }>(
+    `select m.item_id::text, i.description, m.line_kind, m.amount::text, t.code as target_code, t.name as target_name, i.tracking, i.custom_fields
        from spread_item_months m join spread_items i on i.id = m.item_id join accounts t on t.id = i.target_account_id
       where i.kind = $1 and m.month = $2 and i.removed_at is null and (($3::bigint is null and m.run_id is null) or m.run_id = $3)
       order by i.id, m.line_kind desc`,
@@ -86,6 +89,8 @@ export async function previewSpreadMonth(tx: OrgTx, kindInput: unknown, monthInp
   );
   const sides = spreadPosting(kind);
   const journalLines: JournalLine[] = [];
+  // Which item each journal line is for, to name it when a rule stops the month.
+  const lineItems: string[] = [];
   let total = ZERO_DECIMAL;
   const rows: MonthPreviewRow[] = [];
   for (const row of result.rows) {
@@ -97,13 +102,21 @@ export async function previewSpreadMonth(tx: OrgTx, kindInput: unknown, monthInp
     const flip = isNegative(amount);
     const size = toFixedString(abs(amount), 2);
     const text = `${row.description}${row.line_kind === "difference" ? " - difference" : ""} - ${monthName(month)}`.slice(0, 200);
-    const line = (accountCode: string, side: "debit" | "credit", tracking?: TrackingTags) => {
+    const line = (accountCode: string, side: "debit" | "credit", tags?: { tracking: TrackingTags; customFields: CustomValues }) => {
       const actual = flip ? (side === "debit" ? "credit" : "debit") : side;
-      journalLines.push({ accountCode, debitAmount: actual === "debit" ? size : "0.00", creditAmount: actual === "credit" ? size : "0.00", description: text, ...(tracking ? { tracking } : {}) });
+      journalLines.push({
+        accountCode,
+        debitAmount: actual === "debit" ? size : "0.00",
+        creditAmount: actual === "credit" ? size : "0.00",
+        description: text,
+        ...(tags && Object.keys(tags.tracking).length > 0 ? { tracking: tags.tracking } : {}),
+        ...(tags && Object.keys(tags.customFields).length > 0 ? { customFields: tags.customFields } : {}),
+      });
     };
-    // The income or expense line carries the tracking of the bill or invoice line it came from (SW15).
-    line(row.target_code, sides.target, row.tracking && Object.keys(row.tracking).length > 0 ? row.tracking : undefined);
+    // The income or expense line carries the item's tracking and custom fields (SW15, SW25); the balance sheet line has none.
+    line(row.target_code, sides.target, { tracking: row.tracking ?? {}, customFields: row.custom_fields ?? {} });
     line(holding.code, sides.holding);
+    lineItems.push(row.description, row.description);
   }
   let blocked: string | null = null;
   if (!runId) {
@@ -122,8 +135,43 @@ export async function previewSpreadMonth(tx: OrgTx, kindInput: unknown, monthInp
         blocked = `${monthName(month)} is locked (the books are locked up to ${controls.lockDate}), so it can't be posted. It isn't moved to another month.`;
       }
     }
+    // A manual journal's rules for tracking and custom fields apply (SW25); the item is named, not the line.
+    if (!blocked && journalLines.length > 0) blocked = await tagProblem(tx, preview(), lineItems, undefined);
   }
-  return { kind, month, postingDate: monthEndDate(month), reference: spreadReference(kind, month), rows, total: toFixedString(total, 2), journalLines, blocked, runId };
+  return { ...preview(), blocked };
+
+  function preview(): MonthPreview {
+    return { kind, month, postingDate: monthEndDate(month), reference: spreadReference(kind, month), rows, total: toFixedString(total, 2), journalLines, blocked: null, runId, lineItems };
+  }
+}
+
+function journalInput(preview: MonthPreview, customFields: unknown) {
+  return {
+    postingDate: preview.postingDate,
+    reference: preview.reference,
+    description: `${SPREAD_KIND_LABELS[preview.kind]} - ${monthName(preview.month)}`,
+    lines: preview.journalLines,
+    ...(customFields !== undefined ? { customFields } : {}),
+  };
+}
+
+/**
+ * Why a month's journal would be refused for its tracking or custom fields
+ * (a required one missing, say), with the item named in place of "Line 3";
+ * null when it's fine. The journal's own required fields are left for
+ * posting, where they're filled in.
+ */
+async function tagProblem(tx: OrgTx, preview: MonthPreview, lineItems: string[], customFields: unknown, posting = false): Promise<string | null> {
+  try {
+    await checkManualTags(tx, parseJournalBody(tx, journalInput(preview, customFields)));
+    return null;
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+    const line = /^Line (\d+)(: | )/.exec(error.message);
+    if (line) return `${lineItems[Number(line[1]) - 1] ?? "An item"} ${line[2] === ": " ? "- " : ""}${error.message.slice(line[0].length)} Set it on the item, then post.`;
+    // Something the journal itself needs: filled in beside the Post button.
+    return posting ? error.message : null;
+  }
 }
 
 export type SpreadRun = {
@@ -167,7 +215,7 @@ export async function postSpreadMonth(tx: OrgTx, bodyInput: unknown): Promise<{ 
   const idempotencyKey = requireIdempotencyKey(body.idempotencyKey);
   const kind = parseKind(body.kind);
   const month = parseMonth(body.month);
-  const hash = requestHash("spread_run", { kind, month });
+  const hash = requestHash("spread_run", { kind, month, ...(body.customFields !== undefined ? { customFields: body.customFields } : {}) });
   const replay = async () => {
     const earlier = await tx.query<{ id: string; request_hash: string }>("select id::text, request_hash from spread_runs where command_source = $1 and idempotency_key = $2", [source, idempotencyKey]);
     if (!earlier.rows[0]) return null;
@@ -189,18 +237,13 @@ export async function postSpreadMonth(tx: OrgTx, bodyInput: unknown): Promise<{ 
   const runId = next.rows[0].id;
   let journalId: string | null = null;
   if (preview.journalLines.length > 0) {
-    const posted = await postJournalBody(
-      tx,
-      "spreading:run",
-      runId,
-      parseJournalBody(tx, {
-        postingDate: preview.postingDate,
-        reference: preview.reference,
-        description: `${SPREAD_KIND_LABELS[kind]} - ${monthName(month)}`,
-        lines: preview.journalLines,
-      }),
-      { origin: "spreading" },
-    );
+    // Checked as a manual journal is (SW25): tags that exist, required ones present, custom field values resolved.
+    // Custom fields left out get their defaults, as on a new manual journal.
+    const problem = await tagProblem(tx, preview, preview.lineItems, body.customFields, true);
+    if (problem) throw new ValidationError(problem);
+    const journal = parseJournalBody(tx, journalInput(preview, body.customFields));
+    await checkManualTags(tx, journal);
+    const posted = await postJournalBody(tx, "spreading:run", runId, journal, { origin: "spreading" });
     journalId = posted.journal.id;
   }
   try {

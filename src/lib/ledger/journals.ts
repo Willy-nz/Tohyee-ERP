@@ -668,7 +668,7 @@ export async function postJournal(
  * replacement): usable, and required ones present (TC5, TC6, CF9). Sets the
  * checked custom field values on the body.
  */
-async function checkManualTags(
+export async function checkManualTags(
   tx: OrgTx,
   body: JournalBody,
   kept: ReadonlySet<string> = new Set(),
