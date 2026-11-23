@@ -11,9 +11,10 @@ import { caughtUpText } from "@/components/spread-this";
 import { Badge, Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
 import { api, apiDownload, errorMessage, newIdempotencyKey } from "@/lib/client/api";
-import { todayInBrowser } from "@/lib/format";
+import { formatDate, todayInBrowser } from "@/lib/format";
 import { dec, sum, toFixedString } from "@/lib/money/decimal";
 import { addMonths, SPREAD_KIND_LABELS, SPREAD_KINDS, type SpreadKind, type SpreadMethod } from "@/lib/spreading/rules";
+import type { SpreadExplain } from "@/lib/spreading/explain";
 import type { MonthPreview } from "@/lib/spreading/runs";
 import type { SpreadItem, SpreadWorksheet } from "@/lib/spreading/service";
 import styles from "./spreading.module.css";
@@ -221,6 +222,8 @@ export function Spreading({ organisationId }: { organisationId: string }) {
         )}
       </div>
 
+      {!matches && !worksheet.booksElsewhere ? <Behind key={`${kind}:${tie.difference}`} organisationId={organisationId} kind={kind} /> : null}
+
       <MonthEnd key={`${kind}:${nextMonth(worksheet, kind)}:${worksheet.posted[kind]?.runId ?? ""}`} organisationId={organisationId} kind={kind} worksheet={worksheet} busy={busy} send={send} />
 
       <Card title={SPREAD_KIND_LABELS[kind]}>
@@ -266,6 +269,60 @@ export function Spreading({ organisationId }: { organisationId: string }) {
         </label>
       ) : null}
     </>
+  );
+}
+
+/** The two lists to match by eye when a tab is out (SW24). */
+function Behind({ organisationId, kind }: { organisationId: string; kind: SpreadKind }) {
+  const [open, setOpen] = useState(false);
+  const found = useApiData<{ explain: SpreadExplain }>(open ? "/api/spreading" : null, { organisationId, kind, explain: "1" });
+  const explain = found.data?.explain ?? null;
+  return (
+    <div className={styles.behind}>
+      <button type="button" className={styles.linkButton} aria-expanded={open} onClick={() => setOpen(!open)}>
+        {open ? "Hide what's behind it" : "See what's behind it"}
+      </button>
+      {open && found.error ? <Notice tone="error">{found.error}</Notice> : null}
+      {open && explain ? (
+        <Card title="What's behind it" description="Match the two lists. Whatever has no partner is the difference.">
+          <div className={styles.behindLists}>
+            <div>
+              <h3>
+                Coded to {explain.account.code} from outside the worksheet · <Money value={explain.outsideTotal} />
+              </h3>
+              {explain.outside.length === 0 ? <p className={ui.muted}>Nothing.</p> : null}
+              <ul className={styles.behindList}>
+                {explain.outside.map((row) => (
+                  <li key={row.journalId}>
+                    <span>
+                      <Link href={`/operations/ledger-journals?journal=${row.journalId}`}>{row.reference}</Link> · {formatDate(row.date)}
+                      {row.description ? <span className={ui.muted}> · {row.description}</span> : null}
+                    </span>
+                    <Money value={row.amount} />
+                  </li>
+                ))}
+              </ul>
+              {explain.outsideMore > 0 ? <p className={ui.muted}>And {explain.outsideMore} older ones, counted in the total.</p> : null}
+            </div>
+            <div>
+              <h3>
+                What the worksheet expects there · <Money value={explain.expectedTotal} />
+              </h3>
+              {explain.expected.length === 0 ? <p className={ui.muted}>Nothing.</p> : null}
+              <ul className={styles.behindList}>
+                {explain.expected.map((row, index) => (
+                  <li key={index}>
+                    <span>{row.description}</span>
+                    <Money value={row.amount} />
+                  </li>
+                ))}
+              </ul>
+            </div>
+          </div>
+          <p className={ui.muted}>Things added with Spread this aren&apos;t listed: they bring their own entry. Voided entries are left off.</p>
+        </Card>
+      ) : null}
+    </div>
   );
 }
 

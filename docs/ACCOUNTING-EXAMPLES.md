@@ -23335,7 +23335,7 @@ dropdown.
 - **APS10** A name that isn't a salesperson shows **0.00** everywhere,
   never the whole report.
 
-## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW23; planned with the owner 23 Nov 2026, built by Claude; the details follow common practice and are not yet reviewed)
+## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW24; planned with the owner 23 Nov 2026, built by Claude; the details follow common practice and are not yet reviewed)
 
 Income or a cost often belongs to other months than the one it was billed
 or paid in. The Spreading worksheet replaces the spreadsheet kept for that.
@@ -23497,6 +23497,16 @@ added when Spreading is turned on.
   (900.00 after September) to compare with the account in the other
   software. Items can be brought in from a CSV file, one row an item, all
   of them or none; and the worksheet can be downloaded as one.
+- **SW24 What's behind an "Out by".** After SW11's stray journal the Paid
+  in advance tab is out by 50.00. "What's behind it" puts two lists side by
+  side. Coded to 1200 from outside the worksheet: the insurance bill
+  **1,200.00** and the stray journal **50.00**, 1,250.00. What the
+  worksheet expects to find there: Farm insurance **1,200.00**. The 50.00
+  with no partner is the difference. An item made with "Spread this" is on
+  neither list, since it brought its own entry. A voided entry and its
+  reversal are left off. For the two accruals the expected list is the
+  bills or invoices marked as arrived by hand, which take their amount back
+  out of the account.
 
 ## Where Shopify orders go (SHP1-SHP5; 23 Nov 2026; following common practice, not yet reviewed)
 

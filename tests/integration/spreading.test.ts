@@ -1,4 +1,6 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
+import * as tokensRoute from "@/app/api/ai/tokens/route";
+import * as mcpRoute from "@/app/api/mcp/route";
 import * as itemRoute from "@/app/api/spreading/items/[itemId]/route";
 import * as itemsRoute from "@/app/api/spreading/items/route";
 import * as monthsRoute from "@/app/api/spreading/months/route";
@@ -16,6 +18,7 @@ import { coreQuery } from "@/lib/db/transactions";
 import { approveInvoice, createInvoice, voidInvoice } from "@/lib/invoices/service";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { correctJournal, getJournal, getJournalDetails, postJournal } from "@/lib/ledger/journals";
+import { planVoidJournals, voidJournals } from "@/lib/ledger/void-journals";
 import { recodeLine } from "@/lib/ledger/recode";
 import { updatePeriodControls } from "@/lib/ledger/period-controls";
 import { updateOrganisationSettings } from "@/lib/organisations/settings";
@@ -33,6 +36,7 @@ import {
   settleSpreadItem,
   unsettleSpreadItem,
 } from "@/lib/spreading/service";
+import { explainSpreadDifference } from "@/lib/spreading/explain";
 import { importSpreadItems, monthJournalFile, worksheetFile } from "@/lib/spreading/files";
 import { listSourceLines } from "@/lib/spreading/sources";
 import { apiRequest, createTestOrganisation, createTestUser, describeWithDatabase, inOrganisation, key, sessionCookieFor, startTestServer, type TestServer } from "../helpers/test-server";
@@ -651,6 +655,110 @@ describeWithDatabase("spreading", () => {
     const lines = sheet.csv.trim().split("\r\n");
     expect(lines[0]).toBe("What,Account code,Account name,How,From,To,Amount,Left,2026-07,2026-08,2026-09,2026-10,2026-11,2026-12,2027-01,2027-02,2027-03,2027-04,2027-05,2027-06");
     expect(lines[1]).toBe(`Farm insurance,6080,Insurance,Evenly by month,2026-07-01,2027-06-30,1200.00,1100.00,${Array(12).fill("100.00").join(",")}`);
+  });
+
+  it("SW24: what's behind an Out by: entries from outside the worksheet beside what the worksheet expects", async () => {
+    const w = await setup();
+    await w.insurance();
+    for (const month of ["2026-07", "2026-08", "2026-09"]) await w.post("prepayment", month);
+    await w.journal("2026-09-30", "ODD", [
+      ["1200", "50.00", "0"],
+      ["6080", "0", "50.00"],
+    ]);
+    // A voided entry and its reversal are left off.
+    const stray = await w.journal("2026-09-15", "MISTAKE", [
+      ["1200", "75.00", "0"],
+      ["6080", "0", "75.00"],
+    ]);
+    await w.as(async (tx) => {
+      const plan = await planVoidJournals(tx, { journalIds: [stray.journal.id] });
+      await voidJournals(tx, { idempotencyKey: key("void"), journalIds: [stray.journal.id], reason: "Entered twice", previewHash: plan.hash });
+    });
+    // One made with Spread this is on neither list.
+    const bank = (await w.as((tx) => listBankAccounts(tx))).find((account) => account.code === "1000")!;
+    const supplier = (await w.as((tx) => createContact(tx, { idempotencyKey: key("contact"), name: "Licensing NZ", isSupplier: true }))).contact;
+    const spend = (await w.as((tx) => createBankTransaction(tx, { idempotencyKey: key("spend"), kind: "spend", accountId: bank.id, contactId: supplier.id, date: "2026-10-01", amountsMode: "no_tax", lines: [{ description: "Licence", accountCode: "6080", amount: "240.00" }] }))).bankTransaction;
+    const [line] = await w.as((tx) => listSourceLines(tx, "bank", spend.id));
+    await w.add({ bankLineId: line.lineId, startDate: "2026-10-01", endDate: "2027-09-30" });
+
+    const explain = await w.as((tx) => explainSpreadDifference(tx, "prepayment"));
+    expect(explain.outside.map((row) => [row.date, row.reference, row.amount])).toEqual([
+      ["2026-09-30", "ODD", "50.00"],
+      ["2026-07-01", "INS-BILL", "1200.00"],
+    ]);
+    expect(explain.expected.map((row) => [row.description, row.amount])).toEqual([["Farm insurance", "1200.00"]]);
+    expect(explain).toMatchObject({ outsideTotal: "1250.00", expectedTotal: "1200.00", difference: "50.00", outsideMore: 0 });
+    expect((await w.tie("prepayment")).difference).toBe(explain.difference);
+  });
+
+  it("SW24: for an accrual, the bills marked by hand are what's expected", async () => {
+    const w = await setup();
+    const held = w.settings.accrued_expense!.code;
+    await w.as((tx) => createAccount(tx, { code: "6470", name: "Rates", accountType: "expense" }));
+    const rates = await w.add({ kind: "accrued_expense", description: "Rates", targetAccountCode: "6470", amount: "900.00", startDate: "2026-07-01", endDate: "2026-09-30" });
+    for (const month of ["2026-07", "2026-08", "2026-09"]) await w.post("accrued_expense", month);
+    await w.asAroha((tx) => settleSpreadItem(tx, rates.id, { month: "2026-10", amount: "920.00" }));
+    // The bill hasn't been coded to the account yet: out by its 920.00.
+    const before = await w.as((tx) => explainSpreadDifference(tx, "accrued_expense"));
+    expect(before).toMatchObject({ outside: [], expected: [{ itemId: rates.id, description: "Rates: its bill", amount: "-920.00" }], difference: "920.00" });
+    expect((await w.tie("accrued_expense")).difference).toBe("920.00");
+    await w.journal("2026-10-05", "RATES-BILL", [
+      [held, "920.00", "0"],
+      ["2000", "0", "920.00"],
+    ]);
+    const after = await w.as((tx) => explainSpreadDifference(tx, "accrued_expense"));
+    expect(after).toMatchObject({ outsideTotal: "-920.00", expectedTotal: "-920.00", difference: "0.00" });
+    expect((await w.tie("accrued_expense")).difference).toBe("0.00");
+  });
+
+  it("the AI tools do what the screen does, and the undos confirm first", async () => {
+    const w = await setup();
+    const token = async (accessLevel: "post" | "full") => {
+      const response = await tokensRoute.POST(
+        apiRequest("/api/ai/tokens", { method: "POST", cookie: await sessionCookieFor(owner), body: { organisationId: w.org, name: accessLevel, accessLevel, ...(accessLevel === "full" ? { confirmFullAccess: true } : {}) } }),
+        noContext,
+      );
+      expect(response.status).toBe(201);
+      return ((await response.json()) as { token: string }).token;
+    };
+    let rpcId = 0;
+    const call = async (bearer: string, name: string, args: Record<string, unknown> = {}) => {
+      rpcId += 1;
+      const response = await mcpRoute.POST(
+        new Request("http://tohyee.test/api/mcp", { method: "POST", headers: { "content-type": "application/json", authorization: `Bearer ${bearer}` }, body: JSON.stringify({ jsonrpc: "2.0", id: rpcId, method: "tools/call", params: { name, arguments: args } }) }),
+        noContext,
+      );
+      const body = (await response.json()) as { error?: { message: string }; result?: { content: { text: string }[]; isError?: boolean } };
+      if (body.error) throw new Error(body.error.message);
+      if (body.result!.isError) throw new Error(body.result!.content[0].text);
+      return JSON.parse(body.result!.content[0].text) as Record<string, unknown>;
+    };
+    const post = await token("post");
+    const full = await token("full");
+    await w.journal("2026-07-01", "INS-BILL", [
+      ["1200", "1200.00", "0"],
+      ["2000", "0", "1200.00"],
+    ]);
+    const args = { kind: "prepayment", description: "Farm insurance", amount: "1200.00", targetAccountCode: "6080", startDate: "2026-07-01", endDate: "2027-06-30", idempotencyKey: "ai-spread-item-1" };
+    const made = (await call(post, "add_spreading_item", args)) as { created: boolean; item: { id: string } };
+    expect(made.created).toBe(true);
+    expect(await call(post, "add_spreading_item", args)).toMatchObject({ created: false, item: { id: made.item.id } });
+    expect(await call(post, "preview_spreading_month", { kind: "prepayment", month: "2026-07" })).toMatchObject({ total: "100.00", blocked: null });
+    const july = (await call(post, "post_spreading_month", { kind: "prepayment", month: "2026-07", idempotencyKey: "ai-spread-month-1" })) as { run: { id: string } };
+    const sheet = (await call(post, "get_spreading_worksheet")) as { tieOut: Array<{ kind: string; difference: string }>; posted: { prepayment: { runId: string } } };
+    expect(sheet.posted.prepayment.runId).toBe(july.run.id);
+    expect(sheet.tieOut.find((row) => row.kind === "prepayment")!.difference).toBe("0.00");
+    expect(await call(post, "explain_spreading_difference", { kind: "prepayment" })).toMatchObject({ difference: "0.00" });
+    // Undoing is for Full access, and shows what it acts on first.
+    await expect(call(post, "undo_spreading_month", { runId: july.run.id })).rejects.toThrow();
+    const before = await w.journals();
+    const preview = (await call(full, "undo_spreading_month", { runId: july.run.id })) as { preview: boolean; confirmHash: string };
+    expect(preview.preview).toBe(true);
+    expect(await w.journals()).toBe(before);
+    expect(await call(full, "undo_spreading_month", { runId: july.run.id, confirmHash: preview.confirmHash, idempotencyKey: "ai-spread-undo-1" })).toMatchObject({ run: { status: "undone" } });
+    const removal = (await call(full, "remove_spreading_item", { itemId: made.item.id })) as { confirmHash: string };
+    expect(await call(full, "remove_spreading_item", { itemId: made.item.id, confirmHash: removal.confirmHash, idempotencyKey: "ai-spread-remove-1" })).toEqual({ removed: true });
+    expect((await w.worksheet()).items).toEqual([]);
   });
 
   it("the API: viewers read, bookkeepers add and post, admins change the accounts", async () => {
