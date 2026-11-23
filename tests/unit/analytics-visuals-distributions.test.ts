@@ -115,6 +115,13 @@ describe("box plot", () => {
 });
 
 describe("scatter and bubble", () => {
+  it("says what to add, rather than failing, when picked for a chart with one value", () => {
+    const spec: ChartSpec = { kind: "scatter", category: "category", series: [{ field: "m0", label: "Sales" }], valueFormat: "money", format: {} };
+    const result = option(spec, [{ category: "Alpha", m0: "1" }]);
+    expect(result.series).toEqual([]);
+    expect(JSON.stringify(result.graphic)).toContain("Add a second value");
+  });
+
   it("plots each group across by its first value and up by its second, sized by a third", () => {
     expect(bubbleSizes([0, 25, 100, null])).toEqual([8, 24, 40, 8]);
     const spec: ChartSpec = {
