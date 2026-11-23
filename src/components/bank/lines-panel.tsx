@@ -11,6 +11,8 @@ import { LineBaseValue } from "@/components/bank/foreign";
 import { useApiData } from "@/components/hooks";
 import { CustomValuesText, useCustomFields } from "@/components/custom-fields";
 import { RecodeForm } from "@/components/recode";
+import { SpreadThisCard } from "@/components/spread-this";
+import type { SpreadingSettings } from "@/lib/spreading/service";
 import { EditInPlace } from "@/components/bank/recode-in-place";
 import { TrackingTagsText, useTracking } from "@/components/tracking";
 import { Badge, Button, Empty, Field, Notice, ui } from "@/components/ui";
@@ -412,6 +414,10 @@ export function TransactionsPanel({ organisationId, account, focusTransactionId 
   const [recoding, setRecoding] = useState<string | null>(null);
   const [editing, setEditing] = useState<string | null>(null);
   const [recoded, setRecoded] = useState<string | null>(null);
+  // "Spread" is offered once Spreading is turned on (SW19).
+  const [spreading, setSpreading] = useState<string | null>(null);
+  const spreadSettings = useApiData<{ settings: SpreadingSettings }>(can("bookkeeper") ? "/api/spreading/settings" : null, { organisationId });
+  const spreadingOn = Boolean(spreadSettings.data?.settings.prepayment);
   if (focused && openedFocus !== focused.id) {
     setOpenedFocus(focused.id);
     if (focused.status === "posted" && can("bookkeeper")) setRecoding(focused.id);
@@ -507,6 +513,19 @@ export function TransactionsPanel({ organisationId, account, focusTransactionId 
                           >
                             Recode
                           </Button>
+                          {spreadingOn ? (
+                            <Button
+                              variant="secondary"
+                              size="small"
+                              onClick={() => {
+                                setEditing(null);
+                                setRecoding(null);
+                                setSpreading(spreading === transaction.id ? null : transaction.id);
+                              }}
+                            >
+                              Spread
+                            </Button>
+                          ) : null}
                           <VoidButton
                             organisationId={organisationId}
                             path={`/api/bank-transactions/${transaction.id}/void`}
@@ -531,6 +550,13 @@ export function TransactionsPanel({ organisationId, account, focusTransactionId 
                           transactions.reload();
                         }}
                       />
+                    </td>
+                  </tr>
+                ) : null}
+                {spreading === transaction.id ? (
+                  <tr>
+                    <td colSpan={8}>
+                      <SpreadThisCard organisationId={organisationId} bankTransactionId={transaction.id} always />
                     </td>
                   </tr>
                 ) : null}

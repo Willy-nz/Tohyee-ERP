@@ -276,6 +276,7 @@ import { migration as m0298 } from "@/lib/db/migrations/tenant/0298-farm-medicin
 import { migration as m0299 } from "@/lib/db/migrations/tenant/0299-fuel-refund";
 import { migration as m0300 } from "@/lib/db/migrations/tenant/0300-spreading";
 import { migration as m0301 } from "@/lib/db/migrations/tenant/0301-spread-this";
+import { migration as m0302 } from "@/lib/db/migrations/tenant/0302-spreading-bank-and-accrual-links";
 
 /**
  * Migrations applied to every organisation's own database. Each organisation
@@ -619,4 +620,5 @@ export const tenantMigrations: readonly Migration[] = [
   m0299,
   m0300,
   m0301,
+  m0302,
 ];

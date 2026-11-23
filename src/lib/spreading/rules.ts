@@ -209,6 +209,23 @@ export function endEarly(schedule: SpreadMonth[], postedThrough: string | null, 
   return cmp(rest, ZERO_DECIMAL) === 0 ? posted : [...posted, { month: releaseMonth, amount: toFixedString(rest, 2) }];
 }
 
+/**
+ * An item added after some of its months have already posted (SW18): those
+ * months' amounts are caught up in the next month to post, and the posted
+ * months aren't reopened. `postedThrough` is the kind's latest posted month.
+ */
+export function catchUp(schedule: SpreadMonth[], postedThrough: string | null): { schedule: SpreadMonth[]; caughtUp: { months: number; amount: string; into: string } | null } {
+  const sorted = [...schedule].sort((left, right) => (left.month < right.month ? -1 : left.month > right.month ? 1 : 0));
+  if (postedThrough === null || sorted.every((row) => row.month > postedThrough)) return { schedule: sorted, caughtUp: null };
+  const into = addMonths(postedThrough, 1);
+  const late = sorted.filter((row) => row.month <= postedThrough);
+  const lateTotal = sum(late.map((row) => dec(row.amount)));
+  const rest = sorted.filter((row) => row.month > postedThrough);
+  const first = rest[0]?.month === into ? rest.shift()! : null;
+  const amount = toFixedString(add(lateTotal, first ? dec(first.amount) : ZERO_DECIMAL), 2);
+  return { schedule: [{ month: into, amount }, ...rest], caughtUp: { months: late.length, amount: toFixedString(lateTotal, 2), into } };
+}
+
 /** How much of a schedule falls in months up to and including `month`, and how much after. */
 export function splitAt(schedule: SpreadMonth[], month: string | null): { through: string; after: string } {
   let through = ZERO_DECIMAL;
