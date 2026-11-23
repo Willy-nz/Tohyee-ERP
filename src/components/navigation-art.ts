@@ -55,6 +55,7 @@ const ROUTES: Array<[string, IllustratedIconName]> = [
   ["/operations/reports", "reports"], ["/operations/project-reports", "reports"], ["/operations/budgets", "analytics"],
   ["/operations/items", "inventory"], ["/operations/inventory", "inventory"],
   ["/operations/stock", "inventory"], ["/operations/fixed-assets", "vehicle"],
+  ["/operations/spreading", "calendar"],
   ["/operations/period-close", "calendar"], ["/operations/accounts", "checklist"],
   ["/operations/contacts", "crm"], ["/operations/ai", "ai"],
   ["/operations/bank-accounts", "banking"], ["/operations/bank-rules", "funnel"],
