@@ -7,6 +7,7 @@ import { assertPostingDateAllowed, getPeriodControls } from "@/lib/ledger/period
 import { abs, add, dec, isNegative, isZero, toFixedString, ZERO_DECIMAL } from "@/lib/money/decimal";
 import { monthEndDate, SPREAD_KIND_LABELS, type SpreadKind, spreadPosting } from "@/lib/spreading/rules";
 import { getSpreadingSettings, latestPostedMonth, lockWorksheet, parseKind, parseMonth } from "@/lib/spreading/service";
+import type { TrackingTags } from "@/lib/tracking/service";
 import { asRecord, optionalSource, requireId, requireIdempotencyKey } from "@/lib/validation";
 
 /**
@@ -34,7 +35,7 @@ export function spreadReference(kind: SpreadKind, month: string): string {
   return `SPREAD-${REFERENCE[kind]}-${month}`;
 }
 
-type JournalLine = { accountCode: string; debitAmount: string; creditAmount: string; description: string };
+type JournalLine = { accountCode: string; debitAmount: string; creditAmount: string; description: string; tracking?: TrackingTags };
 
 export type MonthPreviewRow = {
   itemId: string;
@@ -76,8 +77,8 @@ export async function previewSpreadMonth(tx: OrgTx, kindInput: unknown, monthInp
   const holding = settings[kind];
   if (!holding) throw new ValidationError("Turn Spreading on first: it needs an account to hold this in.");
   const runId = await activeRun(tx, kind, month);
-  const result = await tx.query<{ item_id: string; description: string; line_kind: "share" | "difference"; amount: string; target_code: string; target_name: string }>(
-    `select m.item_id::text, i.description, m.line_kind, m.amount::text, t.code as target_code, t.name as target_name
+  const result = await tx.query<{ item_id: string; description: string; line_kind: "share" | "difference"; amount: string; target_code: string; target_name: string; tracking: TrackingTags | null }>(
+    `select m.item_id::text, i.description, m.line_kind, m.amount::text, t.code as target_code, t.name as target_name, i.tracking
        from spread_item_months m join spread_items i on i.id = m.item_id join accounts t on t.id = i.target_account_id
       where i.kind = $1 and m.month = $2 and i.removed_at is null and (($3::bigint is null and m.run_id is null) or m.run_id = $3)
       order by i.id, m.line_kind desc`,
@@ -96,11 +97,12 @@ export async function previewSpreadMonth(tx: OrgTx, kindInput: unknown, monthInp
     const flip = isNegative(amount);
     const size = toFixedString(abs(amount), 2);
     const text = `${row.description}${row.line_kind === "difference" ? " - difference" : ""} - ${monthName(month)}`.slice(0, 200);
-    const line = (accountCode: string, side: "debit" | "credit") => {
+    const line = (accountCode: string, side: "debit" | "credit", tracking?: TrackingTags) => {
       const actual = flip ? (side === "debit" ? "credit" : "debit") : side;
-      journalLines.push({ accountCode, debitAmount: actual === "debit" ? size : "0.00", creditAmount: actual === "credit" ? size : "0.00", description: text });
+      journalLines.push({ accountCode, debitAmount: actual === "debit" ? size : "0.00", creditAmount: actual === "credit" ? size : "0.00", description: text, ...(tracking ? { tracking } : {}) });
     };
-    line(row.target_code, sides.target);
+    // The income or expense line carries the tracking of the bill or invoice line it came from (SW15).
+    line(row.target_code, sides.target, row.tracking && Object.keys(row.tracking).length > 0 ? row.tracking : undefined);
     line(holding.code, sides.holding);
   }
   let blocked: string | null = null;

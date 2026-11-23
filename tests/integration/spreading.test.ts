@@ -2,15 +2,22 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import * as itemRoute from "@/app/api/spreading/items/[itemId]/route";
 import * as itemsRoute from "@/app/api/spreading/items/route";
 import * as monthsRoute from "@/app/api/spreading/months/route";
+import * as linesRoute from "@/app/api/spreading/lines/route";
 import * as worksheetRoute from "@/app/api/spreading/route";
 import * as undoRoute from "@/app/api/spreading/runs/[runId]/undo/route";
 import * as settingsRoute from "@/app/api/spreading/settings/route";
 import { createAccount } from "@/lib/accounts/service";
 import type { SessionUser } from "@/lib/auth/sessions";
+import { approveBill, createBill, voidBill } from "@/lib/bills/service";
+import { createContact } from "@/lib/contacts/service";
 import { coreQuery } from "@/lib/db/transactions";
+import { approveInvoice, createInvoice, voidInvoice } from "@/lib/invoices/service";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { correctJournal, getJournal, getJournalDetails, postJournal } from "@/lib/ledger/journals";
+import { recodeLine } from "@/lib/ledger/recode";
 import { updatePeriodControls } from "@/lib/ledger/period-controls";
+import { updateOrganisationSettings } from "@/lib/organisations/settings";
+import { createTrackingValue, getTrackingSetup } from "@/lib/tracking/service";
 import { postSpreadMonth, previewSpreadMonth, undoSpreadRun } from "@/lib/spreading/runs";
 import type { SpreadKind } from "@/lib/spreading/rules";
 import {
@@ -23,6 +30,7 @@ import {
   saveSpreadingSettings,
   settleSpreadItem,
 } from "@/lib/spreading/service";
+import { listSourceLines } from "@/lib/spreading/sources";
 import { apiRequest, createTestOrganisation, createTestUser, describeWithDatabase, inOrganisation, key, sessionCookieFor, startTestServer, type TestServer } from "../helpers/test-server";
 
 const noContext = undefined as unknown;
@@ -339,6 +347,135 @@ describeWithDatabase("spreading", () => {
     expect((await w.item(item.id)).months[0]).toMatchObject({ month: "2026-07", amount: "100.00", runId: null });
     // August still waits for July.
     await expect(w.post("prepayment", "2026-08")).rejects.toThrow(/Post July 2026 first/);
+  });
+
+  it("SW15, SW17: Spread this on a bill line moves it on the bill date, carries tracking, and can be taken back", async () => {
+    const w = await setup();
+    await w.as((tx) => updateOrganisationSettings(tx, { advancedFeatures: true }));
+    const department = (await w.as((tx) => getTrackingSetup(tx))).categories.find((c) => c.kind === "department")!.id;
+    const farm = (await w.as((tx) => createTrackingValue(tx, { categoryId: department, name: "Farm" }))).categories.find((c) => c.id === department)!.values.find((v) => v.name === "Farm")!.id;
+    const supplier = (await w.as((tx) => createContact(tx, { idempotencyKey: key("contact"), name: "FMG", isSupplier: true }))).contact;
+    const bill = (
+      await w.as((tx) =>
+        createBill(tx, {
+          idempotencyKey: key("bill"),
+          contactId: supplier.id,
+          billDate: "2026-07-01",
+          dueDate: "2026-07-20",
+          supplierInvoiceNumber: "INS-778",
+          amountsMode: "exclusive",
+          lines: [
+            { description: "Farm insurance", quantity: "1", unitPrice: "1200.00", accountCode: "6080", taxCode: "GST", tracking: { [department]: farm } },
+            { description: "Laptop", quantity: "1", unitPrice: "2000.00", accountCode: "1620", taxCode: "GST" },
+          ],
+        }),
+      )
+    ).bill;
+    const [insuranceLine, laptopLine] = (await w.as((tx) => listSourceLines(tx, "bill", bill.id))).map((line) => ({ id: line.lineId }));
+    const fields = { billLineId: insuranceLine.id, startDate: "2026-07-01", endDate: "2027-06-30" };
+    await expect(w.add(fields)).rejects.toThrow(/Approve the bill first/);
+    await w.as((tx) => approveBill(tx, bill.id, { idempotencyKey: key("approve") }));
+    expect(await w.balance("6080")).toBe("1200.00");
+    await expect(w.add({ ...fields, billLineId: laptopLine.id })).rejects.toThrow(/isn't an expense account/);
+
+    const itemKey = key("item");
+    const item = await w.add(fields, itemKey);
+    expect(item).toMatchObject({ kind: "prepayment", description: "Farm insurance", amount: "1200.00", left: "1200.00", contactId: supplier.id, tracking: { [department]: farm } });
+    expect(item.target.code).toBe("6080");
+    expect(item.source).toMatchObject({ kind: "bill", documentId: bill.id, label: "Bill INS-778 from FMG" });
+    expect((await w.add(fields, itemKey)).id).toBe(item.id);
+    await expect(w.add(fields)).rejects.toThrow(/already on the Spreading worksheet/);
+    // One journal on the bill's date moved the amount without GST; the GST and the payable stay put.
+    const move = await w.as((tx) => tx.query<{ id: string; posting_date: string; reference: string; origin: string }>("select j.id::text, to_char(j.posting_date, 'YYYY-MM-DD') as posting_date, j.reference, j.origin from ledger_journals j join spread_items i on i.move_journal_id = j.id where i.id = $1", [item.id]));
+    expect(move.rows[0]).toMatchObject({ posting_date: "2026-07-01", reference: `SPREAD-MOVE-${item.id}`, origin: "spreading" });
+    expect(await w.lines(move.rows[0].id)).toEqual([
+      ["1200", "1200.00", "0.00"],
+      ["6080", "0.00", "1200.00"],
+    ]);
+    expect(await w.balance("6080")).toBe("0.00");
+    expect(await w.balance("2100")).toBe("480.00"); // 180.00 on the insurance and 300.00 on the laptop, untouched
+    expect(await w.tie("prepayment")).toMatchObject({ worksheet: "1200.00", ledger: "1200.00", difference: "0.00" });
+    // The bill's card lists the line as spreading.
+    const listed = await linesRoute.GET(apiRequest(`/api/spreading/lines?organisationId=${w.org}&billId=${bill.id}`, { cookie: await sessionCookieFor(viewer) }), noContext);
+    const card = (await listed.json()) as { holding: { code: string }; lines: Array<{ lineId: string; itemId: string | null; reason: string | null }> };
+    expect(card.holding.code).toBe("1200");
+    expect(card.lines.map((line) => [line.lineId, line.itemId, line.reason === null])).toEqual([
+      [insuranceLine.id, item.id, true],
+      [laptopLine.id, null, false],
+    ]);
+
+    // July's journal carries the line's tracking to the expense.
+    const july = await w.post("prepayment", "2026-07");
+    const posted = await w.as((tx) => getJournal(tx, july.journalId as string));
+    expect(posted.lines.map((line) => [line.accountCode, line.debitAmount, line.tracking])).toEqual([
+      ["6080", "100.00", { [department]: farm }],
+      ["1200", "0.00", {}],
+    ]);
+    // The bill can't be voided, and the item can't come off, while a month is posted.
+    await expect(w.as((tx) => voidBill(tx, bill.id, { idempotencyKey: key("void"), voidDate: "2026-07-01" }))).rejects.toThrow(/on the Spreading worksheet/);
+    await expect(w.asAroha((tx) => removeSpreadItem(tx, item.id))).rejects.toThrow(/can't be removed/);
+    // Nor can the line be recoded while it's there.
+    await expect(w.as((tx) => recodeLine(tx, { idempotencyKey: key("recode"), documentType: "bill", documentId: bill.id, lineOrder: 1, accountCode: "6000", reason: "Wrong account" }))).rejects.toThrow(/on the Spreading worksheet/);
+    await w.undo(july.id);
+    await expect(w.as((tx) => voidBill(tx, bill.id, { idempotencyKey: key("void"), voidDate: "2026-07-01" }))).rejects.toThrow(/on the Spreading worksheet/);
+    // Taken back: the exact reversal on the bill's date, and the expense holds it again.
+    await w.asAroha((tx) => removeSpreadItem(tx, item.id));
+    expect(await w.balance("6080")).toBe("1200.00");
+    expect(await w.balance("1200")).toBe("0.00");
+    const undo = await w.as((tx) => tx.query<{ posting_date: string; reference: string }>("select to_char(j.posting_date, 'YYYY-MM-DD') as posting_date, j.reference from ledger_journals j join spread_items i on i.move_undo_journal_id = j.id where i.id = $1", [item.id]));
+    expect(undo.rows[0]).toEqual({ posting_date: "2026-07-01", reference: `VOID-SPREAD-MOVE-${item.id}` });
+    // Now the line can be spread again, or the bill voided.
+    const again = await w.add({ ...fields, description: "Insurance to June" });
+    expect(again.description).toBe("Insurance to June");
+    await w.asAroha((tx) => removeSpreadItem(tx, again.id));
+    expect((await w.as((tx) => voidBill(tx, bill.id, { idempotencyKey: key("void"), voidDate: "2026-07-01" }))).bill.status).toBe("voided");
+  });
+
+  it("SW15: a bill dated in a locked period isn't moved", async () => {
+    const w = await setup();
+    const supplier = (await w.as((tx) => createContact(tx, { idempotencyKey: key("contact"), name: "FMG", isSupplier: true }))).contact;
+    const bill = (
+      await w.as((tx) =>
+        createBill(tx, { idempotencyKey: key("bill"), contactId: supplier.id, billDate: "2026-07-01", dueDate: "2026-07-20", supplierInvoiceNumber: "INS-1", amountsMode: "exclusive", lines: [{ description: "Insurance", quantity: "1", unitPrice: "1200.00", accountCode: "6080", taxCode: "GST" }] }),
+      )
+    ).bill;
+    await w.as((tx) => approveBill(tx, bill.id, { idempotencyKey: key("approve") }));
+    await w.as((tx) => updatePeriodControls(tx, { lockDate: "2026-07-31" }));
+    const before = await w.journals();
+    const lineId = (await w.as((tx) => listSourceLines(tx, "bill", bill.id)))[0].lineId;
+    await expect(w.add({ billLineId: lineId, startDate: "2026-08-01", endDate: "2027-06-30" })).rejects.toThrow(/locked up to 2026-07-31/);
+    expect(await w.journals()).toBe(before);
+    expect((await w.worksheet()).items).toEqual([]);
+  });
+
+  it("SW16: Spread this on an invoice line moves it to Income in advance", async () => {
+    const w = await setup();
+    const held = w.settings.income_in_advance!.code;
+    const customer = (await w.as((tx) => createContact(tx, { idempotencyKey: key("contact"), name: "Hill Station", isCustomer: true }))).contact;
+    const invoice = (
+      await w.as((tx) =>
+        createInvoice(tx, { idempotencyKey: key("invoice"), contactId: customer.id, invoiceDate: "2026-10-01", dueDate: "2026-10-20", amountsMode: "exclusive", lines: [{ description: "Year's subscription", quantity: "1", unitPrice: "2400.00", accountCode: "4000", taxCode: "GST" }] }),
+      )
+    ).invoice;
+    const approved = (await w.as((tx) => approveInvoice(tx, invoice.id, { idempotencyKey: key("approve") }))).invoice;
+    const lineId = (await w.as((tx) => listSourceLines(tx, "invoice", invoice.id)))[0].lineId;
+    const item = await w.add({ invoiceLineId: lineId, startDate: "2026-10-01", endDate: "2027-09-30" });
+    expect(item).toMatchObject({ kind: "income_in_advance", description: "Year's subscription", amount: "2400.00", left: "2400.00" });
+    expect(item.source).toMatchObject({ kind: "invoice", documentId: invoice.id, label: `Invoice ${approved.invoiceNumber}` });
+    const move = await w.as((tx) => tx.query<{ id: string }>("select move_journal_id::text as id from spread_items where id = $1", [item.id]));
+    expect(await w.lines(move.rows[0].id)).toEqual([
+      [held, "0.00", "2400.00"],
+      ["4000", "2400.00", "0.00"],
+    ]);
+    expect(await w.balance("4000")).toBe("0.00");
+    expect(await w.balance("2100")).toBe("-360.00");
+    expect((await w.tie("income_in_advance")).difference).toBe("0.00");
+    const october = await w.post("income_in_advance", "2026-10");
+    expect(await w.lines(october.journalId)).toEqual([
+      ["4000", "0.00", "200.00"],
+      [held, "200.00", "0.00"],
+    ]);
+    await expect(w.as((tx) => voidInvoice(tx, invoice.id, { idempotencyKey: key("void"), voidDate: "2026-10-01" }))).rejects.toThrow(/on the Spreading worksheet/);
   });
 
   it("the API: viewers read, bookkeepers add and post, admins change the accounts", async () => {

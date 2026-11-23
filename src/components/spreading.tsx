@@ -27,13 +27,13 @@ import styles from "./spreading.module.css";
 const KIND_HELP: Record<SpreadKind, { what: string; code: string; example: string; arrived: string }> = {
   prepayment: {
     what: "A cost you've paid for ahead, like a year's insurance.",
-    code: "Code the bill to",
+    code: "Press Spread this on the bill, or code the bill to",
     example: "Insurance to June",
     arrived: "",
   },
   income_in_advance: {
     what: "Money you've invoiced or been paid before doing the work.",
-    code: "Code the invoice to",
+    code: "Press Spread this on the invoice, or code the invoice to",
     example: "Year's subscription",
     arrived: "",
   },
@@ -389,6 +389,11 @@ function ItemsGrid({ items, kind, busy, send, canEdit }: { items: SpreadItem[]; 
                       <div className={ui.muted}>
                         {item.target.code} {item.target.name}
                       </div>
+                      {item.source ? (
+                        <div>
+                          <Link href={`/operations/${item.source.kind === "bill" ? "bills" : "invoices"}/${item.source.documentId}`}>{item.source.label}</Link>
+                        </div>
+                      ) : null}
                       <Badge tone={status.tone}>{status.label}</Badge>
                       {canEdit && !open ? (
                         <div className={styles.rowActions}>

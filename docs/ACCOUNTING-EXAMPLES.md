@@ -23335,7 +23335,7 @@ dropdown.
 - **APS10** A name that isn't a salesperson shows **0.00** everywhere,
   never the whole report.
 
-## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW14; planned with the owner 23 Nov 2026, built by Claude; the details follow common practice and are not yet reviewed)
+## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW17; planned with the owner 23 Nov 2026, built by Claude; the details follow common practice and are not yet reviewed)
 
 Income or a cost often belongs to other months than the one it was billed
 or paid in. The Spreading worksheet replaces the spreadsheet kept for that.
@@ -23353,9 +23353,10 @@ invoice and only the amount that went to the account is spread; one month
 at a time, in order; a locked month is refused, never moved; and "when it's
 done" is a way to release beside the dated ones.
 
-In this first version an item is added on the worksheet, and the bill or
-invoice is coded to the kind's balance sheet account by the person, as they
-do today. Ticking "Spread this" on a bill or invoice line comes later.
+An item is added in one of two ways. On the worksheet, with the bill or
+invoice coded to the kind's balance sheet account by the person (SW1-SW14).
+Or with "Spread this" on an approved bill or invoice line that was coded to
+its expense or income account as usual (SW15-SW17).
 
 Made-up setup: GST registered, invoice basis. Accrued income (a current
 asset), Income in advance and Accrued expenses (current liabilities) are
@@ -23426,3 +23427,24 @@ added when Spreading is turned on.
   kind can be undone: the exact reversal on the same date (which must be
   open), without touching the other three kinds. Each journal's reference
   is the kind and the month, e.g. SPREAD-PAID-2026-07.
+- **SW15 "Spread this" on a bill line.** The insurance bill of SW1 is coded
+  to 6080 Insurance as any bill is, and approved: Dr 6080 **1,200.00** / Dr
+  2100 **180.00** / Cr 2000 **1,380.00**. "Spread this" on the line, 1 Jul
+  2026 to 30 Jun 2027, posts one journal on the bill's date that moves the
+  line's amount without GST: Dr 1200 **1,200.00** / Cr 6080 **1,200.00**,
+  and puts the item on the worksheet, 1,200.00 to 6080. From there it runs
+  as SW1. The GST on the bill isn't touched. The whole line is spread; a
+  line that's partly this month's cost is entered as two lines. Tracking on
+  the line is on the move and on each month's journal. A bill dated in a
+  locked period is refused, and so is a bill in a foreign currency for now.
+- **SW16 "Spread this" on an invoice line.** The subscription invoice of
+  SW4 is coded to 4000 and approved: Dr 1100 **2,760.00** / Cr 4000
+  **2,400.00** / Cr 2100 **360.00**. "Spread this", 1 Oct 2026 to 30 Sep
+  2027, posts on the invoice's date: Dr 4000 **2,400.00** / Cr Income in
+  advance **2,400.00**. From there it runs as SW4.
+- **SW17 Taking it back.** Before any of its months have posted, removing
+  the item reverses the move on the same date, and 6080 (or 4000) holds the
+  amount again as if it had never been spread. Once a month has posted,
+  those months are undone first, or the item is ended early. A bill or
+  invoice with a line on the worksheet can't be voided: the item is removed
+  first.

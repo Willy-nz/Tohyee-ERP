@@ -25,6 +25,7 @@ import type { Invoice } from "@/lib/invoices/service";
 import { InvoiceDirectDebitCard } from "@/components/direct-debit";
 import { InvoicePayNowCard } from "@/components/online-payments";
 import { RecordExtrasPanel } from "@/components/records/record-extras";
+import { SpreadThisCard } from "@/components/spread-this";
 import { RecodeCard } from "@/components/recode";
 import { useConfirm } from "@/components/confirm-dialog";
 import { MoreMenu, type MoreMenuItem } from "@/components/more-menu";
@@ -537,6 +538,7 @@ function InvoiceView({ organisationId, invoiceId }: { organisationId: string; in
       {creditApplied.length > 0 || overpaymentCreditApplied.length > 0 ? (
         <InvoiceCredit creditApplied={creditApplied} overpaymentCreditApplied={overpaymentCreditApplied} />
       ) : null}
+      {invoice.status === "approved" ? <SpreadThisCard organisationId={organisationId} invoiceId={invoice.id} /> : null}
       {invoice.status === "approved" && bookkeeper && shown("void") ? (
         <OpenedPanel id="invoice-void" focus={focused === "void"}>
           <VoidInvoicePanel key={invoice.status} organisationId={organisationId} invoice={invoice} onChanged={changed} onClose={() => close("void")} />
