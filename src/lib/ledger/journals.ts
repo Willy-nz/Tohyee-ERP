@@ -62,7 +62,8 @@ export type JournalOrigin =
   | "livestock_rations"
   | "recode"
   | "history"
-  | "sales_when_sent";
+  | "sales_when_sent"
+  | "spreading";
 export type CorrectionKind = "reversal" | "replacement";
 
 /**
@@ -876,7 +877,8 @@ function canBeCorrected(journal: Journal, alreadyReversed: boolean): boolean {
     journal.origin !== "fixed_asset_depreciation" &&
     journal.origin !== "fixed_asset_disposal" &&
     journal.origin !== "opening_balance" &&
-    journal.origin !== "payroll"
+    journal.origin !== "payroll" &&
+    journal.origin !== "spreading"
   );
 }
 
@@ -1024,6 +1026,11 @@ export async function correctJournal(
   if (original.origin === "sales_when_sent") {
     throw new ValidationError(
       `Journal #${original.id} moved a Shopify sale out of Income in advance when it was sent (${original.reference}), so it can't be corrected in the ledger (SWS9).`,
+    );
+  }
+  if (original.origin === "spreading") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by the Spreading worksheet (${original.reference}), so it can't be corrected in the ledger. To undo it, undo that month on the worksheet (SW14).`,
     );
   }
   if (original.origin === "opening_balance") {

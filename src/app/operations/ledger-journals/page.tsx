@@ -64,6 +64,7 @@ const ORIGIN_LABELS: Record<Journal["origin"], string> = {
   recode: "Recode",
   history: "Imported history",
   sales_when_sent: "Sale sent (Shopify)",
+  spreading: "Spreading",
 };
 
 const REVERSED_BY: Partial<Record<Journal["origin"], string>> = {
