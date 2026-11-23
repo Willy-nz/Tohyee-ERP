@@ -16,6 +16,13 @@ export type SearchField = {
   sql: string;
   /** For a choice: each stored value and how it reads. */
   choices?: ReadonlyArray<{ value: string; label: string }>;
+  /**
+   * For a choice that lives on a record's lines (tracking on an invoice):
+   * the SQL that's true when any line has the value, with $value where the
+   * value goes. "is" uses it and "isn't" its opposite; `sql` is then only
+   * what the column shows.
+   */
+  matchSql?: string;
 };
 
 export type RecordType = {
@@ -25,6 +32,8 @@ export type RecordType = {
   /** One row: "invoice". */
   singular: string;
   from: string;
+  /** A condition every search of this kind keeps to, e.g. leaving out contacts that are only sales prospects. */
+  baseWhere?: string;
   /** The row's id, for its link and as the last sort key. */
   idSql: string;
   /** Where a row opens; {id} is replaced with hrefIdSql's value. */
@@ -60,6 +69,11 @@ const JOURNAL_ORIGINS = [
   { value: "spreading", label: "Spreading" },
   { value: "opening_balance", label: "Opening balances" },
   { value: "correction", label: "Correction" },
+] as const;
+
+const YES_NO = [
+  { value: "true", label: "Yes" },
+  { value: "false", label: "No" },
 ] as const;
 
 export const RECORD_TYPES: readonly RecordType[] = [
@@ -145,10 +159,90 @@ export const RECORD_TYPES: readonly RecordType[] = [
     defaultColumns: ["date", "reference", "accountCode", "account", "description", "debit", "credit"],
     defaultSort: { field: "date", direction: "desc" },
   },
+  {
+    key: "bank_transaction",
+    label: "Money spent and received",
+    singular: "transaction",
+    from: `bank_transactions t
+      join accounts a on a.id = t.account_id
+      left join contacts c on c.id = t.contact_id`,
+    idSql: "t.id",
+    href: "/operations/bank-transactions/{id}",
+    hrefIdSql: "t.id",
+    currencyField: "currency",
+    fields: [
+      { key: "date", label: "Date", type: "date", sql: "t.transaction_date" },
+      { key: "kind", label: "Spent or received", type: "choice", sql: "t.kind", choices: [{ value: "spend", label: "Spent" }, { value: "receive", label: "Received" }] },
+      { key: "contact", label: "Who", type: "text", sql: "c.name" },
+      { key: "reference", label: "Reference", type: "text", sql: "t.reference" },
+      { key: "bankAccount", label: "Bank account", type: "text", sql: "a.name" },
+      { key: "total", label: "Total", type: "money", sql: "t.total" },
+      { key: "status", label: "Status", type: "choice", sql: "t.status", choices: [{ value: "posted", label: "Posted" }, { value: "voided", label: "Voided" }] },
+      { key: "currency", label: "Currency", type: "text", sql: "t.currency_code" },
+      { key: "createdBy", label: "Made by", type: "text", sql: "t.created_by_email" },
+    ],
+    defaultColumns: ["date", "kind", "contact", "reference", "bankAccount", "total", "status"],
+    defaultSort: { field: "date", direction: "desc" },
+  },
+  {
+    key: "contact",
+    label: "Contacts",
+    singular: "contact",
+    from: "contacts c",
+    // Someone who is only a sales prospect belongs to the CRM, which has its own lists and its own access.
+    baseWhere: "(c.is_customer or c.is_supplier)",
+    idSql: "c.id",
+    href: "/operations/contacts",
+    hrefIdSql: "c.id",
+    fields: [
+      { key: "name", label: "Name", type: "text", sql: "c.name" },
+      { key: "email", label: "Email", type: "text", sql: "c.email" },
+      { key: "phone", label: "Phone", type: "text", sql: "c.phone" },
+      { key: "customer", label: "Customer", type: "choice", sql: "c.is_customer::text", choices: YES_NO },
+      { key: "supplier", label: "Supplier", type: "choice", sql: "c.is_supplier::text", choices: YES_NO },
+      { key: "gstNumber", label: "GST number", type: "text", sql: "c.gst_number" },
+      { key: "address", label: "Postal address", type: "text", sql: "c.postal_address" },
+      { key: "archived", label: "Archived", type: "choice", sql: "c.is_archived::text", choices: YES_NO },
+      { key: "added", label: "Added", type: "date", sql: "(c.created_at)::date" },
+    ],
+    defaultColumns: ["name", "email", "phone", "customer", "supplier"],
+    defaultSort: { field: "name", direction: "asc" },
+  },
+  {
+    key: "item",
+    label: "Items",
+    singular: "item",
+    from: "items it",
+    idSql: "it.id",
+    href: "/operations/items",
+    hrefIdSql: "it.id",
+    fields: [
+      { key: "code", label: "Code", type: "text", sql: "it.code" },
+      { key: "name", label: "Name", type: "text", sql: "it.name" },
+      { key: "description", label: "Description", type: "text", sql: "it.description" },
+      {
+        key: "type",
+        label: "Kind",
+        type: "choice",
+        sql: "it.item_type",
+        choices: [
+          { value: "service", label: "Service" },
+          { value: "non_stock", label: "Not tracked" },
+          { value: "stock", label: "Stock" },
+          { value: "kit", label: "Kit" },
+        ],
+      },
+      { key: "salePrice", label: "Sale price", type: "number", sql: "it.sale_price" },
+      { key: "purchasePrice", label: "Purchase price", type: "number", sql: "it.purchase_price" },
+      { key: "active", label: "Active", type: "choice", sql: "it.is_active::text", choices: YES_NO },
+    ],
+    defaultColumns: ["code", "name", "type", "salePrice", "purchasePrice"],
+    defaultSort: { field: "code", direction: "asc" },
+  },
 ];
 
-export function recordType(key: unknown): RecordType | null {
-  return RECORD_TYPES.find((type) => type.key === key) ?? null;
+export function recordType(key: unknown, types: readonly RecordType[] = RECORD_TYPES): RecordType | null {
+  return types.find((type) => type.key === key) ?? null;
 }
 
 export function fieldOf(type: RecordType, key: unknown): SearchField | null {

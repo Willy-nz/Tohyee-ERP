@@ -148,6 +148,7 @@ export function buildSearch(type: RecordType, definition: SearchDefinition, opti
 
   // Today is named in both queries whether or not a chosen field uses it, so each has a use for every parameter it's sent.
   const where: string[] = [`${todayParam}::date is not null`];
+  if (type.baseWhere) where.push(type.baseWhere);
   for (const filter of definition.filters) {
     const field = fieldByKey(filter.field);
     const sql = expression(field);
@@ -160,10 +161,12 @@ export function buildSearch(type: RecordType, definition: SearchDefinition, opti
         where.push(`${sql} ilike ${param(`${escapeLike(filter.value!)}%`)}`);
         break;
       case "is":
-        where.push(field.type === "text" ? `lower(${sql}) = lower(${param(filter.value)}::text)` : `${sql} = ${param(filter.value)}${cast}`);
+        if (field.matchSql) where.push(field.matchSql.replaceAll("$value", `${param(filter.value)}::text`));
+        else where.push(field.type === "text" ? `lower(${sql}) = lower(${param(filter.value)}::text)` : `${sql} = ${param(filter.value)}${cast}`);
         break;
       case "is_not":
-        where.push(`${sql} is distinct from ${param(filter.value)}${cast}`);
+        if (field.matchSql) where.push(`not ${field.matchSql.replaceAll("$value", `${param(filter.value)}::text`)}`);
+        else where.push(`${sql} is distinct from ${param(filter.value)}${cast}`);
         break;
       case "empty":
         where.push(`coalesce(${sql}, '') = ''`);

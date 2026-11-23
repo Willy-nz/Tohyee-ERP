@@ -11,14 +11,8 @@ import { Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
 import { api, apiDownload, errorMessage } from "@/lib/client/api";
 import { formatDate } from "@/lib/format";
-import {
-  DATE_RANGES,
-  fieldOf,
-  OPERATORS,
-  RECORD_TYPES,
-  type RecordType,
-  recordType,
-} from "@/lib/saved-searches/catalogue";
+import { DATE_RANGES, OPERATORS } from "@/lib/saved-searches/catalogue";
+import type { PublicRecordType as RecordType } from "@/lib/saved-searches/org-catalogue";
 import type {
   SearchDefinition,
   SearchFilter,
@@ -39,6 +33,10 @@ type Draft = {
   shared: boolean;
   definition: SearchDefinition;
 };
+
+function fieldOf(type: RecordType, key: string) {
+  return type.fields.find((field) => field.key === key) ?? null;
+}
 
 function blank(type: RecordType): Draft {
   return {
@@ -74,12 +72,14 @@ function sendable(draft: Draft): SearchDefinition {
 export function SavedSearches({ organisationId }: { organisationId: string }) {
   const router = useRouter();
   const params = useSearchParams();
-  const saved = useApiData<{ searches: SavedSearch[] }>("/api/saved-searches", {
+  const saved = useApiData<{ searches: SavedSearch[]; recordTypes: RecordType[] }>("/api/saved-searches", {
     organisationId,
   });
   const [message, setMessage] = useState<string | null>(null);
   const searches = saved.data?.searches ?? null;
   const wantedId = params.get("search");
+  const recordTypes = saved.data?.recordTypes ?? [];
+  const recordType = (key: string | null) => recordTypes.find((type) => type.key === key) ?? null;
   const wantedType = recordType(params.get("type"));
 
   if (saved.error) return <Notice tone="error">{saved.error}</Notice>;
@@ -138,7 +138,7 @@ export function SavedSearches({ organisationId }: { organisationId: string }) {
         </div>
         <div className={styles.starts}>
           <span className={ui.muted}>New search of</span>
-          {RECORD_TYPES.map((type) => (
+          {recordTypes.map((type) => (
             <Button
               key={type.key}
               size="small"
