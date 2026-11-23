@@ -342,7 +342,8 @@ that something happened.
   and only its maker or an admin changes or deletes a shared one. A search
   can only name fields from a fixed list for its kind of record, and what's
   typed is passed as a value, never as part of the query. Invoices and
-  Bills link to it. **Show on Home** (tenant migration 0306) puts a search
+  Bills have **Save this view**, which starts a search from the tab and
+  sort being looked at. **Show on Home** (tenant migration 0306) puts a search
   on Home with how many match now and its first money total: a private one
   on its maker's Home, a shared one on everyone's. **Email me this** is each
   person's own choice for a search they can open: every day, every week
