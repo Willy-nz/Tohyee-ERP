@@ -321,6 +321,23 @@ that something happened.
   later month; closes, reopens, reasons and accepted warnings are in the
   audit log. It replaces the old lock date and unlock window on Settings.
   The financial year end can't change while a year is closed.
+- **Saved searches** (Reports, Detail; tenant migration 0305; stage 1): a
+  list of one kind of record, filtered, with chosen columns and a sort,
+  kept under a name. Invoices, bills and ledger lines so far. Filters are
+  joined with "and": text (contains, is exactly, starts with, empty), money
+  and numbers (more or less than, between), dates (on, before, after,
+  between, or a moving range such as this month or the last 30 days) and
+  choices such as status. Invoices and bills have "Still owing" and "Days
+  overdue". Results come from the live books every time, 100 at a time,
+  with a count of all that match and a total for each money column (left
+  off when the matches are in more than one currency), and download as a
+  CSV file of up to 5,000 rows. A search is private to its maker; a
+  bookkeeper or above can share one with everyone who can see the books,
+  and only its maker or an admin changes or deletes a shared one. A search
+  can only name fields from a fixed list for its kind of record, and what's
+  typed is passed as a value, never as part of the query. Invoices and
+  Bills link to it. Not built yet: more kinds of record, tracking and
+  custom fields as filters, Home tiles, emailing on a schedule and alerts.
 - **Custom reports** (Reporting, tabs Home, Custom, Drafts, Published and
   Archived): start from the profit and loss or balance sheet, then change the
   title, the columns (1-12 months, quarters or years, a difference and %

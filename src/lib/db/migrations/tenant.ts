@@ -279,6 +279,7 @@ import { migration as m0301 } from "@/lib/db/migrations/tenant/0301-spread-this"
 import { migration as m0302 } from "@/lib/db/migrations/tenant/0302-spreading-bank-and-accrual-links";
 import { migration as m0303 } from "@/lib/db/migrations/tenant/0303-shopify-shipping-place";
 import { migration as m0304 } from "@/lib/db/migrations/tenant/0304-spreading-tags";
+import { migration as m0305 } from "@/lib/db/migrations/tenant/0305-saved-searches";
 
 /**
  * Migrations applied to every organisation's own database. Each organisation
@@ -625,4 +626,5 @@ export const tenantMigrations: readonly Migration[] = [
   m0302,
   m0303,
   m0304,
+  m0305,
 ];

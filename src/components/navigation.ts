@@ -194,6 +194,8 @@ export const MENUS: Menu[] = [
             { href: "/operations/reports?report=transactions", label: "Account transactions" },
             { href: "/operations/reports?report=journals", label: "Journal report" },
             { href: "/operations/reports?report=bankrec", label: "Bank reconciliation" },
+            // Lists of invoices, bills or ledger lines, filtered and kept under a name.
+            { href: "/operations/saved-searches", label: "Saved searches" },
           ]),
           ...section("Who owes what", [
             { href: "/operations/reports?report=aged", label: "Aged receivables" },
