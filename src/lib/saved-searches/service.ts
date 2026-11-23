@@ -8,7 +8,7 @@ import { dec, toFixedString } from "@/lib/money/decimal";
 import { type FieldType, fieldOf, type RecordType, recordType } from "@/lib/saved-searches/catalogue";
 import { loadRecordTypes } from "@/lib/saved-searches/org-catalogue";
 import { buildSearch, parseDefinition, type SearchDefinition } from "@/lib/saved-searches/query";
-import { asRecord, optionalId, requireId, requireString } from "@/lib/validation";
+import { asRecord, optionalId, requireId, requireOneOf, requireString } from "@/lib/validation";
 
 /**
  * Saved searches: a list of one kind of record, filtered, with chosen
@@ -25,6 +25,10 @@ export type SavedSearch = {
   name: string;
   definition: SearchDefinition;
   shared: boolean;
+  /** Shown on Home: its maker's when it's private, everyone's when it's shared. */
+  onHome: boolean;
+  /** How this person has it emailed to them, if they do. */
+  myEmail: { frequency: EmailFrequency; onlyWhen: EmailWhen } | null;
   mine: boolean;
   /** Whether this person can change or delete it. */
   canEdit: boolean;
@@ -32,7 +36,24 @@ export type SavedSearch = {
   updatedAt: string;
 };
 
-type Row = { id: string; record_type: string; name: string; definition: unknown; shared: boolean; owner_user_id: string | null; owner_email: string; updated_at: Date | string };
+export const EMAIL_FREQUENCIES = ["daily", "weekly", "monthly"] as const;
+export type EmailFrequency = (typeof EMAIL_FREQUENCIES)[number];
+export const EMAIL_WHEN = ["always", "has_rows", "new_rows"] as const;
+export type EmailWhen = (typeof EMAIL_WHEN)[number];
+
+type Row = {
+  id: string;
+  record_type: string;
+  name: string;
+  definition: unknown;
+  shared: boolean;
+  on_home: boolean;
+  owner_user_id: string | null;
+  owner_email: string;
+  updated_at: Date | string;
+  email_frequency: EmailFrequency | null;
+  email_only_when: EmailWhen | null;
+};
 
 function isMine(tx: OrgTx, row: Row): boolean {
   return row.owner_user_id !== null ? row.owner_user_id === tx.actor.userId : row.owner_email === tx.actor.email;
@@ -68,6 +89,8 @@ function toSaved(tx: OrgTx, types: readonly RecordType[], row: Row): SavedSearch
     name: row.name,
     definition,
     shared: row.shared,
+    onHome: row.on_home,
+    myEmail: row.email_frequency ? { frequency: row.email_frequency, onlyWhen: row.email_only_when ?? "always" } : null,
     mine,
     canEdit: mine || isAdmin(tx),
     ownerEmail: row.owner_email,
@@ -75,18 +98,21 @@ function toSaved(tx: OrgTx, types: readonly RecordType[], row: Row): SavedSearch
   };
 }
 
-const SELECT = "select id::text, record_type, name, definition, shared, owner_user_id::text, owner_email, updated_at from saved_searches";
+/** $1 is always this person's user id, for their own email setting. */
+const SELECT = `select s.id::text, s.record_type, s.name, s.definition, s.shared, s.on_home, s.owner_user_id::text, s.owner_email, s.updated_at,
+    e.frequency as email_frequency, e.only_when as email_only_when
+  from saved_searches s left join saved_search_emails e on e.search_id = s.id and e.user_id = $1`;
 
 /** This person's searches and the shared ones, by name. */
 export async function listSavedSearches(tx: OrgTx): Promise<SavedSearch[]> {
-  const result = await tx.query<Row>(`${SELECT} where shared or owner_user_id = $1 or (owner_user_id is null and owner_email = $2) order by lower(name), id`, [tx.actor.userId, tx.actor.email]);
+  const result = await tx.query<Row>(`${SELECT} where s.shared or s.owner_user_id = $1 or (s.owner_user_id is null and s.owner_email = $2) order by lower(s.name), s.id`, [tx.actor.userId, tx.actor.email]);
   const types = await loadRecordTypes(tx);
   return result.rows.map((row) => toSaved(tx, types, row)).filter((search): search is SavedSearch => search !== null);
 }
 
 async function loadRow(tx: OrgTx, idInput: unknown, lock = false): Promise<Row> {
   const id = requireId(idInput, "searchId");
-  const result = await tx.query<Row>(`${SELECT} where id = $1${lock ? " for update" : ""}`, [id]);
+  const result = await tx.query<Row>(`${SELECT} where s.id = $2${lock ? " for update of s" : ""}`, [tx.actor.userId, id]);
   const row = result.rows[0];
   // Someone else's private search isn't there, as far as this person can tell.
   if (!row || !(row.shared || isMine(tx, row))) throw new NotFoundError("That saved search wasn't found.");
@@ -105,6 +131,7 @@ export async function saveSavedSearch(tx: OrgTx, bodyInput: unknown): Promise<Sa
   const id = optionalId(body.id, "id");
   const name = requireString(body.name, "A name", { maxLength: 80 });
   const shared = body.shared === true;
+  const onHome = body.onHome === true;
   if (shared && tx.actor.role !== undefined && !roleAtLeast(tx.actor.role, "bookkeeper")) throw new ForbiddenError("Sharing a search with everyone is for bookkeepers and above.");
   if (id) {
     const row = await loadRow(tx, id, true);
@@ -112,15 +139,17 @@ export async function saveSavedSearch(tx: OrgTx, bodyInput: unknown): Promise<Sa
     // A saved search keeps its kind of record: another kind is another search.
     const type = requireType(await loadRecordTypes(tx), row.record_type);
     const definition = parseDefinition(type, body.definition);
-    await tx.query("update saved_searches set name = $2, definition = $3::jsonb, shared = $4, updated_at = now(), updated_by_email = $5 where id = $1", [id, name, JSON.stringify(definition), shared, tx.actor.email]);
-    await writeAuditEvent(tx, { eventType: "saved_search.changed", entityType: "saved_search", entityId: id, details: { name, shared, recordType: type.key } });
+    await tx.query("update saved_searches set name = $2, definition = $3::jsonb, shared = $4, on_home = $6, updated_at = now(), updated_by_email = $5 where id = $1", [id, name, JSON.stringify(definition), shared, tx.actor.email, onHome]);
+    // Made private again, it's nobody else's to be emailed.
+    if (!shared) await tx.query("delete from saved_search_emails where search_id = $1 and user_id is distinct from $2", [id, row.owner_user_id]);
+    await writeAuditEvent(tx, { eventType: "saved_search.changed", entityType: "saved_search", entityId: id, details: { name, shared, onHome, recordType: type.key } });
     return getSavedSearch(tx, id);
   }
   const type = requireType(await loadRecordTypes(tx), body.recordType);
   const definition = parseDefinition(type, body.definition);
   const inserted = await tx.query<{ id: string }>(
-    `insert into saved_searches (record_type, name, definition, shared, owner_user_id, owner_email, updated_by_email) values ($1, $2, $3::jsonb, $4, $5, $6, $6) returning id::text`,
-    [type.key, name, JSON.stringify(definition), shared, tx.actor.userId, tx.actor.email],
+    `insert into saved_searches (record_type, name, definition, shared, owner_user_id, owner_email, updated_by_email, on_home) values ($1, $2, $3::jsonb, $4, $5, $6, $6, $7) returning id::text`,
+    [type.key, name, JSON.stringify(definition), shared, tx.actor.userId, tx.actor.email, onHome],
   );
   await writeAuditEvent(tx, { eventType: "saved_search.created", entityType: "saved_search", entityId: inserted.rows[0].id, details: { name, shared, recordType: type.key } });
   return getSavedSearch(tx, inserted.rows[0].id);
@@ -131,6 +160,43 @@ export async function deleteSavedSearch(tx: OrgTx, idInput: unknown): Promise<vo
   if (!(isMine(tx, row) || isAdmin(tx))) throw new ForbiddenError("Only the person who made a shared search, or an admin, can delete it.");
   await tx.query("delete from saved_searches where id = $1", [row.id]);
   await writeAuditEvent(tx, { eventType: "saved_search.deleted", entityType: "saved_search", entityId: row.id, details: { name: row.name, recordType: row.record_type } });
+}
+
+/**
+ * How this person has a search emailed to them, or (frequency null) that they
+ * don't. Anyone who can open the search can set their own.
+ */
+export async function setMySearchEmail(tx: OrgTx, idInput: unknown, bodyInput: unknown): Promise<SavedSearch> {
+  const body = asRecord(bodyInput, "body");
+  const row = await loadRow(tx, idInput);
+  if (!tx.actor.userId) throw new ValidationError("Emails go to a person: sign in as one.");
+  if (body.frequency == null || body.frequency === "" || body.frequency === "never") {
+    await tx.query("delete from saved_search_emails where search_id = $1 and user_id = $2", [row.id, tx.actor.userId]);
+  } else {
+    const frequency = requireOneOf(body.frequency, "frequency", EMAIL_FREQUENCIES);
+    const onlyWhen = requireOneOf(body.onlyWhen ?? "always", "onlyWhen", EMAIL_WHEN);
+    await tx.query(
+      `insert into saved_search_emails (search_id, user_id, email, frequency, only_when) values ($1, $2, $3, $4, $5)
+       on conflict (search_id, user_id) do update set email = excluded.email, frequency = excluded.frequency, only_when = excluded.only_when`,
+      [row.id, tx.actor.userId, tx.actor.email, frequency, onlyWhen],
+    );
+  }
+  await writeAuditEvent(tx, { eventType: "saved_search.email_set", entityType: "saved_search", entityId: row.id, details: { frequency: body.frequency ?? null, onlyWhen: body.onlyWhen ?? null } });
+  return getSavedSearch(tx, row.id);
+}
+
+export type HomeSearch = { id: string; name: string; recordLabel: string; matches: number; /** The first money column's total, when there is one. */ total: string | null; totalLabel: string | null };
+
+/** The searches shown on this person's Home, each with how many match now. Up to eight. */
+export async function homeSearches(tx: OrgTx): Promise<HomeSearch[]> {
+  const searches = (await listSavedSearches(tx)).filter((search) => search.onHome).slice(0, 8);
+  const out: HomeSearch[] = [];
+  for (const search of searches) {
+    const result = await runSearch(tx, { recordType: search.recordType, definition: search.definition, limit: 1 });
+    const money = result.totals.findIndex((total) => total !== null);
+    out.push({ id: search.id, name: search.name, recordLabel: search.recordLabel, matches: result.matches, total: money >= 0 ? result.totals[money] : null, totalLabel: money >= 0 ? result.columns[money].label : null });
+  }
+  return out;
 }
 
 export type SearchColumn = { key: string; label: string; type: FieldType; choices?: Record<string, string> };

@@ -31,6 +31,7 @@ type Draft = {
   type: RecordType;
   name: string;
   shared: boolean;
+  onHome: boolean;
   definition: SearchDefinition;
 };
 
@@ -44,6 +45,7 @@ function blank(type: RecordType): Draft {
     type,
     name: "",
     shared: false,
+    onHome: false,
     definition: { filters: [], columns: [...type.defaultColumns], sort: null },
   };
 }
@@ -72,14 +74,18 @@ function sendable(draft: Draft): SearchDefinition {
 export function SavedSearches({ organisationId }: { organisationId: string }) {
   const router = useRouter();
   const params = useSearchParams();
-  const saved = useApiData<{ searches: SavedSearch[]; recordTypes: RecordType[] }>("/api/saved-searches", {
+  const saved = useApiData<{
+    searches: SavedSearch[];
+    recordTypes: RecordType[];
+  }>("/api/saved-searches", {
     organisationId,
   });
   const [message, setMessage] = useState<string | null>(null);
   const searches = saved.data?.searches ?? null;
   const wantedId = params.get("search");
   const recordTypes = saved.data?.recordTypes ?? [];
-  const recordType = (key: string | null) => recordTypes.find((type) => type.key === key) ?? null;
+  const recordType = (key: string | null) =>
+    recordTypes.find((type) => type.key === key) ?? null;
   const wantedType = recordType(params.get("type"));
 
   if (saved.error) return <Notice tone="error">{saved.error}</Notice>;
@@ -97,6 +103,7 @@ export function SavedSearches({ organisationId }: { organisationId: string }) {
           type: foundType,
           name: found.name,
           shared: found.shared,
+          onHome: found.onHome,
           definition: found.definition,
         }
       : !wantedId && wantedType
@@ -253,6 +260,7 @@ function Editor({
             : { id: draft.id }),
           name: draft.name,
           shared: draft.shared,
+          onHome: draft.onHome,
           definition: sendable(draft),
         },
       });
@@ -429,6 +437,16 @@ function Editor({
               Share with everyone who can see the books
             </label>
           ) : null}
+          <label className={styles.share}>
+            <input
+              type="checkbox"
+              checked={draft.onHome}
+              onChange={(event) =>
+                setDraft({ ...draft, onHome: event.target.checked })
+              }
+            />{" "}
+            {draft.shared ? "Show on everyone's Home" : "Show on my Home"}
+          </label>
         </div>
         {current && !current.canEdit ? (
           <p className={ui.muted}>
@@ -462,6 +480,16 @@ function Editor({
           ) : null}
         </div>
       </Card>
+
+      {current ? (
+        <EmailMe
+          key={`${current.id}:${current.myEmail?.frequency ?? ""}:${current.myEmail?.onlyWhen ?? ""}`}
+          organisationId={organisationId}
+          search={current}
+          onSaved={onSaved}
+          onError={setError}
+        />
+      ) : null}
 
       <Card
         title={
@@ -715,5 +743,79 @@ function Results({
         </tbody>
       </table>
     </div>
+  );
+}
+
+/** "Email me this": the person's own choice for a saved search, kept as soon as it's changed. */
+function EmailMe({
+  organisationId,
+  search,
+  onSaved,
+  onError,
+}: {
+  organisationId: string;
+  search: SavedSearch;
+  onSaved: (search: SavedSearch) => void;
+  onError: (text: string | null) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const frequency = search.myEmail?.frequency ?? "never";
+  const onlyWhen = search.myEmail?.onlyWhen ?? "always";
+  async function set(next: { frequency: string; onlyWhen: string }) {
+    setBusy(true);
+    onError(null);
+    try {
+      const got = await api<{ search: SavedSearch }>(
+        `/api/saved-searches/${search.id}/email`,
+        { method: "PUT", body: { organisationId, ...next } },
+      );
+      onSaved(got.search);
+    } catch (caught) {
+      onError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card
+      title="Email me this"
+      description="Sent to your own email in the morning. It needs email set up on the server."
+    >
+      <div className={styles.saveRow}>
+        <Field label="How often">
+          <select
+            value={frequency}
+            disabled={busy}
+            onChange={(event) =>
+              void set({ frequency: event.target.value, onlyWhen })
+            }
+          >
+            <option value="never">Never</option>
+            <option value="daily">Every day</option>
+            <option value="weekly">Every week, on Monday</option>
+            <option value="monthly">Every month, on the 1st</option>
+          </select>
+        </Field>
+        {frequency !== "never" ? (
+          <Field label="When">
+            <select
+              value={onlyWhen}
+              disabled={busy}
+              onChange={(event) =>
+                void set({ frequency, onlyWhen: event.target.value })
+              }
+            >
+              <option value="always">Every time</option>
+              <option value="has_rows">
+                Only when there&apos;s something in it
+              </option>
+              <option value="new_rows">
+                Only when there&apos;s something new in it
+              </option>
+            </select>
+          </Field>
+        ) : null}
+      </div>
+    </Card>
   );
 }

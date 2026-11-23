@@ -79,3 +79,24 @@
   font: inherit;
   text-decoration: underline;
 }
+
+.homeTiles {
+  display: grid;
+  grid-template-columns: repeat(auto-fill, minmax(11rem, 1fr));
+  gap: 0.75rem;
+}
+
+.homeTile {
+  display: grid;
+  gap: 0.15rem;
+  padding: 0.75rem 0.9rem;
+  border: 1px solid var(--border);
+  border-radius: 0.6rem;
+  text-decoration: none;
+  color: inherit;
+}
+
+.homeCount {
+  font-size: 1.6rem;
+  line-height: 1.1;
+}

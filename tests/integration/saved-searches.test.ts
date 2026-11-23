@@ -1,6 +1,8 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import * as searchRoute from "@/app/api/saved-searches/[searchId]/route";
+import * as emailRoute from "@/app/api/saved-searches/[searchId]/email/route";
 import * as exportRoute from "@/app/api/saved-searches/export/route";
+import * as homeRoute from "@/app/api/saved-searches/home/route";
 import * as searchesRoute from "@/app/api/saved-searches/route";
 import * as runRoute from "@/app/api/saved-searches/run/route";
 import type { SessionUser } from "@/lib/auth/sessions";
@@ -10,10 +12,13 @@ import { createContact } from "@/lib/contacts/service";
 import { createCustomField } from "@/lib/custom-fields/service";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { coreQuery } from "@/lib/db/transactions";
+import { type OutgoingEmail, setEmailSenderForTests, updateEmailSettings } from "@/lib/email/mailer";
 import { approveInvoice, createInvoice } from "@/lib/invoices/service";
+import { getOrganisation } from "@/lib/organisations/registry";
+import { sendOrganisationSearchEmails } from "@/lib/saved-searches/emails";
 import { updateOrganisationSettings } from "@/lib/organisations/settings";
 import { loadRecordTypes } from "@/lib/saved-searches/org-catalogue";
-import { runSearch, type SavedSearch, type SearchResult } from "@/lib/saved-searches/service";
+import { type HomeSearch, runSearch, type SavedSearch, type SearchResult } from "@/lib/saved-searches/service";
 import { createTrackingValue, getTrackingSetup } from "@/lib/tracking/service";
 import { apiRequest, createTestOrganisation, createTestUser, describeWithDatabase, inOrganisation, key, sessionCookieFor, startTestServer, type TestServer } from "../helpers/test-server";
 
@@ -30,11 +35,19 @@ describeWithDatabase("saved searches", () => {
   const as = <T>(work: (tx: OrgTx) => Promise<T>) => inOrganisation(org, { userId: owner.id, email: owner.email }, work);
   const run = (recordType: string, definition: unknown) => as((tx) => runSearch(tx, { recordType, definition, today: "2026-11-24" }));
 
+  const sent: OutgoingEmail[] = [];
+  const originalKey = process.env.TOHYEE_SECRET_KEY;
+
   beforeAll(async () => {
+    process.env.TOHYEE_SECRET_KEY = "saved-searches-test-key-0123456789abcdef";
     server = await startTestServer();
+    setEmailSenderForTests(async (message) => {
+      sent.push(message);
+    });
     owner = await createTestUser("ss-jade@example.com", { serverAdmin: true });
     aroha = await createTestUser("ss-aroha@example.com");
     viewer = await createTestUser("ss-viewer@example.com");
+    await updateEmailSettings({ user: { id: owner.id, email: owner.email, isServerAdmin: true } }, { host: "smtp.example.com", port: 465, username: "books@example.com", password: "app-password" });
     await createTestOrganisation(owner, org);
     for (const [user, role] of [
       [aroha, "bookkeeper"],
@@ -54,6 +67,8 @@ describeWithDatabase("saved searches", () => {
   });
 
   afterAll(async () => {
+    setEmailSenderForTests(null);
+    process.env.TOHYEE_SECRET_KEY = originalKey;
     await server?.teardown();
   });
 
@@ -226,5 +241,65 @@ describeWithDatabase("saved searches", () => {
 
     // Items: none in a new organisation, and the search still runs.
     expect(await run("item", { filters: [{ field: "type", op: "is", value: "stock" }] })).toMatchObject({ matches: 0, rows: [] });
+  });
+
+  it("shows on Home, and emails each person their own choice, run as them", async () => {
+    const cookies = { owner: await sessionCookieFor(owner), aroha: await sessionCookieFor(aroha), viewer: await sessionCookieFor(viewer) };
+    const save = async (who: keyof typeof cookies, body: Record<string, unknown>) => {
+      const response = await searchesRoute.POST(apiRequest("/api/saved-searches", { method: "POST", cookie: cookies[who], body: { organisationId: org, ...body } }), noContext);
+      return ((await response.json()) as { search: SavedSearch }).search;
+    };
+    const home = async (who: keyof typeof cookies) => ((await (await homeRoute.GET(apiRequest(`/api/saved-searches/home?organisationId=${org}`, { cookie: cookies[who] }), noContext)).json()) as { searches: HomeSearch[] }).searches;
+    const email = (who: keyof typeof cookies, searchId: string, body: Record<string, unknown>) =>
+      emailRoute.PUT(apiRequest(`/api/saved-searches/${searchId}/email`, { method: "PUT", cookie: cookies[who], body: { organisationId: org, ...body } }), { params: Promise.resolve({ searchId }) });
+
+    const unpaid = await save("aroha", { recordType: "invoice", name: "Unpaid invoices", shared: true, onHome: true, definition: { filters: [{ field: "owing", op: "gt", value: "0" }], columns: ["number", "contact", "owing"], sort: { field: "owing", direction: "desc" } } });
+    const mine = await save("viewer", { recordType: "bill", name: "My bills", onHome: true, definition: {} });
+    expect(unpaid.onHome).toBe(true);
+    // A shared one is on everyone's Home; a private one only on its maker's.
+    expect(await home("owner")).toEqual([{ id: unpaid.id, name: "Unpaid invoices", recordLabel: "Invoices", matches: 3, total: "1552.50", totalLabel: "Still owing" }]);
+    expect((await home("viewer")).map((search) => search.name)).toEqual(["My bills", "Unpaid invoices"]);
+
+    // Each person sets their own email; nobody can set one on a search they can't open.
+    expect((await email("viewer", unpaid.id, { frequency: "daily", onlyWhen: "new_rows" })).status).toBe(200);
+    expect((await email("owner", unpaid.id, { frequency: "weekly" })).status).toBe(200);
+    expect((await email("aroha", mine.id, { frequency: "daily" })).status).toBe(404);
+    expect((await email("viewer", unpaid.id, { frequency: "hourly" })).status).toBe(400);
+    const listed = ((await (await searchesRoute.GET(apiRequest(`/api/saved-searches?organisationId=${org}`, { cookie: cookies.viewer }), noContext)).json()) as { searches: SavedSearch[] }).searches;
+    expect(listed.find((search) => search.id === unpaid.id)!.myEmail).toEqual({ frequency: "daily", onlyWhen: "new_rows" });
+
+    const record = (await getOrganisation(org))!;
+    sent.length = 0;
+    // Tuesday 24 November: both are due the first time.
+    expect(await sendOrganisationSearchEmails(record, "2026-11-24")).toBe(2);
+    expect(sent.map((message) => [message.to, message.subject]).sort()).toEqual([
+      [owner.email, "Tohyee: Unpaid invoices: 3 found"],
+      [viewer.email, "Tohyee: Unpaid invoices: 3 found"],
+    ]);
+    expect(sent.find((message) => message.to === viewer.email)!.text).toContain("(3 new)");
+    expect(sent[0].text).toContain("Hill Station | 1,150.00");
+    // The same day again: nothing. The next day: the viewer's has nothing new, and the owner's weekly one isn't due.
+    sent.length = 0;
+    expect(await sendOrganisationSearchEmails(record, "2026-11-24")).toBe(0);
+    expect(await sendOrganisationSearchEmails(record, "2026-11-25")).toBe(0);
+    // A new unpaid invoice: the viewer hears the next day; the owner on Monday.
+    const hill = (await as((tx) => tx.query<{ id: string }>("select id::text from contacts where name = 'Hill Station'"))).rows[0].id;
+    const made = (await as((tx) => createInvoice(tx, { idempotencyKey: key("invoice"), contactId: hill, invoiceDate: "2026-11-25", dueDate: "2026-12-20", amountsMode: "exclusive", lines: [{ description: "Silage", quantity: "1", unitPrice: "300.00", accountCode: "4000", taxCode: "GST" }] }))).invoice;
+    await as((tx) => approveInvoice(tx, made.id, { idempotencyKey: key("approve") }));
+    expect(await sendOrganisationSearchEmails(record, "2026-11-26")).toBe(1);
+    expect(sent.map((message) => [message.to, message.subject])).toEqual([[viewer.email, "Tohyee: Unpaid invoices: 4 found"]]);
+    expect(sent[0].text).toContain("(1 new)");
+    sent.length = 0;
+    expect(await sendOrganisationSearchEmails(record, "2026-11-30")).toBe(1);
+    expect(sent[0].to).toBe(owner.email);
+
+    // Made private again, it stops going to anyone but its maker; someone who has left stops getting theirs.
+    await save("aroha", { id: unpaid.id, name: "Unpaid invoices", shared: false, definition: unpaid.definition });
+    expect(await home("owner")).toEqual([]);
+    await email("viewer", mine.id, { frequency: "daily" });
+    await coreQuery("delete from organisation_members where organisation_id = $1 and user_id = $2", [org, viewer.id]);
+    sent.length = 0;
+    expect(await sendOrganisationSearchEmails(record, "2026-12-07")).toBe(0);
+    expect((await as((tx) => tx.query<{ n: string }>("select count(*)::text as n from saved_search_emails"))).rows[0].n).toBe("0");
   });
 });

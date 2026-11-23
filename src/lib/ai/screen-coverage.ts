@@ -585,6 +585,7 @@ export const SCREEN_COVERAGE: Record<string, ScreenCoverage> = {
   "POST /api/saved-searches": {"next": "reporting"},
   "DELETE /api/saved-searches/[searchId]": {"next": "reporting"},
   "POST /api/saved-searches/run": {"next": "reporting"},
+  "PUT /api/saved-searches/[searchId]/email": {"person": "It sets what the person themselves is emailed."},
   "POST /api/saved-searches/export": {"next": "reporting"},
   "PUT /api/spreading/settings": {"next": "accounting"},
   "POST /api/spreading/items": {"tool": "add_spreading_item"},
