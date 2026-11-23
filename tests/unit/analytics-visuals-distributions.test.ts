@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { parseChartFormat } from "@/lib/analytics/chart-format";
-import { toEChartsOption, type ChartSpec, type ChartTheme } from "@/lib/analytics/chart-spec";
+import { chartProblem, toEChartsOption, type ChartSpec, type ChartTheme } from "@/lib/analytics/chart-spec";
 import { boxGroups, boxStats, bubbleSizes, fitLine, histogramBins, niceWidth, quantile } from "@/lib/analytics/chart-distributions";
 import { tileChartSpec } from "@/lib/analytics/tile-chart";
 import { dec, toPlainString } from "@/lib/money/decimal";
@@ -115,6 +115,20 @@ describe("box plot", () => {
 });
 
 describe("scatter and bubble", () => {
+  it("a chart with nothing to group by asks for a Group by rather than failing the page", () => {
+    for (const kind of ["funnel", "scatter", "waterfall", "column"] as const) {
+      const spec: ChartSpec = { kind, category: "category", series: [{ field: "m0", label: "Sales" }, { field: "m1", label: "Orders" }], valueFormat: "money", format: {} };
+      let caught: unknown = null;
+      try {
+        toEChartsOption(spec, [{ m0: "18202.75", m1: "99" }], theme);
+      } catch (error) {
+        caught = error;
+      }
+      expect(chartProblem(spec, caught)).toBe("Pick what to group by (Group by) to draw this chart.");
+    }
+    expect(chartProblem({ kind: "pie", category: "category", series: [], valueFormat: "number" }, new Error("Something else"))).toBe("This chart can't be drawn: Something else");
+  });
+
   it("says what to add, rather than failing, when picked for a chart with one value", () => {
     const spec: ChartSpec = { kind: "scatter", category: "category", series: [{ field: "m0", label: "Sales" }], valueFormat: "money", format: {} };
     const result = option(spec, [{ category: "Alpha", m0: "1" }]);

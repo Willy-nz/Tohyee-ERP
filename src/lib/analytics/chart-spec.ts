@@ -65,6 +65,13 @@ export type KpiSummary = {
 
 type ChartRow = Record<string, string | number | null>;
 
+/** Why a chart can't be drawn, in a sentence for the person building it. */
+export function chartProblem(spec: ChartSpec, error: unknown): string {
+  const message = error instanceof Error ? error.message : String(error);
+  if (message.includes(`"${spec.category}" is missing`)) return "Pick what to group by (Group by) to draw this chart.";
+  return `This chart can't be drawn: ${message}`;
+}
+
 function validateFields(spec: ChartSpec, rows: ChartRow[]) {
   if (rows.length === 0) return;
   // A gauge (and a bullet chart with no groups) shows one total, so there's no group column.
