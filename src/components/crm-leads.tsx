@@ -12,6 +12,7 @@ import { readFileAsBase64 } from "@/components/bank/common";
 import { memberName, useBusy, useTeam } from "@/components/crm";
 import { LeadSources } from "@/components/crm-lead-sources";
 import { useApiData } from "@/components/hooks";
+import { ColumnChooser, useShownColumns } from "@/components/shown-columns";
 import { Badge, Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
 import { api, newIdempotencyKey } from "@/lib/client/api";
@@ -154,6 +155,13 @@ const FILTERS = [
 ] as const;
 
 /** CRM › Leads: enquiries to work, qualify and convert. */
+const LEAD_COLUMNS = [
+  { id: "email", label: "Email" },
+  { id: "source", label: "Source" },
+  { id: "added", label: "Added" },
+] as const;
+const LEAD_COLUMN_IDS = LEAD_COLUMNS.map((column) => column.id);
+
 export function LeadsPage({ organisationId }: { organisationId: string }) {
   const { canCrm } = useWorkspace();
   const team = useTeam(organisationId).data?.team;
@@ -164,6 +172,8 @@ export function LeadsPage({ organisationId }: { organisationId: string }) {
   const [campaignId, setCampaignId] = useState("");
   const [added, setAdded] = useState<string | null>(null);
   const bulk = useBusy();
+  // Lead, company, status and owner always show; the rest are a tick away and remembered in this browser.
+  const columns = useShownColumns("tohyee.crm.leads.columns", LEAD_COLUMN_IDS, ["added"]);
   const leads = useApiData<{ leads: Lead[] }>("/api/crm/leads", {
     organisationId,
     status: filter === "review" ? "open" : filter,
@@ -242,6 +252,8 @@ export function LeadsPage({ organisationId }: { organisationId: string }) {
           </span>
         ) : null}
         {leads.data && leads.data.leads.length > 0 ? (
+          <>
+          <ColumnChooser columns={LEAD_COLUMNS} shows={columns.shows} toggle={columns.toggle} />
           <div className={ui.tableWrap}>
             <table className={ui.table}>
               <thead>
@@ -258,11 +270,11 @@ export function LeadsPage({ organisationId }: { organisationId: string }) {
                   ) : null}
                   <th>Lead</th>
                   <th>Company</th>
-                  <th>Email</th>
+                  {columns.shows("email") ? <th>Email</th> : null}
                   <th>Status</th>
-                  <th>Source</th>
+                  {columns.shows("source") ? <th>Source</th> : null}
                   <th>Owner</th>
-                  <th>Added</th>
+                  {columns.shows("added") ? <th>Added</th> : null}
                 </tr>
               </thead>
               <tbody>
@@ -282,16 +294,17 @@ export function LeadsPage({ organisationId }: { organisationId: string }) {
                       <Link href={`/crm/leads/${lead.id}`}>{lead.name}</Link> {lead.needsReview ? <Badge>To review</Badge> : null}
                     </td>
                     <td>{lead.companyName ?? ""}</td>
-                    <td>{lead.email ?? ""}</td>
+                    {columns.shows("email") ? <td>{lead.email ?? ""}</td> : null}
                     <td>{LEAD_STATUS_LABELS[lead.status]}</td>
-                    <td>{LEAD_SOURCE_LABELS[lead.source]}</td>
+                    {columns.shows("source") ? <td>{LEAD_SOURCE_LABELS[lead.source]}</td> : null}
                     <td>{lead.ownerUserId ? memberName(team, lead.ownerUserId) : "Unassigned"}</td>
-                    <td>{formatDateTime(lead.createdAt)}</td>
+                    {columns.shows("added") ? <td>{formatDateTime(lead.createdAt)}</td> : null}
                   </tr>
                 ))}
               </tbody>
             </table>
           </div>
+          </>
         ) : null}
       </Card>
       <LeadSources organisationId={organisationId} onChecked={() => leads.reload()} />

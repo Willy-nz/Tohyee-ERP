@@ -1,0 +1,17 @@
+.chooser {
+  margin-bottom: 8px;
+}
+
+.chooser > summary {
+  display: inline-block;
+  color: var(--muted);
+  font-size: 0.9rem;
+  cursor: pointer;
+}
+
+.options {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 4px 16px;
+  padding: 8px 0 0;
+}

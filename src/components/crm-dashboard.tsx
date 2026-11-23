@@ -4,6 +4,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { amountIn, useBaseCurrency } from "@/components/crm";
 import { useApiData } from "@/components/hooks";
+import { PeriodBars } from "@/components/crm-period-bars";
 import { InfoTip } from "@/components/info-tip";
 import { Button, Card, Empty, Field, Notice, Stat, ui } from "@/components/ui";
 import type { CurrencyAmount, Dashboard, DashboardDeal } from "@/lib/crm/dashboard";
@@ -121,6 +122,8 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
           </Card>
           <Card title="Leads">
             {noLeads ? <Empty>No leads in these periods.</Empty> : (
+            <>
+            <PeriodBars label="Leads added in each period" bars={d.leads.map((row) => ({ period: label(row.periodStart), value: row.added, text: String(row.added) }))} />
             <table className={ui.table}>
               <thead>
                 <tr>
@@ -141,6 +144,7 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
                 ))}
               </tbody>
             </table>
+            </>
             )}
             {d.leadSources.length > 0 ? (
               <p className={ui.muted}>
@@ -156,6 +160,12 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
             }
           >
             {noneClosed ? <Empty>No deals closed in these periods.</Empty> : (
+            <>
+            <PeriodBars
+              label="Win rate in each period"
+              max={100}
+              bars={d.winLoss.map((row, index) => ({ period: d.periods[index].label, value: row.winRate === null ? null : Number(row.winRate), text: row.winRate === null ? "—" : `${row.winRate}%` }))}
+            />
             <table className={ui.table}>
               <thead>
                 <tr>
@@ -186,6 +196,7 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
                 })}
               </tbody>
             </table>
+            </>
             )}
           </Card>
           <Card title="Activity">
