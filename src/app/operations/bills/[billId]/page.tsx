@@ -23,6 +23,7 @@ import type { SupplierCreditNoteApplication } from "@/lib/supplier-credit-notes/
 import type { SupplierCreditNoteSummary } from "@/lib/supplier-credit-notes/service";
 import { RdLineTags } from "@/components/rd";
 import { RecordExtrasPanel } from "@/components/records/record-extras";
+import { SpreadThisCard } from "@/components/spread-this";
 import { BillAssetPrompt } from "@/components/fixed-assets";
 import { LandedCostCard } from "@/components/bills/landed-cost";
 import { RecodeCard } from "@/components/recode";
@@ -458,6 +459,7 @@ function BillView({ organisationId, billId }: { organisationId: string; billId: 
       ) : null}
       {bill.status === "approved" ? <BillAssetPrompt key={`assets-${message ?? ""}`} organisationId={organisationId} billId={bill.id} /> : null}
       {bill.status === "approved" ? <LandedCostCard organisationId={organisationId} billId={bill.id} /> : null}
+      {bill.status === "approved" ? <SpreadThisCard organisationId={organisationId} billId={bill.id} /> : null}
       {bill.status === "approved" ? (
         <RecodeCard
           organisationId={organisationId}

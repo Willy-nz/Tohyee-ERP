@@ -14,6 +14,8 @@ import {
   type SpreadMonth,
   spreadSchedule,
 } from "@/lib/spreading/rules";
+import { loadSourceLine, postMove, reverseMove, type SourceKind } from "@/lib/spreading/sources";
+import type { TrackingTags } from "@/lib/tracking/service";
 import { asRecord, optionalId, optionalSource, requireArray, requireId, requireIdempotencyKey, requireOneOf, requireString } from "@/lib/validation";
 
 /**
@@ -187,11 +189,21 @@ export type SpreadItem = {
   finished: boolean;
   /** "When it's done" that hasn't been marked done yet (SW12). */
   waiting: boolean;
+  /** The bill or invoice line "Spread this" was pressed on (SW15, SW16), or null when it was added on the worksheet. */
+  source: { kind: SourceKind; documentId: string; label: string } | null;
+  tracking: TrackingTags;
   createdByEmail: string;
   createdAt: string;
 };
 
 type ItemRow = {
+  bill_id: string | null;
+  bill_number: string | null;
+  bill_supplier: string | null;
+  invoice_id: string | null;
+  invoice_number: string | null;
+  move_journal_id: string | null;
+  tracking: TrackingTags | null;
   id: string;
   kind: SpreadKind;
   description: string;
@@ -212,8 +224,12 @@ type ItemRow = {
 
 const ITEM_SELECT = `select i.id::text, i.kind, i.description, i.contact_id::text, c.name as contact_name, t.id::text as target_id, t.code as target_code, t.name as target_name,
     i.amount::text, i.method, to_char(i.start_date, 'YYYY-MM-DD') as start_date, to_char(i.end_date, 'YYYY-MM-DD') as end_date,
-    to_char(i.settled_month, 'YYYY-MM') as settled_month, i.settled_amount::text, i.created_by_email, i.created_at
-  from spread_items i join accounts t on t.id = i.target_account_id left join contacts c on c.id = i.contact_id`;
+    to_char(i.settled_month, 'YYYY-MM') as settled_month, i.settled_amount::text, i.created_by_email, i.created_at,
+    i.move_journal_id::text, i.tracking, b.id::text as bill_id, b.supplier_invoice_number as bill_number, bc.name as bill_supplier,
+    si.id::text as invoice_id, si.invoice_number
+  from spread_items i join accounts t on t.id = i.target_account_id left join contacts c on c.id = i.contact_id
+  left join bill_lines bl on bl.id = i.bill_line_id left join bills b on b.id = bl.bill_id left join contacts bc on bc.id = b.contact_id
+  left join sales_invoice_lines sl on sl.id = i.invoice_line_id left join sales_invoices si on si.id = sl.invoice_id`;
 
 /**
  * What an item still holds in its kind's account (SW11).
@@ -252,6 +268,12 @@ function toItem(row: ItemRow, months: SpreadItemMonth[]): SpreadItem {
     left,
     finished: !unposted && !waiting && (row.kind === "prepayment" || row.kind === "income_in_advance" || row.settled_month !== null),
     waiting,
+    source: row.bill_id
+      ? { kind: "bill", documentId: row.bill_id, label: `Bill ${row.bill_number ? `${row.bill_number} ` : ""}from ${row.bill_supplier}` }
+      : row.invoice_id
+        ? { kind: "invoice", documentId: row.invoice_id, label: `Invoice ${row.invoice_number ?? `#${row.invoice_id}`}` }
+        : null,
+    tracking: row.tracking ?? {},
     createdByEmail: row.created_by_email,
     createdAt: new Date(row.created_at).toISOString(),
   };
@@ -313,10 +335,16 @@ export async function createSpreadItem(tx: OrgTx, bodyInput: unknown): Promise<{
   const body = asRecord(bodyInput, "body");
   const source = optionalSource(body.source);
   const idempotencyKey = requireIdempotencyKey(body.idempotencyKey);
-  const kind = parseKind(body.kind);
-  const description = requireString(body.description, "What it is", { maxLength: 200 });
+  // "Spread this" on a bill or invoice line (SW15, SW16): the line says the kind, the amount and the account.
+  const billLineId = optionalId(body.billLineId, "billLineId");
+  const invoiceLineId = optionalId(body.invoiceLineId, "invoiceLineId");
+  if (billLineId && invoiceLineId) throw new ValidationError("Spread a bill line or an invoice line, not both.");
+  const fromLine = billLineId ? ({ sourceKind: "bill", lineId: billLineId } as const) : invoiceLineId ? ({ sourceKind: "invoice", lineId: invoiceLineId } as const) : null;
+  const kind = fromLine ? (fromLine.sourceKind === "bill" ? "prepayment" : "income_in_advance") : parseKind(body.kind);
+  const blankDescription = body.description == null || (typeof body.description === "string" && body.description.trim() === "");
+  const typedDescription = fromLine && blankDescription ? null : requireString(body.description, "What it is", { maxLength: 200 });
   const method = requireOneOf(body.method ?? "by_month", "method", SPREAD_METHODS);
-  const contactId = optionalId(body.contactId, "contactId");
+  const typedContactId = fromLine ? null : optionalId(body.contactId, "contactId");
   const dated = method === "by_month" || method === "by_days";
   const startDate = dated ? parseDate(body.startDate, "the first day it covers") : null;
   const endDate = dated ? parseDate(body.endDate, "the last day it covers") : null;
@@ -328,9 +356,9 @@ export async function createSpreadItem(tx: OrgTx, bodyInput: unknown): Promise<{
           return { month: parseMonth(row.month), amount: requireString(row.amount, "amount", { maxLength: 20 }) };
         })
       : null;
-  const amount = requireString(body.amount, "The amount", { maxLength: 20 }).replaceAll(",", "");
-  const schedule = spreadSchedule({ amount, method, startDate, endDate, month, ownAmounts });
-  const hash = requestHash("spread_item", { kind, description, method, contactId, startDate, endDate, month, ownAmounts, amount, targetAccountCode: body.targetAccountCode ?? null });
+  const typedAmount = fromLine ? null : requireString(body.amount, "The amount", { maxLength: 20 }).replaceAll(",", "");
+  const typedTarget = fromLine ? null : requireString(body.targetAccountCode, kind === "prepayment" || kind === "accrued_expense" ? "The expense account" : "The income account", { maxLength: 20 });
+  const hash = requestHash("spread_item", { kind, description: typedDescription, method, contactId: typedContactId, startDate, endDate, month, ownAmounts, amount: typedAmount, targetAccountCode: typedTarget, billLineId, invoiceLineId });
 
   const earlier = await tx.query<{ id: string; request_hash: string }>("select id::text, request_hash from spread_items where command_source = $1 and idempotency_key = $2", [source, idempotencyKey]);
   if (earlier.rows[0]) {
@@ -340,15 +368,21 @@ export async function createSpreadItem(tx: OrgTx, bodyInput: unknown): Promise<{
   await lockWorksheet(tx);
 
   const settings = await getSpreadingSettings(tx);
-  if (!settings[kind]) throw new ValidationError("Turn Spreading on first: it needs an account to hold this in.");
-  const target = await accountByCode(tx, requireString(body.targetAccountCode, kind === "prepayment" || kind === "accrued_expense" ? "The expense account" : "The income account", { maxLength: 20 }));
+  const holding = settings[kind];
+  if (!holding) throw new ValidationError("Turn Spreading on first: it needs an account to hold this in.");
+  const line = fromLine ? await loadSourceLine(tx, fromLine.sourceKind, fromLine.lineId) : null;
+  const amount = line ? line.amount : typedAmount!;
+  const description = typedDescription ?? line!.description.trim().slice(0, 200);
+  const contactId = line ? line.contactId : typedContactId;
+  const schedule = spreadSchedule({ amount, method, startDate, endDate, month, ownAmounts });
+  const target = await accountByCode(tx, line ? line.accountCode : typedTarget!);
   if (!target) throw new ValidationError(`There's no account ${String(body.targetAccountCode)}.`);
   if (!target.is_active) throw new ValidationError(`${target.code} ${target.name} is archived.`);
   if (target.account_class !== TARGET_CLASS[kind]) {
     throw new ValidationError(`${target.code} ${target.name} isn't ${TARGET_CLASS[kind] === "expense" ? "an expense" : "an income"} account, and ${SPREAD_KIND_LABELS[kind].toLowerCase()} lands on one.`);
   }
   if (target.currency_code) throw new ValidationError(`${target.code} ${target.name} holds a foreign currency, which Spreading doesn't do yet.`);
-  if (contactId) {
+  if (contactId && !line) {
     const contact = await tx.query("select 1 from contacts where id = $1", [contactId]);
     if (!contact.rows[0]) throw new ValidationError("That contact isn't in this organisation.");
   }
@@ -361,13 +395,23 @@ export async function createSpreadItem(tx: OrgTx, bodyInput: unknown): Promise<{
 
   const inserted = await tx.query<{ id: string }>(
     `insert into spread_items (command_source, idempotency_key, request_hash, kind, description, contact_id, target_account_id, amount, method, start_date, end_date,
-                               created_by_user_id, created_by_email)
-     values ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9, $10, $11, $12, $13) returning id::text`,
-    [source, idempotencyKey, hash, kind, description, contactId, target.id, amount, method, startDate, endDate, tx.actor.userId, tx.actor.email],
+                               created_by_user_id, created_by_email, bill_line_id, invoice_line_id, tracking)
+     values ($1, $2, $3, $4, $5, $6, $7, $8::numeric, $9, $10, $11, $12, $13, $14, $15, $16::jsonb) returning id::text`,
+    [source, idempotencyKey, hash, kind, description, contactId, target.id, amount, method, startDate, endDate, tx.actor.userId, tx.actor.email, billLineId, invoiceLineId, JSON.stringify(line?.tracking ?? {})],
   );
   const id = inserted.rows[0].id;
   await writeMonths(tx, id, schedule);
-  await writeAuditEvent(tx, { eventType: "spread_item.created", entityType: "spread_item", entityId: id, details: { kind, description, amount, method, months: schedule.length } });
+  let moveJournalId: string | null = null;
+  if (line) {
+    moveJournalId = await postMove(tx, id, line, holding.code, description);
+    await tx.query("update spread_items set move_journal_id = $2 where id = $1", [id, moveJournalId]);
+  }
+  await writeAuditEvent(tx, {
+    eventType: "spread_item.created",
+    entityType: "spread_item",
+    entityId: id,
+    details: { kind, description, amount, method, months: schedule.length, from: line ? { kind: line.sourceKind, lineId: line.lineId, label: line.label, moveJournalId } : null },
+  });
   return { created: true, item: await getSpreadItem(tx, id) };
 }
 
@@ -440,13 +484,17 @@ export async function settleSpreadItem(tx: OrgTx, idInput: unknown, bodyInput: u
   return getSpreadItem(tx, item.id);
 }
 
-/** Takes an item off the worksheet. Only before anything has posted for it: after that, end it early. */
+/** Takes an item off the worksheet. Only before anything has posted for it: after that, end it early. One from a bill or invoice line has its move reversed. */
 export async function removeSpreadItem(tx: OrgTx, idInput: unknown): Promise<void> {
   await lockWorksheet(tx);
   const item = await getSpreadItem(tx, idInput);
   if (item.months.some((row) => row.runId !== null)) throw new ConflictError("Some of its months have posted, so it can't be removed. End it early, or undo those months first.");
+  // From a bill or invoice line (SW17): the amount goes back on the line's account.
+  const moved = await tx.query<{ move_journal_id: string | null }>("select move_journal_id::text from spread_items where id = $1", [item.id]);
+  const moveJournalId = moved.rows[0]?.move_journal_id ?? null;
+  const undoJournalId = moveJournalId ? await reverseMove(tx, item.id, moveJournalId) : null;
   await tx.query("delete from spread_item_months where item_id = $1", [item.id]);
-  await tx.query("update spread_items set removed_at = now(), removed_by_email = $2 where id = $1", [item.id, tx.actor.email]);
+  await tx.query("update spread_items set removed_at = now(), removed_by_email = $2, move_undo_journal_id = $3 where id = $1", [item.id, tx.actor.email, undoJournalId]);
   await writeAuditEvent(tx, { eventType: "spread_item.removed", entityType: "spread_item", entityId: item.id, details: { description: item.description, amount: item.amount } });
 }
 
