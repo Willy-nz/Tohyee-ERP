@@ -316,9 +316,38 @@ describeWithDatabase("Shopify's read-only extras: stock, shop stats, discounts, 
     expect((await rows<{ n: string }>(refused, "select count(*)::text as n from sales_platform_documents where record_kind = 'order' and state = 'done'"))[0].n).toBe("2");
   });
 
+  it("SHP1-SHP3: where each order is going (region, town, country), and older orders read for it once, many to a query", async () => {
+    const w = await setup();
+    w.state.orders.push(
+      order1001({ shippingPlace: { province: "Otago", city: " Dunedin ", country: "nz" } }),
+      order1002({ shippingPlace: { province: "Manawatu-Wanganui", city: "Palmerston North", country: "NZ" } }),
+    );
+    await w.sync("2026-10-03T01:00:00Z");
+    const places = () => rows(w, "select order_external_id, shipping_region, shipping_town, shipping_country, shipping_place_read from sales_platform_order_details order by 1");
+    expect(await places()).toEqual([
+      { order_external_id: "5001", shipping_region: "Otago", shipping_town: "Dunedin", shipping_country: "NZ", shipping_place_read: true },
+      { order_external_id: "5002", shipping_region: "Manawatu-Wanganui", shipping_town: "Palmerston North", shipping_country: "NZ", shipping_place_read: true },
+    ]);
+    expect(w.state.calls.filter((call) => call.startsWith("places:"))).toEqual([]);
+
+    // Orders brought in before SHP1 had no place. The next sync asks for them together, once.
+    await w.as((tx) => tx.query("update sales_platform_order_details set shipping_region = null, shipping_town = null, shipping_country = null, shipping_place_read = false"));
+    w.state.orders.splice(1, 1); // #1002 is gone from Shopify: marked read, with no place, so it isn't asked about again.
+    await w.sync("2026-10-03T01:15:00Z");
+    expect(w.state.calls.filter((call) => call.startsWith("places:"))).toEqual(["places:2"]);
+    expect(await places()).toEqual([
+      { order_external_id: "5001", shipping_region: "Otago", shipping_town: "Dunedin", shipping_country: "NZ", shipping_place_read: true },
+      { order_external_id: "5002", shipping_region: null, shipping_town: null, shipping_country: null, shipping_place_read: true },
+    ]);
+    await w.sync("2026-10-03T01:30:00Z");
+    expect(w.state.calls.filter((call) => call.startsWith("places:"))).toEqual(["places:2"]);
+    // Nothing posted twice.
+    expect((await rows<{ n: string }>(w, "select count(*)::text as n from sales_invoices"))[0].n).toBe("2");
+  });
+
   it("SPD11: Shopify in Analytics is Tohyee's own copy, and never calls Shopify", async () => {
     const w = await setup();
-    w.state.orders.push(order1002());
+    w.state.orders.push(order1002({ shippingPlace: { province: "Canterbury", city: "Christchurch", country: "NZ" } }));
     await w.sync("2026-10-03T01:00:00Z");
     const savedDir = process.env.TOHYEE_ANALYTICS_DIR;
     const folder = fs.mkdtempSync(nodePath.join(os.tmpdir(), "tohyee-spd11-"));
@@ -355,8 +384,8 @@ describeWithDatabase("Shopify's read-only extras: stock, shop stats, discounts, 
         if (!name.startsWith("shopify_")) continue;
         expect(columns.map((c) => c.name).filter((c) => /email|phone|address|customer_name|^contact$/.test(c))).toEqual([]);
       }
-      expect(await queryAnalytics(w.org, "select order_name, invoice_number, cast(total as varchar) as total, cast(discounts as varchar) as discounts, cast(shipping_charged as varchar) as shipping, fulfilment_status from shopify_orders")).toEqual([
-        { order_name: "#1002", invoice_number: "INV-0001", total: "28.90", discounts: "5.00", shipping: "6.90", fulfilment_status: "FULFILLED" },
+      expect(await queryAnalytics(w.org, "select order_name, invoice_number, cast(total as varchar) as total, cast(discounts as varchar) as discounts, cast(shipping_charged as varchar) as shipping, fulfilment_status, shipping_region, shipping_town, shipping_country from shopify_orders")).toEqual([
+        { order_name: "#1002", invoice_number: "INV-0001", total: "28.90", discounts: "5.00", shipping: "6.90", fulfilment_status: "FULFILLED", shipping_region: "Canterbury", shipping_town: "Christchurch", shipping_country: "NZ" },
       ]);
       expect(await queryAnalytics(w.org, "select ends_with from shopify_gift_cards order by ends_with")).toEqual([{ ends_with: "7XQ2" }, { ends_with: "K9MD" }]);
       // Tohyee's on hand and the difference sit on one row per variant, so adding up doesn't double them.

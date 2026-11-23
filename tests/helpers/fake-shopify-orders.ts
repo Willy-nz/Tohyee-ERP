@@ -61,6 +61,8 @@ export type OrderFixture = {
   billingCountry?: string | null;
   billingName?: AddressNameFixture;
   shippingName?: AddressNameFixture;
+  /** SHP1: where it's going (Shopify's province, city and country code). */
+  shippingPlace?: { province?: string | null; city?: string | null; country?: string | null };
   lines: LineFixture[];
   shipping?: ShippingFixture[];
   transactions: TransactionFixture[];
@@ -118,6 +120,14 @@ function transactionNode(t: TransactionFixture, currency = "NZD") {
   };
 }
 
+function shippingAddressNode(o: OrderFixture) {
+  if (!o.shippingName && !o.shippingPlace) return null;
+  return {
+    ...addressName(o.shippingName),
+    ...(o.shippingPlace ? { province: o.shippingPlace.province ?? null, city: o.shippingPlace.city ?? null, countryCodeV2: o.shippingPlace.country ?? null } : {}),
+  };
+}
+
 /** An order as the `order(id)` query returns it: refunds are only their IDs (each is asked for on its own). */
 export function orderNode(o: OrderFixture) {
   const currency = o.currency ?? "NZD";
@@ -140,7 +150,7 @@ export function orderNode(o: OrderFixture) {
       o.billingCountry === undefined && !o.billingName
         ? null
         : { countryCodeV2: o.billingCountry ?? null, ...addressName(o.billingName) },
-    shippingAddress: o.shippingName ? addressName(o.shippingName) : null,
+    shippingAddress: shippingAddressNode(o),
     lineItems: {
       nodes: o.lines.map((line) => ({
         id: gid("LineItem", line.id),
@@ -593,6 +603,19 @@ export function fakeShopifyStore(state: StoreState) {
       const rows = recent(state.orders).filter((o) => readable(o) && (!processed || Date.parse(o.processedAt) >= Date.parse(processed)));
       const result = page(rows);
       return json({ data: { orders: { nodes: result.nodes.map((o) => ({ id: gid("Order", o.id), updatedAt: o.updatedAt })), pageInfo: result.pageInfo } } });
+    }
+    if (query.includes("nodes(ids: $ids)")) {
+      // SHP3: where orders are going, many at once.
+      const ids: number[] = (Array.isArray(variables.ids) ? (variables.ids as unknown[]) : []).map((id) => numeric(id));
+      state.calls.push(`places:${ids.length}`);
+      return json({
+        data: {
+          nodes: ids.map((id: number) => {
+            const found = state.orders.find((o) => o.id === id);
+            return found ? { id: gid("Order", found.id), shippingAddress: shippingAddressNode(found) } : null;
+          }),
+        },
+      });
     }
     if (query.includes("order(id: $id)")) {
       const id = numeric(variables.id);

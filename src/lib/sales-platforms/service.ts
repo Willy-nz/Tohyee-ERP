@@ -24,11 +24,12 @@ import {
   type OrdersResult,
   type PayoutsResult,
   type PlatformCustomer,
+  type PlatformShippingPlace,
   type PlatformVariant,
   PlatformError,
   type SalesPlatformConnector,
 } from "@/lib/sales-platforms/connector";
-import { type StockView, saveExtras, saveOrderExtras, stockDifferences } from "@/lib/sales-platforms/extras-store";
+import { type StockView, ordersWithoutPlace, saveExtras, saveOrderExtras, saveShippingPlaces, stockDifferences } from "@/lib/sales-platforms/extras-store";
 import {
   forgetCustomerMatch,
   isWeakName,
@@ -87,6 +88,8 @@ export const SALES_PLATFORM_ACTOR: Actor = { userId: null, email: "sales-platfor
 /** The command source of contacts and items brought in from a platform. */
 const SOURCE = "sales-platform";
 const PAUSE_AFTER_FAILURES = 3;
+/** SHP3: older orders whose place is read at each sync (about 1 Shopify point each, 100 to a query). */
+const PLACES_PER_SYNC = 500;
 const LOG_PAGE = 200;
 
 type ConnectionRow = {
@@ -1876,9 +1879,11 @@ export async function syncConnection(
   now: Date = new Date(),
 ): Promise<SyncResult> {
   requireSecrets();
-  const { row, retryIds, postedPayouts, hasStats, recheckFrom } = await withOrganisationTransaction(organisation, actor, async (tx) => {
+  const { row, retryIds, postedPayouts, hasStats, recheckFrom, placeIds } = await withOrganisationTransaction(organisation, actor, async (tx) => {
     const found = await readConnection(tx, connectionIdInput);
     assertConnected(found);
+    // SHP3: orders brought in before their place was read, a batch at a time.
+    const placeIds = connectorFor(found.platform).fetchShippingPlaces ? await ordersWithoutPlace(tx, found.id, PLACES_PER_SYNC) : [];
     const stats = await tx.query("select 1 from sales_platform_shop_stats where connection_id = $1 limit 1", [found.id]);
     return {
       row: found,
@@ -1888,6 +1893,7 @@ export async function syncConnection(
       postedPayouts: posts(found) && readsPayouts(found) ? await postedPayoutIds(tx, found.platform, found.store_domain) : new Set<string>(),
       // SPC39: payouts to read again (refused before a fix, or "Try again"); the earliest one's day.
       recheckFrom: posts(found) && readsPayouts(found) ? await payoutsRecheckFrom(tx, found.id) : null,
+      placeIds,
     };
   });
   const connector = connectorFor(row.platform);
@@ -1923,6 +1929,16 @@ export async function syncConnection(
       }
     }
     const extras = await fetchExtras(connector, context, token, row, now, force, hasStats);
+    // SHP3: a place that can't be read now is tried at the next sync; it doesn't stop this one.
+    let places: Map<string, PlatformShippingPlace> | null = null;
+    let placesNote: string | null = null;
+    if (placeIds.length && connector.fetchShippingPlaces) {
+      try {
+        places = await connector.fetchShippingPlaces(context, token, placeIds);
+      } catch (error) {
+        placesNote = `Couldn't read where older orders were sent, for the region map: ${error instanceof Error ? error.message : String(error)} It's tried again at the next sync.`;
+      }
+    }
     return await withOrganisationTransaction(organisation, actor, async (tx) => {
       const current = await readConnection(tx, row.id, { lock: true });
       assertConnected(current);
@@ -1974,6 +1990,8 @@ export async function syncConnection(
       if (orders) {
         for (const order of orders.orders) await saveOrderExtras(tx, current.id, order);
       }
+      if (places) await saveShippingPlaces(tx, current.id, placeIds, places);
+      if (placesNote) await writeNote(tx, row.id, "sync", placesNote);
       if (extras) {
         await saveExtras(tx, current.id, extras.result);
         for (const note of extras.result.notes) await writeNote(tx, row.id, "sync", note);

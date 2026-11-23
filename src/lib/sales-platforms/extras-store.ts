@@ -1,6 +1,6 @@
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { cmp, dec, sub, sum, toPlainString, ZERO_DECIMAL } from "@/lib/money/decimal";
-import type { ExtrasResult, PlatformOrder } from "@/lib/sales-platforms/connector";
+import type { ExtrasResult, PlatformOrder, PlatformShippingPlace } from "@/lib/sales-platforms/connector";
 
 /**
  * Saving Shopify's read-only extras and reading the stock difference view
@@ -87,8 +87,9 @@ export async function saveOrderExtras(tx: OrgTx, connectionId: string, order: Pl
   if (!extras) return;
   await tx.query(
     `insert into sales_platform_order_details (connection_id, order_external_id, order_name, processed_at, currency, discounts_total, shipping_charged,
-                                              fulfilment_status, fulfilment_order_statuses, closed_at)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)
+                                              fulfilment_status, fulfilment_order_statuses, closed_at,
+                                              shipping_region, shipping_town, shipping_country, shipping_place_read)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, $12, $13, $14)
      on conflict (connection_id, order_external_id) do update set
        order_name = excluded.order_name, processed_at = excluded.processed_at, currency = excluded.currency,
        discounts_total = coalesce(excluded.discounts_total, sales_platform_order_details.discounts_total),
@@ -97,6 +98,11 @@ export async function saveOrderExtras(tx: OrgTx, connectionId: string, order: Pl
        fulfilment_order_statuses = coalesce(excluded.fulfilment_order_statuses, sales_platform_order_details.fulfilment_order_statuses),
        -- Overwritten, not kept: an order brought back from Shopify's archive is open again.
        closed_at = excluded.closed_at,
+       -- SHP2: where it's going, as the order now says (an order read before SHP1 has none yet).
+       shipping_region = case when excluded.shipping_place_read then excluded.shipping_region else sales_platform_order_details.shipping_region end,
+       shipping_town = case when excluded.shipping_place_read then excluded.shipping_town else sales_platform_order_details.shipping_town end,
+       shipping_country = case when excluded.shipping_place_read then excluded.shipping_country else sales_platform_order_details.shipping_country end,
+       shipping_place_read = sales_platform_order_details.shipping_place_read or excluded.shipping_place_read,
        synced_at = now()`,
     [
       connectionId,
@@ -109,6 +115,11 @@ export async function saveOrderExtras(tx: OrgTx, connectionId: string, order: Pl
       extras.fulfilmentStatus?.slice(0, 40) ?? null,
       extras.fulfilmentOrderStatuses,
       order.closedAt ?? null,
+      extras.shippingPlace?.region ?? null,
+      extras.shippingPlace?.town ?? null,
+      extras.shippingPlace?.country ?? null,
+      // Undefined from a connector that doesn't read places (WooCommerce): not read, so nothing is overwritten.
+      extras.shippingPlace !== undefined,
     ],
   );
   if (extras.discountApplications) {
@@ -233,4 +244,33 @@ export async function stockDifferences(tx: OrgTx, connectionId: string): Promise
 /** Whether a row's figures differ (for the "only differences" filter and counts). */
 export function differs(row: StockDifference): boolean {
   return row.difference !== null && cmp(dec(row.difference), ZERO_DECIMAL) !== 0;
+}
+
+/** SHP3: orders saved before their place was read (brought in before SHP1), oldest first, at most `limit`. */
+export async function ordersWithoutPlace(tx: OrgTx, connectionId: string, limit: number): Promise<string[]> {
+  const found = await tx.query<{ id: string }>(
+    `select order_external_id as id from sales_platform_order_details
+      where connection_id = $1 and not shipping_place_read
+      order by processed_at nulls last, order_external_id
+      limit $2`,
+    [connectionId, limit],
+  );
+  return found.rows.map((row) => row.id);
+}
+
+/**
+ * SHP3: the places read for orders asked about. Every order asked about is
+ * marked read, so one Shopify no longer has (or keeps the address of) isn't
+ * asked about again; an order read in full since keeps what that read said.
+ */
+export async function saveShippingPlaces(tx: OrgTx, connectionId: string, asked: readonly string[], places: ReadonlyMap<string, PlatformShippingPlace>): Promise<void> {
+  for (const id of asked) {
+    const place = places.get(id) ?? null;
+    await tx.query(
+      `update sales_platform_order_details
+          set shipping_region = $3, shipping_town = $4, shipping_country = $5, shipping_place_read = true
+        where connection_id = $1 and order_external_id = $2 and not shipping_place_read`,
+      [connectionId, id, place?.region ?? null, place?.town ?? null, place?.country ?? null],
+    );
+  }
 }

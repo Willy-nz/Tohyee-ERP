@@ -23448,3 +23448,31 @@ added when Spreading is turned on.
   those months are undone first, or the item is ended early. A bill or
   invoice with a line on the worksheet can't be voided: the item is removed
   first.
+
+
+## Where Shopify orders go (SHP1-SHP5; 23 Nov 2026; following common practice, not yet reviewed)
+
+Tested in `tests/integration/shopify-extras.test.ts` and
+`tests/unit/shopify-extras.test.ts`. A made-up candle shop sells through
+Shopify; #1001 goes to Dunedin and #1002 to Palmerston North.
+
+- **SHP1 Only the place.** Each order keeps the region from its shipping
+  address as Shopify names it (Shopify's province, e.g. Otago), the town or
+  city, and the country code: #1001 is Otago, Dunedin, NZ. Never the street,
+  postcode or name. Spaces are trimmed and the country code is upper case. An
+  order with no shipping address (a pickup), or one whose address Shopify
+  keeps back, has no place.
+- **SHP2 Kept up to date.** Each time an order is read, its place is what the
+  order says now, so a changed address changes it. Nothing is posted: it's
+  only for reports.
+- **SHP3 Older orders too.** Orders brought in before this have no place yet.
+  Each sync asks Shopify where up to 500 of them went, 100 to a question
+  (about 1 point an order). Each is asked about once: one Shopify no longer
+  has is marked read with no place. If Shopify can't answer, the sync carries
+  on, the log says so, and the next sync tries again.
+- **SHP4 In Analytics.** Shopify orders has shipping_region, shipping_town and
+  shipping_country, so a filled map of NZ regions can be grouped by
+  shipping_region (Shopify's "Manawatu-Wanganui" is Manawatū-Whanganui).
+- **SHP5 Towns on the district map.** shipping_town on a district map matches
+  city and district names (Dunedin is Dunedin City). A town that isn't a
+  district (Mosgiel, say) doesn't match and is listed as not on the map.

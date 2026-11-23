@@ -17,7 +17,7 @@ export const SHOPIFY_FILE_NAME = "(Tohyee's copy of the connected Shopify stores
 export type ShopifyTable = { table: string; label: string; noun: string; description: string };
 
 export const SHOPIFY_TABLES: ShopifyTable[] = [
-  { table: "shopify_orders", label: "Shopify orders", noun: "orders", description: "Each Shopify order brought in: its invoice, total, discounts, shipping charged and fulfilment status. Contacts by ID only." },
+  { table: "shopify_orders", label: "Shopify orders", noun: "orders", description: "Each Shopify order brought in: its invoice, total, discounts, shipping charged, fulfilment status and where it was sent (region, town and country; never the street). Contacts by ID only." },
   { table: "shopify_order_lines", label: "Shopify order lines", noun: "order lines", description: "The lines of the invoices made from Shopify orders, excluding GST." },
   { table: "shopify_refunds", label: "Shopify refunds", noun: "refunds", description: "Each Shopify refund brought in, as its credit note." },
   { table: "shopify_payouts", label: "Shopify payouts", noun: "payouts", description: "Each Shopify Payments payout brought in, and what it became in Tohyee." },
