@@ -7,6 +7,7 @@ import { Money, RequireOrganisation, OrganisationActions } from "@/components/bo
 import { CustomValueCell, listColumns, useCustomFields } from "@/components/custom-fields";
 import { useApiData } from "@/components/hooks";
 import { ListSearch } from "@/components/list-search";
+import { type ListSortState, SortableHeading, sortQuery } from "@/components/list-sort";
 import { useHomeSummary } from "@/components/home/home";
 import { useSalespeople } from "@/components/salespeople";
 import { InvoiceStatusBadge, PaidStatusBadge } from "@/components/invoices/invoice-editor";
@@ -15,7 +16,7 @@ import { api, errorMessage } from "@/lib/client/api";
 import { formatDate } from "@/lib/format";
 import type { InvoiceStatus, InvoiceSummary } from "@/lib/invoices/service";
 
-type InvoicePage = { invoices: InvoiceSummary[]; nextBeforeId: string | null };
+type InvoicePage = { invoices: InvoiceSummary[]; nextBeforeId: string | null; nextOffset: number | null };
 
 type Filter = { slug: string; label: string; status: InvoiceStatus | null; awaitingPayment: boolean; empty: string };
 
@@ -27,10 +28,13 @@ const FILTERS: Filter[] = [
   { slug: "voided", label: "Voided", status: "voided", awaitingPayment: false, empty: "No voided invoices." },
 ];
 
-function InvoiceList({ organisationId, filter, search }: { organisationId: string; filter: Filter; search: string }) {
+/** Which count belongs on which tab. */
+const COUNT_KEYS: Record<string, string> = { all: "all", drafts: "draft", approved: "approved", awaiting: "awaitingPayment", voided: "voided" };
+
+function InvoiceList({ organisationId, filter, search, sort, onSort }: { organisationId: string; filter: Filter; search: string; sort: ListSortState; onSort: (next: ListSortState) => void }) {
   const { status } = filter;
   const awaitingPayment = filter.awaitingPayment ? "true" : null;
-  const list = useApiData<InvoicePage>("/api/invoices", { organisationId, status, awaitingPayment, search: search || null });
+  const list = useApiData<InvoicePage>("/api/invoices", { organisationId, status, awaitingPayment, search: search || null, ...sortQuery(sort) });
   // The salesperson column shows while advanced features are on (SR1).
   const showSalesperson = useSalespeople(organisationId).data?.advancedFeatures ?? false;
   const columns = listColumns(useCustomFields(organisationId).data, "document", ["invoice"]);
@@ -39,14 +43,16 @@ function InvoiceList({ organisationId, filter, search }: { organisationId: strin
 
   const invoices = [...(list.data?.invoices ?? []), ...(more?.invoices ?? [])];
   const nextBeforeId = more ? more.nextBeforeId : (list.data?.nextBeforeId ?? null);
+  // A sorted list pages by position instead of from the last id.
+  const nextOffset = more ? more.nextOffset : (list.data?.nextOffset ?? null);
 
   async function loadMore() {
-    if (!nextBeforeId) return;
+    if (!nextBeforeId && nextOffset === null) return;
     try {
       const page = await api<InvoicePage>("/api/invoices", {
-        query: { organisationId, status, awaitingPayment, search: search || null, beforeId: nextBeforeId },
+        query: { organisationId, status, awaitingPayment, search: search || null, beforeId: nextBeforeId, ...sortQuery(sort), offset: nextOffset },
       });
-      setMore((current) => ({ invoices: [...(current?.invoices ?? []), ...page.invoices], nextBeforeId: page.nextBeforeId }));
+      setMore((current) => ({ invoices: [...(current?.invoices ?? []), ...page.invoices], nextBeforeId: page.nextBeforeId, nextOffset: page.nextOffset }));
     } catch (caught) {
       setMoreError(errorMessage(caught));
     }
@@ -68,10 +74,10 @@ function InvoiceList({ organisationId, filter, search }: { organisationId: strin
         <table className={ui.table}>
           <thead>
             <tr>
-              <th>Number</th>
-              <th>Customer</th>
-              <th>Date</th>
-              <th>Due</th>
+              <SortableHeading column="number" label="Number" sort={sort} onSort={onSort} />
+              <SortableHeading column="contact" label="Customer" sort={sort} onSort={onSort} />
+              <SortableHeading column="date" label="Date" sort={sort} onSort={onSort} />
+              <SortableHeading column="due" label="Due" sort={sort} onSort={onSort} />
               <th>Reference</th>
               {showSalesperson ? <th>Salesperson</th> : null}
               {columns.map((field) => (
@@ -79,7 +85,7 @@ function InvoiceList({ organisationId, filter, search }: { organisationId: strin
               ))}
               <th>Status</th>
               <th>Payment</th>
-              <th className={ui.num}>Total</th>
+              <SortableHeading column="total" label="Total" sort={sort} onSort={onSort} numeric />
               <th className={ui.num}>Amount due</th>
             </tr>
           </thead>
@@ -110,7 +116,7 @@ function InvoiceList({ organisationId, filter, search }: { organisationId: strin
           </tbody>
         </table>
       </div>
-      {nextBeforeId ? (
+      {nextBeforeId || nextOffset !== null ? (
         <div>
           <Button variant="secondary" onClick={() => void loadMore()}>
             Load older invoices
@@ -127,6 +133,8 @@ function Invoices({ organisationId }: { organisationId: string }) {
   // The list shown is in the address (?show=), so the menus can open "Awaiting payment".
   const filter = FILTERS.find((entry) => entry.slug === params.get("show")) ?? FILTERS[0];
   const [search, setSearch] = useState("");
+  const [sort, setSort] = useState<ListSortState>(null);
+  const counts = useApiData<Record<string, number>>("/api/invoices/counts", { organisationId }).data;
   // What customers owe, on the Awaiting payment tab (the old Sales overview's figure).
   const owed = useHomeSummary(organisationId).data?.owedToYou ?? null;
   return (
@@ -142,6 +150,7 @@ function Invoices({ organisationId }: { organisationId: string }) {
             onClick={() => router.replace(entry.slug === "all" ? "/operations/invoices" : `/operations/invoices?show=${entry.slug}`, { scroll: false })}
           >
             {entry.label}
+            {counts ? <span className={ui.tabCount}> {counts[COUNT_KEYS[entry.slug]] ?? 0}</span> : null}
             {entry.awaitingPayment && owed ? (
               <span className={ui.tabFigure}>
                 {" "}
@@ -152,7 +161,7 @@ function Invoices({ organisationId }: { organisationId: string }) {
         ))}
       </div>
       <ListSearch label="Search invoices" placeholder="Number, customer or reference" onSearch={setSearch} />
-      <InvoiceList key={`${filter.label}:${search}`} organisationId={organisationId} filter={filter} search={search} />
+      <InvoiceList key={`${filter.label}:${search}:${sort?.column}:${sort?.direction}`} organisationId={organisationId} filter={filter} search={search} sort={sort} onSort={setSort} />
     </div>
   );
 }

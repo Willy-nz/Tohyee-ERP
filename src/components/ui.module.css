@@ -101,6 +101,12 @@
   grid-template-columns: repeat(auto-fit, minmax(150px, 1fr));
 }
 
+/* How many a tab holds, after its name. */
+.tabCount {
+  color: var(--muted);
+  font-weight: 400;
+}
+
 /* Cards and tabs one under another, with room between. */
 .stack {
   display: grid;

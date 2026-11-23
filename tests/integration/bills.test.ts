@@ -7,6 +7,7 @@ import * as billsRoute from "@/app/api/bills/route";
 import { createAccount, updateAccount } from "@/lib/accounts/service";
 import type { SessionUser } from "@/lib/auth/sessions";
 import {
+  countBillsByTab,
   approveBill,
   type Bill,
   type BillSummary,
@@ -977,6 +978,26 @@ describeWithDatabase("bills", () => {
     const next = await asUser(viewer, (tx) => listBills(tx, { limit: "2", beforeId: page.nextBeforeId }));
     expect(next.bills.map((entry) => entry.id)).toEqual(all.bills.slice(2, 4).map((entry) => entry.id));
     await expect(asUser(viewer, (tx) => listBills(tx, { status: "paid" }))).rejects.toThrow(/status must be one of/);
+    // Sorted by a column: in that order, paged by position, and every bill turns up once.
+    const byTotal = await asUser(viewer, (tx) => listBills(tx, { sort: "total", direction: "desc", limit: "200" }));
+    const totals = byTotal.bills.map((entry) => Number(entry.total));
+    expect(totals).toEqual([...totals].sort((x, y) => y - x));
+    expect(byTotal.bills.map((entry) => entry.id).sort()).toEqual(all.bills.map((entry) => entry.id).sort());
+    const pageOne = await asUser(viewer, (tx) => listBills(tx, { sort: "contact", limit: "1" }));
+    expect(pageOne).toMatchObject({ nextBeforeId: null, nextOffset: all.bills.length > 1 ? 1 : null });
+    const pageTwo = await asUser(viewer, (tx) => listBills(tx, { sort: "contact", limit: "200", offset: "1" }));
+    expect([...pageOne.bills, ...pageTwo.bills].map((entry) => entry.contactName.toLowerCase())).toEqual(
+      all.bills.map((entry) => entry.contactName.toLowerCase()).sort(),
+    );
+    await expect(asUser(viewer, (tx) => listBills(tx, { sort: "b.id; drop table bills" }))).rejects.toThrow(/sort must be one of/);
+    await expect(asUser(viewer, (tx) => listBills(tx, { sort: "total", direction: "sideways" }))).rejects.toThrow(/asc or desc/);
+    // The count on each tab is the number of bills that tab lists.
+    const counts = await asUser(viewer, (tx) => countBillsByTab(tx));
+    expect(counts.all).toBe(all.bills.length);
+    expect(counts.draft).toBe((await asUser(viewer, (tx) => listBills(tx, { status: "draft", limit: "200" }))).bills.length);
+    expect(counts.approved).toBe((await asUser(viewer, (tx) => listBills(tx, { status: "approved", limit: "200" }))).bills.length);
+    expect(counts.awaitingPayment).toBe((await asUser(viewer, (tx) => listBills(tx, { awaitingPayment: true, limit: "200" }))).bills.length);
+    expect(counts.voided).toBe((await asUser(viewer, (tx) => listBills(tx, { status: "voided", limit: "200" }))).bills.length);
     // The search box: text anywhere in the supplier's invoice number or name, any case; % and _ are just characters.
     const wanted = all.bills.find((entry) => entry.supplierInvoiceNumber)!;
     const number = wanted.supplierInvoiceNumber!.toLowerCase();

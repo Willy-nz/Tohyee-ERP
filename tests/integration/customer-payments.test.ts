@@ -12,6 +12,7 @@ import type { OrgTx } from "@/lib/db/org-transaction";
 import { coreQuery } from "@/lib/db/transactions";
 import { type CustomerPayment, listPayments, recordPayment, voidPayment } from "@/lib/invoices/payments";
 import {
+  countInvoicesByTab,
   approveInvoice,
   createInvoice,
   getInvoice,
@@ -650,6 +651,13 @@ describeWithDatabase("customer payments", () => {
     expect(awaiting.every((entry) => entry.status === "approved" && entry.paidStatus !== "paid")).toBe(true);
     expect(awaitingIds).toEqual([...awaitingIds].sort((a, b) => Number(b) - Number(a)));
 
+    // Sorted by due date, the list pages by position and the tab counts match what each tab lists.
+    const byDue = (await asUser(viewer, (tx) => listInvoices(tx, { sort: "due", direction: "asc", limit: 200 }))).invoices;
+    const dues = byDue.map((entry) => entry.dueDate);
+    expect(dues).toEqual([...dues].sort());
+    const tabCounts = await asUser(viewer, (tx) => countInvoicesByTab(tx));
+    expect(tabCounts.all).toBe(byDue.length);
+    expect(tabCounts.awaitingPayment).toBe((await asUser(viewer, (tx) => listInvoices(tx, { awaitingPayment: true, limit: 200 }))).invoices.length);
     // The search box: text anywhere in the number, customer or reference, any case, with the other filters.
     const wanted = all.get(unpaid.id)!;
     const byNumber = (await asUser(viewer, (tx) => listInvoices(tx, { search: wanted.invoiceNumber!.toLowerCase() }))).invoices;
