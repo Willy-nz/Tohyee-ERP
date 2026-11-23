@@ -161,6 +161,9 @@ function Invoices({ organisationId }: { organisationId: string }) {
         ))}
       </div>
       <ListSearch label="Search invoices" placeholder="Number, customer or reference" onSearch={setSearch} />
+      <p className={ui.muted}>
+        Need more filters, or want to keep one? <Link href="/operations/saved-searches?type=invoice">Saved searches</Link>
+      </p>
       <InvoiceList key={`${filter.label}:${search}:${sort?.column}:${sort?.direction}`} organisationId={organisationId} filter={filter} search={search} sort={sort} onSort={setSort} />
     </div>
   );

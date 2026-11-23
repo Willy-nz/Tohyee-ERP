@@ -48,6 +48,7 @@ const ROUTES: Array<[string, IllustratedIconName]> = [
   ["/operations/reports?report=stock", "inventory"], ["/operations/reports?report=sales", "sales"],
   ["/operations/reports?view=custom", "form"], ["/operations/reports?view=drafts", "form"],
   ["/operations/reports?view=archived", "documents"],
+  ["/operations/saved-searches", "funnel"],
   // The year's statements as a set of papers; the general ledger as a list; signing the statements as an approval.
   ["/operations/reports?report=statements", "documents"], ["/operations/reports?report=ledger", "checklist"],
   ["/operations/reports/financial-statements", "approval"],
