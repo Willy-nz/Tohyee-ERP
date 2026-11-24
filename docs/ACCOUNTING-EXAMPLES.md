@@ -23335,7 +23335,7 @@ dropdown.
 - **APS10** A name that isn't a salesperson shows **0.00** everywhere,
   never the whole report.
 
-## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW25; planned with the owner 23 Nov 2026, built by Claude; the details follow common practice and are not yet reviewed)
+## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW25; planned with the owner 23 Nov 2026, built by Claude; the rules were summarised to the owner, who accepted them on 24 Nov 2026)
 
 Income or a cost often belongs to other months than the one it was billed
 or paid in. The Spreading worksheet replaces the spreadsheet kept for that.
