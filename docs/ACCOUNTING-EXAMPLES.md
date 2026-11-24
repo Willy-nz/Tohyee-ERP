@@ -22557,7 +22557,7 @@ and `tests/integration/rainfall.test.ts`.
   `tohyee_farm_rainfall` (a row a reading, removed ones left out): RF1-RF7
   sum to 99.0 mm over 6 readings for Cowshed.
 
-## Farming: MetService weather forecast (WX1-WX11; built by Claude 5 Nov 2026 when the owner asked for MetService forecasts with each farm's own key, Claude's rules, not yet reviewed)
+## Farming: MetService weather forecast (WX1-WX12; built by Claude 5 Nov 2026 when the owner asked for MetService forecasts with each farm's own key, Claude's rules, not yet reviewed)
 
 Records only: nothing posts to the books.. MetService's
 API hasn't been tried live from Tohyee: these use the made-up forecast
@@ -22623,6 +22623,19 @@ API hasn't been tried live from Tohyee: these use the made-up forecast
   for now is a choice, with "Delete them now" offered after.
 - **WX11 Backups.** With 1 latest forecast and 2 records kept, a backup has
   the forecast table empty and both records.
+- **WX12 Pictures** (24 Nov 2026; the owner asked Claude to suggest what's
+  windy on a New Zealand farm and agreed to 40 and 60 as a setting for each
+  farm). Each day in the week's table shows a picture with its word: Frost
+  at 2.0 °C or below (as WX5), Rain from 1.0 mm in the day, and Windy once
+  the day's strongest wind reaches the farm's "Windy from" figure, or its
+  strongest gust reaches half as much again. The figure is 40 km/h unless
+  an admin changes it for the farm (10 to 150): 39 isn't windy and 40 is;
+  with gusts fetched, 59 isn't and 60 is. An exposed farm set to 55 doesn't
+  call 45 windy, and counts gusts from 83. Changing the figure keeps the
+  pin and the kept forecast. It means a windy day, not a limit for
+  spraying. Frost and heavy rain warnings carry their picture too. Sun and
+  cloud aren't shown: the forecast holds no cloud cover to choose them
+  from.
 
 ## Farming: farm team tasks (FT1-FT7; built by Claude 5 Nov 2026 when the owner asked for the missing farm features, Claude's rules, not yet reviewed)
 

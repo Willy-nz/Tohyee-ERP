@@ -35,6 +35,9 @@ import {
   type WeatherChoice,
   type WeatherStatus,
   WARNINGS_NOTE,
+  WINDY_AT_KMH,
+  WINDY_MAX_KMH,
+  WINDY_MIN_KMH,
 } from "@/lib/weather/forecast-rules";
 import { usingFakeProvider, weatherProvider, WeatherProviderError } from "@/lib/weather/provider";
 
@@ -60,7 +63,7 @@ import { usingFakeProvider, weatherProvider, WeatherProviderError } from "@/lib/
 export type WeatherSetupStep = "about" | "get_key" | "paste" | "test" | "farms" | "choose" | "turn_on";
 export const SETUP_STEPS: WeatherSetupStep[] = ["about", "get_key", "paste", "test", "farms", "choose", "turn_on"];
 
-export type WeatherLocation = { farmId: string; farmName: string; point: { latitude: string; longitude: string } | null; centre: { latitude: string; longitude: string } | null };
+export type WeatherLocation = { farmId: string; farmName: string; point: { latitude: string; longitude: string } | null; centre: { latitude: string; longitude: string } | null; /** From this wind speed (km/h) a day shows the wind picture. */ windyKmh: number };
 
 export type WeatherPermission = {
   keepRecords: boolean;
@@ -139,8 +142,8 @@ function choicesOf(row: { choices: string[] }): WeatherChoice[] {
 /** Every active farm the person can see, with its pin and the middle of its paddocks (the pin's default). */
 async function listLocations(tx: OrgTx): Promise<WeatherLocation[]> {
   const visible = await visibleFarmIds(tx);
-  const farms = await tx.query<{ id: string; name: string; latitude: string | null; longitude: string | null }>(
-    `select f.id::text, f.name, l.latitude::text, l.longitude::text from farms f left join weather_locations l on l.farm_id = f.id
+  const farms = await tx.query<{ id: string; name: string; latitude: string | null; longitude: string | null; windy_kmh: number | null }>(
+    `select f.id::text, f.name, l.latitude::text, l.longitude::text, l.windy_kmh from farms f left join weather_locations l on l.farm_id = f.id
       where f.is_active and ($1::bigint[] is null or f.id = any($1::bigint[])) order by lower(f.name), f.id`,
     [visible],
   );
@@ -163,6 +166,7 @@ async function listLocations(tx: OrgTx): Promise<WeatherLocation[]> {
       farmName: farm.name,
       point: farm.latitude !== null && farm.longitude !== null ? { latitude: farm.latitude, longitude: farm.longitude } : null,
       centre: box ? { longitude: ((box[0] + box[2]) / 2).toFixed(6), latitude: ((box[1] + box[3]) / 2).toFixed(6) } : null,
+      windyKmh: farm.windy_kmh ?? WINDY_AT_KMH,
     };
   });
 }
@@ -277,6 +281,7 @@ export async function saveWeatherLocations(tx: OrgTx, input: unknown): Promise<W
   await requireFarming(tx);
   const list = requireArray(input, "locations", 200);
   const wanted = new Map<string, { latitude: string; longitude: string } | null>();
+  const windyFor = new Map<string, number>();
   for (const entry of list) {
     if (!entry || typeof entry !== "object") throw new ValidationError("Each farm needs a farmId and a point.");
     const record = entry as Record<string, unknown>;
@@ -285,6 +290,11 @@ export async function saveWeatherLocations(tx: OrgTx, input: unknown): Promise<W
     if (!farm.rowCount) throw new NotFoundError("Farm not found.");
     await requireFarmAccess(tx, farmId);
     wanted.set(farmId, record.point === null || record.point === undefined ? null : parsePoint(record.point));
+    if (record.windyKmh !== undefined && record.windyKmh !== null) {
+      const windy = typeof record.windyKmh === "string" && /^\d{1,3}$/.test(record.windyKmh) ? Number(record.windyKmh) : record.windyKmh;
+      if (typeof windy !== "number" || !Number.isInteger(windy) || windy < WINDY_MIN_KMH || windy > WINDY_MAX_KMH) throw new ValidationError(`Windy from is a whole number of km/h, ${WINDY_MIN_KMH} to ${WINDY_MAX_KMH}.`);
+      windyFor.set(farmId, windy);
+    }
   }
   const before = new Map((await tx.query<{ farm_id: string; latitude: string; longitude: string }>("select farm_id::text, latitude::text, longitude::text from weather_locations")).rows.map((row) => [row.farm_id, row]));
   for (const [farmId, point] of wanted) {
@@ -294,17 +304,23 @@ export async function saveWeatherLocations(tx: OrgTx, input: unknown): Promise<W
       await tx.query("delete from weather_forecast_cache where farm_id = $1", [farmId]);
       continue;
     }
-    if (was && was.latitude === point.latitude && was.longitude === point.longitude) continue;
+    const windy = windyFor.get(farmId);
+    if (was && was.latitude === point.latitude && was.longitude === point.longitude) {
+      // Only what counts as windy changed: the kept forecast is still for this place, so it stays.
+      if (windy !== undefined) await tx.query("update weather_locations set windy_kmh = $2, updated_at = now(), updated_by_email = $3 where farm_id = $1 and windy_kmh <> $2", [farmId, windy, tx.actor.email]);
+      continue;
+    }
     await tx.query(
-      `insert into weather_locations (farm_id, latitude, longitude, updated_by_email) values ($1, $2, $3, $4)
-       on conflict (farm_id) do update set latitude = excluded.latitude, longitude = excluded.longitude, updated_at = now(), updated_by_email = excluded.updated_by_email`,
-      [farmId, point.latitude, point.longitude, tx.actor.email],
+      `insert into weather_locations (farm_id, latitude, longitude, updated_by_email, windy_kmh) values ($1, $2, $3, $4, coalesce($5::integer, ${WINDY_AT_KMH}))
+       on conflict (farm_id) do update set latitude = excluded.latitude, longitude = excluded.longitude, updated_at = now(), updated_by_email = excluded.updated_by_email,
+         windy_kmh = coalesce($5::integer, weather_locations.windy_kmh)`,
+      [farmId, point.latitude, point.longitude, tx.actor.email, windy ?? null],
     );
     await tx.query("delete from weather_forecast_cache where farm_id = $1", [farmId]);
     // A new or moved pin is fetched at the next check, within 10 minutes.
     await tx.query("update weather_settings set last_refresh_at = null where id = true");
   }
-  await writeAuditEvent(tx, { eventType: "weather.farms_changed", entityType: "weather_settings", entityId: "metservice", details: { farms: [...wanted].map(([farmId, point]) => ({ farmId, placed: Boolean(point) })) } });
+  await writeAuditEvent(tx, { eventType: "weather.farms_changed", entityType: "weather_settings", entityId: "metservice", details: { farms: [...wanted].map(([farmId, point]) => ({ farmId, placed: Boolean(point), ...(windyFor.has(farmId) ? { windyKmh: windyFor.get(farmId) } : {}) })) } });
   const pinned = await tx.query<{ n: number }>("select count(*)::int as n from weather_locations");
   if (pinned.rows[0].n === 0) await tx.query("update weather_settings set enabled = false, revision = revision + 1 where id = true");
   return getWeatherSetup(tx);
@@ -544,6 +560,8 @@ export type FarmForecast = {
     hours: ForecastHour[];
     days: ForecastDay[];
     warnings: ForecastWarning[];
+    /** The wind speed (km/h) from which this farm's day shows the wind picture (WX12). */
+    windyKmh: number;
   } | null;
   /** Whether the person may press Refresh (bookkeepers and up). */
   canRefresh: boolean;
@@ -558,7 +576,7 @@ export async function getFarmForecast(tx: OrgTx, farmIdInput: unknown, options: 
   await requireFarmAccess(tx, farmId);
   const now = options.now ?? new Date();
   const row = await settingsRow(tx);
-  const placed = await tx.query("select 1 from weather_locations where farm_id = $1", [farmId]);
+  const placed = await tx.query<{ windy_kmh: number }>("select windy_kmh from weather_locations where farm_id = $1", [farmId]);
   const cached = await tx.query<{ fetched_at: string; latitude: string; longitude: string; choices: string[]; hours: ForecastHour[] }>(
     "select fetched_at::text, latitude::text, longitude::text, choices, hours from weather_forecast_cache where farm_id = $1",
     [farmId],
@@ -585,6 +603,7 @@ export async function getFarmForecast(tx: OrgTx, farmIdInput: unknown, options: 
           hours: ahead.slice(0, 48),
           days: forecastDays(ahead, zone).slice(0, 7),
           warnings: forecastWarnings(ahead, zone),
+          windyKmh: placed.rows[0]?.windy_kmh ?? WINDY_AT_KMH,
         }
       : null,
     canRefresh: options.canRefresh ?? false,

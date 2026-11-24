@@ -2,12 +2,13 @@
 
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { IllustratedIcon } from "@/components/illustrated-icon";
 import { InfoTip } from "@/components/info-tip";
 import { Badge, Button, Card, Notice, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
 import { api, errorMessage } from "@/lib/client/api";
 import type { Farm } from "@/lib/farming/paddocks";
-import { ageText, compassPoint, METSERVICE_ATTRIBUTION, type ForecastDay, type ForecastHour, type WeatherChoice } from "@/lib/weather/forecast-rules";
+import { ageText, compassPoint, dayPictures, METSERVICE_ATTRIBUTION, type ForecastDay, type ForecastHour, type WeatherChoice } from "@/lib/weather/forecast-rules";
 import type { FarmForecast, GaugeComparisonDay } from "@/lib/weather/service";
 import styles from "./weather-forecast.module.css";
 
@@ -115,6 +116,7 @@ function Warnings({ forecast, note, limit }: { forecast: NonNullable<FarmForecas
       <ul className={styles.warnings} aria-label="Frost and heavy rain">
         {shown.map((warning) => (
           <li key={`${warning.kind}-${warning.date}`} className={styles.warning} data-kind={warning.kind}>
+            <IllustratedIcon name={warning.kind === "frost" ? "frost" : "rain"} size={28} />
             <strong>{warning.date === today ? "Today" : dayLabel(warning.date, 1)}</strong> {warning.text}
           </li>
         ))}
@@ -146,7 +148,23 @@ function Strip({ hours, choices, every = 3 }: { hours: ForecastHour[]; choices: 
   );
 }
 
-function DaysTable({ days, choices }: { days: ForecastDay[]; choices: WeatherChoice[] }) {
+/** A day's pictures (WX12), each with its word beside it. */
+function DayPictures({ day, windyKmh }: { day: ForecastDay; windyKmh: number }) {
+  const pictures = dayPictures(day, windyKmh);
+  if (!pictures.length) return null;
+  return (
+    <span className={styles.pictures}>
+      {pictures.map((picture) => (
+        <span key={picture.kind} className={styles.picture}>
+          <IllustratedIcon name={picture.kind} size={28} />
+          {picture.label}
+        </span>
+      ))}
+    </span>
+  );
+}
+
+function DaysTable({ days, choices, windyKmh }: { days: ForecastDay[]; choices: WeatherChoice[]; windyKmh: number }) {
   return (
     <div className={styles.tableWrap}>
       <table className={styles.table}>
@@ -166,6 +184,7 @@ function DaysTable({ days, choices }: { days: ForecastDay[]; choices: WeatherCho
               <th scope="row" className={styles.dayRow}>
                 {dayLabel(day.date, index)}
                 {day.hours < 24 ? <span className={ui.muted}> ({day.hours} h)</span> : null}
+                <DayPictures day={day} windyKmh={windyKmh} />
               </th>
               {choices.includes("rain") ? <td>{dash(day.rainMm)}</td> : null}
               {choices.includes("temperature") ? <td>{day.minC === null ? "–" : `${day.minC} / ${day.maxC}`}</td> : null}
@@ -291,7 +310,7 @@ export function WeatherForecastCard({ organisationId, farm }: { organisationId: 
           <Attribution />
         </div>
         <div>
-          <DaysTable days={data.days.slice(0, 7)} choices={data.choices} />
+          <DaysTable days={data.days.slice(0, 7)} choices={data.choices} windyKmh={data.windyKmh} />
           <Attribution />
         </div>
         <p>
@@ -332,7 +351,7 @@ export function WeatherPage({ organisationId, farm }: { organisationId: string; 
             {forecast!.paused ? <Notice tone="warning">{forecast!.statusText}</Notice> : null}
             <Warnings forecast={data} note={forecast!.warningsNote} />
             <div>
-              <DaysTable days={data.days.slice(0, 7)} choices={data.choices} />
+              <DaysTable days={data.days.slice(0, 7)} choices={data.choices} windyKmh={data.windyKmh} />
               <Attribution />
             </div>
           </div>

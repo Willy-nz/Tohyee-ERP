@@ -265,6 +265,37 @@ export function forecastWarnings(hours: ForecastHour[], timeZone: string): Forec
   return warnings;
 }
 
+/** A day is windy once its strongest wind reaches this (the start of a strong breeze), unless the farm has its own figure. */
+export const WINDY_AT_KMH = 40;
+export const WINDY_MIN_KMH = 10;
+export const WINDY_MAX_KMH = 150;
+/** A day's rain picture shows from this much rain. */
+export const RAIN_PICTURE_MM = "1.0";
+
+/** Gusts count as windy at half as much again as the steady wind: 60 km/h for a farm on 40. */
+export function gustyAt(windyKmh: number): number {
+  return Math.round(windyKmh * 1.5);
+}
+
+export type DayPicture = { kind: "frost" | "rain" | "wind"; label: string };
+
+/**
+ * The pictures beside a day (WX12), each with its word: frost at FROST_AT_C
+ * or below, rain from RAIN_PICTURE_MM in the day, and wind once the day's
+ * strongest wind reaches the farm's figure or its strongest gust reaches
+ * half as much again. Sun and cloud aren't shown: the forecast holds no
+ * cloud cover to choose them from.
+ */
+export function dayPictures(day: ForecastDay, windyKmh: number = WINDY_AT_KMH): DayPicture[] {
+  const pictures: DayPicture[] = [];
+  if (day.minC !== null && cmp(dec(day.minC), dec(FROST_AT_C)) <= 0) pictures.push({ kind: "frost", label: "Frost" });
+  if (day.rainMm !== null && cmp(dec(day.rainMm), dec(RAIN_PICTURE_MM)) >= 0) pictures.push({ kind: "rain", label: "Rain" });
+  const windy = day.maxWindKmh !== null && cmp(dec(day.maxWindKmh), dec(String(windyKmh))) >= 0;
+  const gusty = day.maxGustKmh !== null && cmp(dec(day.maxGustKmh), dec(String(gustyAt(windyKmh)))) >= 0;
+  if (windy || gusty) pictures.push({ kind: "wind", label: "Windy" });
+  return pictures;
+}
+
 /** The hours from now on, at most `count` (the next 48 hours on the card). */
 export function hoursAhead(hours: ForecastHour[], now: Date, count = 48): ForecastHour[] {
   const start = now.getTime() - 60 * 60 * 1000;

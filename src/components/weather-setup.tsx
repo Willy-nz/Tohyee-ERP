@@ -12,7 +12,7 @@ import { api, ApiError, errorMessage } from "@/lib/client/api";
 import type { Position } from "@/lib/farming/geometry";
 import type { FarmingSettings, Paddock } from "@/lib/farming/paddocks";
 import { formatDate } from "@/lib/format";
-import { DEFAULT_CHOICES, estimateUnits, METSERVICE_ATTRIBUTION, REFRESH_CHOICES, WEATHER_CHOICES, type WeatherChoice } from "@/lib/weather/forecast-rules";
+import { DEFAULT_CHOICES, estimateUnits, gustyAt, METSERVICE_ATTRIBUTION, REFRESH_CHOICES, WEATHER_CHOICES, type WeatherChoice, WINDY_AT_KMH, WINDY_MAX_KMH, WINDY_MIN_KMH } from "@/lib/weather/forecast-rules";
 import type { WeatherLocation, WeatherSetup, WeatherSetupStep } from "@/lib/weather/service";
 import styles from "./weather-setup.module.css";
 
@@ -392,14 +392,22 @@ function FarmsStep({ organisationId, setup, onSetup }: StepProps) {
     ) as Record<string, Position | null>;
   const [points, setPoints] = useState<Record<string, Position | null>>(initial);
   const [chosen, setChosen] = useState<Set<string>>(() => new Set(setup.locations.filter((location) => location.point).map((location) => location.farmId)));
+  // What counts as a windy day on each farm, as typed.
+  const [windy, setWindy] = useState<Record<string, string>>(() => Object.fromEntries(setup.locations.map((location) => [location.farmId, String(location.windyKmh)])));
+  const windyOf = (farmId: string) => {
+    const text = (windy[farmId] ?? "").trim();
+    const value = /^\d{1,3}$/.test(text) ? Number(text) : null;
+    return value !== null && value >= WINDY_MIN_KMH && value <= WINDY_MAX_KMH ? value : null;
+  };
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
   const save = async () => {
     setBusy(true);
     setMessage(null);
     try {
-      const locations = setup.locations.map((location) => ({ farmId: location.farmId, point: chosen.has(location.farmId) ? points[location.farmId] : null }));
+      const locations = setup.locations.map((location) => ({ farmId: location.farmId, point: chosen.has(location.farmId) ? points[location.farmId] : null, ...(chosen.has(location.farmId) ? { windyKmh: windyOf(location.farmId) } : {}) }));
       if (locations.some((location) => chosen.has(location.farmId) && !location.point)) throw new ApiError("Place a pin for each farm you ticked.", 400);
+      if (locations.some((location) => chosen.has(location.farmId) && windyOf(location.farmId) === null)) throw new ApiError(`Windy from is a whole number of km/h, ${WINDY_MIN_KMH} to ${WINDY_MAX_KMH}.`, 400);
       const answer = await api<{ setup: WeatherSetup }>("/api/farming/weather", { method: "PATCH", body: { organisationId, locations } });
       onSetup(answer.setup);
       setMessage({ tone: "success", text: "Saved." });
@@ -413,6 +421,7 @@ function FarmsStep({ organisationId, setup, onSetup }: StepProps) {
   const changed = setup.locations.some((location) => {
     const was = location.point ? saved[location.farmId] : null;
     const now = chosen.has(location.farmId) ? (points[location.farmId] ?? null) : null;
+    if (now !== null && (windy[location.farmId] ?? "").trim() !== String(location.windyKmh)) return true;
     return (was === null) !== (now === null) || (was !== null && now !== null && (Math.abs(was[0] - now[0]) > 1e-7 || Math.abs(was[1] - now[1]) > 1e-7));
   });
   if (!setup.locations.length) return <p>No farms yet. Add one under Farms and paddocks first.</p>;
@@ -445,6 +454,11 @@ function FarmsStep({ organisationId, setup, onSetup }: StepProps) {
                 {location.point ? <Badge tone="green">Pin saved</Badge> : null}
               </label>
               {on ? <FarmPin organisationId={organisationId} location={location} point={points[location.farmId] ?? null} onPoint={(point) => setPoints({ ...points, [location.farmId]: point })} /> : null}
+              {on ? (
+                <Field label="Windy from (km/h)" hint={`A day shows the wind picture once its strongest wind reaches this${windyOf(location.farmId) !== null ? `, or gusts reach ${gustyAt(windyOf(location.farmId)!)}` : ""}. ${WINDY_AT_KMH} suits most farms; go higher on an exposed one.`}>
+                  <input inputMode="numeric" maxLength={3} value={windy[location.farmId] ?? ""} onChange={(event) => setWindy({ ...windy, [location.farmId]: event.target.value })} />
+                </Field>
+              ) : null}
             </li>
           );
         })}
