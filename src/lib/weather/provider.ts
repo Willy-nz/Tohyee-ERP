@@ -102,9 +102,11 @@ export const fakeProvider: WeatherProvider = {
         if (variable === "air.temperature.at-2m") return 273.15 + 11 + 5 * Math.sin(((hourOfDay - 9) / 24) * Math.PI * 2) + 2 * Math.sin((t + seed) / 50) - coldNight;
         if (variable === "wind.speed.at-10m") return Math.round((5 + 3 * Math.abs(wave)) * 10) / 10;
         if (variable === "wind.speed.gust.at-10m") return Math.round((9 + 6 * Math.abs(wave)) * 10) / 10;
+        // Clear, mixed and overcast days in turn.
+        if (variable === "cloud.cover") return Math.round(Math.min(100, Math.max(0, 50 + 55 * Math.sin((t + seed) / 40))));
         return Math.round((270 + 60 * wave + 360) % 360);
       });
-    const units: Record<string, string> = { "precipitation.rate": "mm/h", "air.temperature.at-2m": "K", "wind.speed.at-10m": "m/s", "wind.speed.gust.at-10m": "m/s", "wind.direction.at-10m": "degree" };
+    const units: Record<string, string> = { "precipitation.rate": "mm/h", "air.temperature.at-2m": "K", "wind.speed.at-10m": "m/s", "wind.speed.gust.at-10m": "m/s", "cloud.cover": "%", "wind.direction.at-10m": "degree" };
     const variables = Object.fromEntries(
       variablesFor(choices).map((variable) => [variable, { units: units[variable], dimensions: ["time", "point"], data: values(variable), noData: times.map(() => 0) }]),
     );

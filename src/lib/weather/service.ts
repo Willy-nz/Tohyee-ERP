@@ -333,7 +333,7 @@ export async function saveWeatherChoices(tx: OrgTx, input: { choices?: unknown; 
   let choices = choicesOf(row);
   if (input.choices !== undefined) {
     const list = requireArray(input.choices, "choices", 10);
-    if (!list.every(isWeatherChoice)) throw new ValidationError("Choose from rain, temperature, wind and gusts.");
+    if (!list.every(isWeatherChoice)) throw new ValidationError("Choose from rain, temperature, wind, gusts and cloud.");
     choices = [...new Set(list as WeatherChoice[])];
     if (!choices.length) throw new ValidationError("Choose at least one thing to fetch.");
   }

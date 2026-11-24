@@ -34,6 +34,14 @@ function day(startUtc: string, values: (index: number) => Partial<ForecastHour>)
   return Array.from({ length: 24 }, (_, index) => hour(new Date(Date.parse(startUtc) + index * 3_600_000).toISOString(), values(index)));
 }
 
+/** MetService's answer for one point, with these variables. */
+function metServiceBody(times: string[], variables: Record<string, { units: string; data: Array<number | null>; noData?: number[] }>) {
+  return {
+    dimensions: { point: { type: "point", data: [{ lon: 169.9, lat: -46.1 }] }, time: { type: "time", data: times } },
+    variables: Object.fromEntries(Object.entries(variables).map(([name, block]) => [name, { dimensions: ["time", "point"], noData: times.map(() => 0), ...block }])),
+  };
+}
+
 describe("weather forecast rules", () => {
   it("WX1 the credit to MetService is word for word", () => {
     expect(METSERVICE_ATTRIBUTION).toBe("This data was provided by MetService Limited.");
@@ -47,6 +55,9 @@ describe("weather forecast rules", () => {
     expect(estimateUnits({ choices: ["rain"], farms: 0, refreshHours: 3 }).perDay).toBe(0);
     // Frost risk comes from the temperature: no extra variable.
     expect(variablesFor(["temperature"])).toEqual(["air.temperature.at-2m"]);
+    // Cloud, for the sun and cloud pictures, is one more.
+    expect(variablesFor(["rain", "cloud"])).toEqual(["precipitation.rate", "cloud.cover"]);
+    expect(estimateUnits({ choices: ["rain", "temperature", "wind", "cloud"], farms: 1, refreshHours: 3 })).toMatchObject({ perRefresh: 5, perDay: 40 });
   });
 
   it("WX3 a request is 7 days from the hour, hourly, for the farm's pin", () => {
@@ -110,6 +121,37 @@ describe("weather forecast rules", () => {
     expect(dayPictures({ ...base, minC: "2.1", rainMm: "0.9" })).toEqual([]);
     // Nothing fetched, nothing shown.
     expect(dayPictures({ ...base, rainMm: null, minC: null, maxC: null, maxWindKmh: null })).toEqual([]);
+  });
+
+  it("WX13 cloud, when it's fetched: the day's average through the daytime, and the sun and cloud pictures", () => {
+    // Nothing about cloud unless it was asked for.
+    expect(parseForecast(metServiceBody(["2026-11-05T10:00:00Z"], { "precipitation.rate": { units: "mm/h", data: [0] } }))[0]).not.toHaveProperty("cloudPct");
+    const parsed = parseForecast(metServiceBody(["2026-11-05T10:00:00Z", "2026-11-05T11:00:00Z", "2026-11-05T12:00:00Z"], { "cloud.cover": { units: "%", data: [12.4, 130, 80], noData: [0, 0, 1] } }));
+    expect(parsed.map((each) => each.cloudPct)).toEqual(["12", "100", null]);
+    expect(parseForecast(metServiceBody(["2026-11-05T10:00:00Z"], { "cloud.cover": { units: "1", data: [0.5] } }))[0].cloudPct).toBe("50");
+    expect(onlyChosen(parsed, ["rain"])[0]).not.toHaveProperty("cloudPct");
+    expect(onlyChosen(parsed, ["cloud"])[0]).toMatchObject({ cloudPct: "12", rainMm: null });
+
+    // 6 November in New Zealand: clear by day (7 am to 7 pm), overcast all night. The night doesn't count.
+    const hours = day("2026-11-05T11:00:00Z", (index) => ({ cloudPct: index >= 7 && index < 19 ? "10" : "100" }));
+    const [six] = forecastDays(hours, NZ);
+    expect(six.cloudPct).toBe("10");
+    expect(dayPictures(six)).toEqual([{ kind: "sun", label: "Sunny" }]);
+    // With only night hours left in the day there's no sky to picture.
+    expect(forecastDays(hours.slice(20), NZ)[0].cloudPct).toBeNull();
+    expect(dayPictures(forecastDays(hours.slice(20), NZ)[0])).toEqual([]);
+    // Days without cloud fetched carry nothing about it.
+    expect(forecastDays(day("2026-11-05T11:00:00Z", () => ({})), NZ)[0]).not.toHaveProperty("cloudPct");
+
+    const base = { date: "2026-11-06", hours: 24, rainMm: "0.0", minC: "6.0", maxC: "15.0", maxWindKmh: "25", maxGustKmh: null };
+    expect(dayPictures({ ...base, cloudPct: "25" })).toEqual([{ kind: "sun", label: "Sunny" }]);
+    expect(dayPictures({ ...base, cloudPct: "26" })).toEqual([{ kind: "part", label: "Some cloud" }]);
+    expect(dayPictures({ ...base, cloudPct: "74" })).toEqual([{ kind: "part", label: "Some cloud" }]);
+    expect(dayPictures({ ...base, cloudPct: "75" })).toEqual([{ kind: "cloud", label: "Cloudy" }]);
+    // Rain says enough about the sky; frost and wind still show beside the sun.
+    expect(dayPictures({ ...base, cloudPct: "90", rainMm: "3.0" })).toEqual([{ kind: "rain", label: "Rain" }]);
+    expect(dayPictures({ ...base, cloudPct: "5", minC: "-1.0", maxWindKmh: "44" })).toEqual([{ kind: "sun", label: "Sunny" }, { kind: "frost", label: "Frost" }, { kind: "wind", label: "Windy" }]);
+    expect(dayPictures({ ...base, cloudPct: null })).toEqual([]);
   });
 
   it("WX5 frost at 2 degrees or below, heavy rain at 25 mm in a day or 10 mm in an hour; one of each a day", () => {
