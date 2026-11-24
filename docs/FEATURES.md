@@ -633,8 +633,8 @@ that something happened.
   year's depreciation by type, disposals this year, and ties to the ledger
   account by account. Tax depreciation beside book, pooling and low-value
   write-offs aren't built.
-- **Spreading** (Accounting, Month end; SW1-SW25, following common practice,
-  not yet reviewed by the owner): one worksheet in place of the spreadsheet
+- **Spreading** (Accounting, Month end; SW1-SW25, accepted by the owner
+  24 Nov 2026): one worksheet in place of the spreadsheet
   for costs **paid in advance**, **income in advance**, costs **not billed
   yet** and income **not invoiced yet**. Each kind has one balance sheet
   account, set when an admin turns it on (1200 Prepayments, and Accrued
