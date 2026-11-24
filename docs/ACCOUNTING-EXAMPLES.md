@@ -10745,6 +10745,42 @@ Setup:
   the parent's AUD rate 1.15 that day: 1,250.50 × 1.15 = 1,438.075, rounded
   to **1,438.08**, plus 3,400.00 = **NZD 4,838.08**, labelled with the rate
   and its date. It isn't posted or used in any report.
+- **CO15** Three currencies, and charts that don't match (24 Nov 2026; the
+  owner asked Claude to look for bugs; following common practice, not yet
+  reviewed). A New Zealand parent (NZD) with a US office (USD) and a UK
+  office (GBP). The parent's list has USD 1.65 from 1 Apr 2026 and 1.70 on
+  31 Oct, and GBP 2.10 from 1 Sep and 2.20 on 31 Oct.
+  - **A code that's a different kind of account.** 6900 is Staff training
+    (an expense, 700.00) in New Zealand and Deposits paid (an asset, USD
+    1,500.00) in the US. Each kind is its own line: October's profit and
+    loss has 6900 Staff training **700.00**, and the balance sheet at 31
+    Oct has 6900 Deposits paid **2,550.00** (1,500.00 at 1.70). Both sides
+    of the balance sheet agree, in every column. A notice names the code
+    and says to give them different codes. (Before this, the US asset was
+    left off the balance sheet and it was out by 2,550.00.)
+  - **The same code, the same kind, different names.** 6910 is Advertising
+    in New Zealand (300.00) and Rent in the UK (GBP 1,200.00 at October's
+    2.10 = 2,520.00). They add up on one line, **2,820.00**, under the
+    first name, and a notice says so. Tohyee doesn't map one chart of
+    accounts onto another: organisations in a group need matching codes.
+  - **Rates that aren't there.** The US office's books begin on 1 Jul 2024,
+    before the parent's first USD rate. The balance sheet is refused once
+    for the currency: "…has no USD rate for 1 Jul 2024, or for 1 later date
+    in the US office's books up to 15 Aug 2024. One USD rate dated 1 Jul
+    2024 or earlier covers them all." ECB rates only reach back about 90
+    days, so an older office needs one typed rate. The Rates tab shows no
+    current rate for a month the list doesn't cover, never 1.000000. A rate
+    from a set stops at the end of its period, as everywhere else.
+  - **A loan between currencies.** New Zealand lent NZD 10,000.00; the US
+    office holds USD 6,000.00, which is 10,200.00 at 1.70. Both sides are
+    eliminated and the **200.00** shows as an intercompany difference
+    (CO9), with a note that the books are in different currencies so it
+    can be the rate moving.
+  - **Budget vs actual ends in net profit.** With October's sales 28,500.00
+    against a budget of 21,200.00 (NZ 10,000.00 and USD 7,000.00 at a
+    budget rate of 1.60) and costs 3,520.00 against 500.00, the last row
+    is Net profit: actual **24,980.00**, budget **20,700.00**, variance
+    **4,280.00**. Only income and cost accounts are in it.
 - **FX1** Holdings (NZD) turns on ECB rates. The ECB's rates for 5 Oct 2026
   are, per EUR, NZD 1.9000 and AUD 1.7000, so Holdings' list gets AUD
   **1.117647** on 5 Oct, from "European Central Bank". A rate the owner typed for
@@ -10755,7 +10791,7 @@ Setup:
   in.
 
 Built (core migration 0007, tenant migration 0102).
-Test: `tests/integration/consolidation.test.ts` (CO1-CO12, FX1);
+Test: `tests/integration/consolidation.test.ts` (CO1-CO12, CO15, FX1);
 `tests/integration/group-workspace.test.ts` and
 `tests/unit/group-workspace.test.ts` (CO13, CO14; the tests use the
 same dates and numbers with a made-up Harakeke group). AI

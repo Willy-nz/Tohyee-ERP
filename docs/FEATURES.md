@@ -906,7 +906,11 @@ that something happened.
   and what's owed between members eliminated and any differences shown.
   Elimination adjustments (including unrealised profit in stock, typed by
   the accountant), changed rates, budget exchange rates and a
-  consolidated budget vs actual. Seen only by people in every member.
+  consolidated budget vs actual ending in net profit. Accounts add up by
+  code: a code that's a different kind of account in another member gets
+  its own line, and codes with different names are named in a notice
+  (CO15). There's no mapping of one chart of accounts onto another. Seen
+  only by people in every member.
 - **Group workspace** (CO13-CO14, core migration 0015, tenant migration 0173), the first tab of a consolidation
   group: the members on a date, the consolidated revenue and net profit for
   the year to date (from the existing consolidated profit and loss), each

@@ -311,6 +311,109 @@ describeWithDatabase("consolidation (CO1-CO11, FX1)", () => {
     expect(different.notices).toEqual([`Test ${w.ids.holdings} 1150 10,000.00 and Test ${w.ids.retail} 2150 9,950.00 don't agree (a difference of 50.00). Check them.`]);
   });
 
+  it("CO15: three currencies; a code that's a different kind of account in another member isn't left out; rates and the budget's net profit", async () => {
+    const ids = { nz: "co15-nz", us: "co15-us", uk: "co15-uk" };
+    await createTestOrganisation(jade, ids.nz);
+    await createTestOrganisation(jade, ids.us, { baseCurrency: "USD" });
+    await createTestOrganisation(jade, ids.uk, { baseCurrency: "GBP" });
+    const user = { id: jade.id, email: jade.email };
+    const as = <T>(org: string, work: (tx: OrgTx) => Promise<T>) => inOrganisation(org, { userId: jade.id, email: jade.email }, work);
+    const journal = (org: string, postingDate: string, lines: Array<{ accountCode: string; debitAmount?: string; creditAmount?: string }>) =>
+      as(org, (tx) => postJournal(tx, { idempotencyKey: key("j"), postingDate, reference: "Setup", lines }));
+    const account = (org: string, code: string, name: string, accountType: string) => as(org, (tx) => createAccount(tx, { code, name, accountType }));
+    await account(ids.nz, "1150", "Loan to US office", "non_current_asset");
+    await account(ids.us, "2150", "Loan from NZ", "non_current_liability");
+    // 6900 is an expense in NZ and an asset in the US; 6910 is an expense in both, under different names.
+    await account(ids.nz, "6900", "Staff training", "expense");
+    await account(ids.us, "6900", "Deposits paid", "current_asset");
+    await account(ids.nz, "6910", "Advertising", "expense");
+    await account(ids.uk, "6910", "Rent", "expense");
+    await journal(ids.nz, "2026-04-01", [{ accountCode: "1000", debitAmount: "50000.00" }, { accountCode: "3000", creditAmount: "50000.00" }]);
+    await journal(ids.nz, "2026-05-01", [{ accountCode: "1150", debitAmount: "10000.00" }, { accountCode: "1000", creditAmount: "10000.00" }]);
+    await journal(ids.nz, "2026-10-10", [{ accountCode: "6900", debitAmount: "700.00" }, { accountCode: "6910", debitAmount: "300.00" }, { accountCode: "1000", creditAmount: "1000.00" }]);
+    await journal(ids.nz, "2026-10-12", [{ accountCode: "1000", debitAmount: "9000.00" }, { accountCode: "4000", creditAmount: "9000.00" }]);
+    // The US office began in 2024, before the parent's list has any USD rate.
+    await journal(ids.us, "2024-07-01", [{ accountCode: "1000", debitAmount: "20000.00" }, { accountCode: "3000", creditAmount: "20000.00" }]);
+    await journal(ids.us, "2024-08-15", [{ accountCode: "6200", debitAmount: "4000.00" }, { accountCode: "1000", creditAmount: "4000.00" }]);
+    await journal(ids.us, "2026-05-01", [{ accountCode: "1000", debitAmount: "6000.00" }, { accountCode: "2150", creditAmount: "6000.00" }]);
+    await journal(ids.us, "2026-10-05", [{ accountCode: "6900", debitAmount: "1500.00" }, { accountCode: "1000", creditAmount: "1500.00" }]);
+    await journal(ids.us, "2026-10-20", [{ accountCode: "1000", debitAmount: "8000.00" }, { accountCode: "4000", creditAmount: "8000.00" }]);
+    await journal(ids.uk, "2026-09-01", [{ accountCode: "1000", debitAmount: "5000.00" }, { accountCode: "3000", creditAmount: "5000.00" }]);
+    await journal(ids.uk, "2026-10-08", [{ accountCode: "6910", debitAmount: "1200.00" }, { accountCode: "1000", creditAmount: "1200.00" }]);
+    await journal(ids.uk, "2026-10-25", [{ accountCode: "1000", debitAmount: "3000.00" }, { accountCode: "4000", creditAmount: "3000.00" }]);
+    const rates = (list: Array<{ currencyCode: string; effectiveDate: string; rate: string }>) => as(ids.nz, (tx) => addExchangeRates(tx, { idempotencyKey: key("rates"), rates: list }));
+    await rates([
+      { currencyCode: "USD", effectiveDate: "2026-04-01", rate: "1.65" },
+      { currencyCode: "USD", effectiveDate: "2026-10-31", rate: "1.70" },
+      { currencyCode: "GBP", effectiveDate: "2026-10-01", rate: "2.10" },
+      { currencyCode: "GBP", effectiveDate: "2026-10-31", rate: "2.20" },
+    ]);
+    const made = await createGroup(user, { name: "Three offices", parentOrganisationId: ids.nz, organisationIds: [ids.us, ids.uk] });
+    const idOf = (org: string, code: string) => as(org, (tx) => tx.query<{ id: string }>("select id::text from accounts where code = $1", [code]).then((result) => result.rows[0].id));
+    await as(ids.nz, async (tx) => setIntercompany(tx, { accounts: [{ accountId: await idOf(ids.nz, "1150"), counterpartOrganisationId: ids.us }], contacts: [] }));
+    await as(ids.us, async (tx) => setIntercompany(tx, { accounts: [{ accountId: await idOf(ids.us, "2150"), counterpartOrganisationId: ids.nz }], contacts: [] }));
+
+    // What's missing is said once a currency, with the one date that fixes it.
+    await expect(consolidatedBalanceSheet(user, made.id, { asAt: "2026-10-31" })).rejects.toThrow(
+      "Test co15-nz's exchange rates list has no GBP rate for 1 Sep 2026. Test co15-nz's exchange rates list has no USD rate for 1 Jul 2024, or for 1 later date in Test co15-us's books up to 15 Aug 2024. One USD rate dated 1 Jul 2024 or earlier covers them all.",
+    );
+    // The Rates tab shows no rate where there is none, not 1.
+    const before = await consolidationRates(user, made.id, { from: "2026-09-01", to: "2026-10-31" });
+    expect(before.filter((row) => row.currencyCode === "GBP").map((row) => [row.month, row.current])).toEqual([
+      ["2026-09-01", null],
+      ["2026-10-01", "2.200000"],
+    ]);
+    await rates([
+      { currencyCode: "USD", effectiveDate: "2024-07-01", rate: "1.60" },
+      { currencyCode: "GBP", effectiveDate: "2026-09-01", rate: "2.10" },
+    ]);
+
+    const order = [ids.nz, ids.uk, ids.us];
+    const table = (report: ConsolidatedReport) => report.sections.flatMap((section) => section.lines.map((line) => [section.key, line.code || line.name, line.name, ...order.map((id) => line.amounts[id]), line.eliminations, line.consolidated]));
+    const pnl = await consolidatedProfitAndLoss(user, made.id, { from: "2026-10-01", to: "2026-10-31" });
+    expect(table(pnl)).toEqual([
+      ["revenue", "4000", "Sales", "9000.00", "6300.00", "13200.00", "0.00", "28500.00"],
+      ["expenses", "6900", "Staff training", "700.00", "0.00", "0.00", "0.00", "700.00"],
+      ["expenses", "6910", "Advertising", "300.00", "2520.00", "0.00", "0.00", "2820.00"],
+    ]);
+    expect(pnl.totals.at(-1)).toMatchObject({ name: "Net profit", consolidated: "24980.00" });
+    expect(pnl.notices).toEqual([
+      "The same code is a different kind of account in different organisations, so each is on its own line: 6900 is Staff training (an expense) in Test co15-nz and Deposits paid (an asset) in Test co15-us. Give them different codes to tidy this up.",
+      "Accounts add up by code. These codes have different names in different organisations and are added together under the first name: 6910 (Advertising in Test co15-nz, Rent in Test co15-uk). If they aren't the same thing, give one a different code.",
+    ]);
+
+    const sheet = await consolidatedBalanceSheet(user, made.id, { asAt: "2026-10-31" });
+    // The US office's 6900 is an asset: it's on the balance sheet (USD 1,500.00 at 1.70), and both sides agree.
+    expect(table(sheet).find((row) => row[1] === "6900")).toEqual(["assets", "6900", "Deposits paid", "0.00", "0.00", "2550.00", "0.00", "2550.00"]);
+    expect(sheet.totals.map((line) => [line.name, line.consolidated])).toEqual([
+      ["Total assets", "113960.00"],
+      ["Total liabilities and equity", "113960.00"],
+    ]);
+    for (const id of order) expect(sheet.totals[0].amounts[id]).toBe(sheet.totals[1].amounts[id]);
+    // The loan: NZD 10,000.00 against USD 6,000.00 at 1.70. The notice says the currencies differ.
+    expect(sheet.notices[0]).toBe(
+      "Test co15-nz 1150 10,000.00 and Test co15-us 2150 10,200.00 don't agree (a difference of 200.00). Check them. Their books are in different currencies (NZD and USD), so some or all of this can be the exchange rate moving since the amounts were recorded.",
+    );
+
+    // Budget vs actual ends in net profit: income less costs, not everything added up.
+    const budget = (org: string, accountCode: string, amount: string) =>
+      as(org, async (tx) => {
+        const overall = (await listBudgets(tx))[0];
+        await setBudgetAmounts(tx, overall.id, { version: (await getBudget(tx, overall.id)).budget.version, amounts: [{ accountCode, month: "2026-10", amount }] });
+      });
+    await budget(ids.nz, "4000", "10000.00");
+    await budget(ids.nz, "6910", "500.00");
+    await budget(ids.us, "4000", "7000.00");
+    await setBudgetRate(user, made.id, { currencyCode: "USD", month: "2026-10", rate: "1.6" });
+    const versus = await consolidatedBudgetVsActual(user, made.id, { from: "2026-10-01", to: "2026-10-31" });
+    expect(versus.lines.map((line) => [line.code, line.actual, line.budget])).toEqual([
+      ["4000", "28500.00", "21200.00"],
+      ["6900", "700.00", "0.00"],
+      ["6910", "2820.00", "500.00"],
+    ]);
+    expect(versus.total).toEqual({ actual: "24980.00", budget: "20700.00", variance: "4280.00" });
+  });
+
   it("CO11: consolidated budget vs actual at the budget rates", async () => {
     const w = await setup();
     const made = await group(w);
