@@ -1,17 +1,20 @@
 import type { SearchDefinition } from "@/lib/saved-searches/query";
 
 /**
- * "Save this view" on the Invoices and Bills lists: the tab and the sort the
- * person is looking at, as the start of a saved search. Browser safe.
+ * "Save this view" on the Invoices and Bills lists: the tab, the search text
+ * and the sort the person is looking at, as the start of a saved search.
+ * Browser safe.
  */
 
 const SORT_FIELDS: Record<string, string> = { number: "number", contact: "contact", date: "date", due: "due", total: "total" };
 
 export function savedSearchFromList(
   recordType: "invoice" | "bill",
-  view: { status: string | null; awaitingPayment: boolean; sort: { column: string; direction: "asc" | "desc" } | null },
+  view: { status: string | null; awaitingPayment: boolean; sort: { column: string; direction: "asc" | "desc" } | null; search?: string },
 ): string {
   const filters: SearchDefinition["filters"] = [];
+  // What's typed in the list's search box: the same fields it looks in.
+  if (view.search?.trim()) filters.push({ field: "anyText", op: "contains", value: view.search.trim().slice(0, 200) });
   if (view.awaitingPayment) filters.push({ field: "status", op: "is", value: "approved" }, { field: "owing", op: "gt", value: "0" });
   else if (view.status) filters.push({ field: "status", op: "is", value: view.status });
   const sortField = view.sort ? SORT_FIELDS[view.sort.column] : undefined;

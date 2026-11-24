@@ -100,3 +100,13 @@
   font-size: 1.6rem;
   line-height: 1.1;
 }
+
+.formula {
+  display: grid;
+  gap: 0.25rem;
+}
+
+.filter input.sum {
+  flex: 1 1 14rem;
+  max-width: 28rem;
+}

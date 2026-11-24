@@ -302,4 +302,56 @@ describeWithDatabase("saved searches", () => {
     expect(await sendOrganisationSearchEmails(record, "2026-12-07")).toBe(0);
     expect((await as((tx) => tx.query<{ n: string }>("select count(*)::text as n from saved_search_emails"))).rows[0].n).toBe("0");
   });
+
+  it("uses the customer's own fields on an invoice, fields holding several choices, and calculated columns", async () => {
+    const made = await as((tx) => createCustomField(tx, { record: "contact", label: "Markets", type: "multi_select", usedOn: ["customer"], options: ["Otago", "Southland", "Canterbury"] }));
+    const markets = made.fields.find((field) => field.label === "Markets")!;
+    const option = (name: string) => markets.options.find((each) => each.name === name)!.id;
+    const customer = (await as((tx) => createContact(tx, { idempotencyKey: key("contact"), name: "Two Markets Ltd", email: "two@example.nz", isCustomer: true, customFields: { [markets.id]: [option("Southland"), option("Otago")] } }))).contact;
+    const invoice = (await as((tx) => createInvoice(tx, { idempotencyKey: key("invoice"), contactId: customer.id, invoiceDate: "2026-11-23", dueDate: "2026-12-20", amountsMode: "exclusive", lines: [{ description: "Wool", quantity: "1", unitPrice: "400.00", accountCode: "4000", taxCode: "GST" }] }))).invoice;
+    await as((tx) => approveInvoice(tx, invoice.id, { idempotencyKey: key("approve") }));
+
+    const types = await as((tx) => loadRecordTypes(tx));
+    const invoices = types.find((type) => type.key === "invoice")!;
+    expect(invoices.fields.find((field) => field.key === `cc_${markets.id}`)).toMatchObject({ label: "Customer: Markets", type: "choice" });
+    expect(types.find((type) => type.key === "contact")!.fields.find((field) => field.key === `cf_${markets.id}`)).toMatchObject({ label: "Markets", type: "choice" });
+    expect(types.find((type) => type.key === "bill")!.fields.some((field) => field.key === `cc_${markets.id}`)).toBe(false);
+
+    // "Is" asks whether the choice is among them; the column lists them all, in the field's own order.
+    const south = await run("invoice", { filters: [{ field: `cc_${markets.id}`, op: "is", value: option("Southland") }], columns: ["contact", "contactEmail", `cc_${markets.id}`] });
+    expect(south.rows.map((row) => row.cells)).toEqual([["Two Markets Ltd", "two@example.nz", "Otago, Southland"]]);
+    expect((await run("invoice", { filters: [{ field: `cc_${markets.id}`, op: "is", value: option("Canterbury") }] })).matches).toBe(0);
+    expect((await run("contact", { filters: [{ field: `cf_${markets.id}`, op: "is", value: option("Otago") }] })).rows.map((row) => row.cells[0])).toEqual(["Two Markets Ltd"]);
+    const others = (await run("invoice", {})).matches - 1;
+    expect((await run("invoice", { filters: [{ field: `cc_${markets.id}`, op: "is_not", value: option("Otago") }] })).matches).toBe(others);
+
+    // What the list's search box looks in, in one field.
+    expect((await run("invoice", { filters: [{ field: "anyText", op: "contains", value: "two markets" }] })).matches).toBe(1);
+    expect((await run("journal_line", { filters: [{ field: "accountClass", op: "is", value: "revenue" }, { field: "description", op: "contains", value: "Two Markets" }], columns: ["credit"] })).rows.map((row) => row.cells)).toEqual([["400.00"]]);
+
+    // Calculated columns: shown, totalled like any number isn't, filtered and sorted.
+    const sums = await run("invoice", {
+      formulas: [
+        { key: "f1", label: "GST part", expression: "{total} - {total} / 1.15" },
+        { key: "f2", label: "Share owing", expression: "{owing} / ({total} - {total}) " },
+      ],
+      filters: [{ field: "f1", op: "gt", value: "50" }],
+      columns: ["reference", "total", "f1", "f2"],
+      sort: { field: "f1", direction: "asc" },
+    });
+    // Dividing by nothing leaves the cell empty.
+    expect(sums.rows.map((row) => row.cells)).toEqual([
+      [null, "460.00", "60.00", null],
+      ["Quote stage", "575.00", "75.00", null],
+      ["Grazing", "1150.00", "150.00", null],
+    ]);
+    expect(sums.columns[2]).toMatchObject({ key: "f1", label: "GST part", type: "number" });
+    await expect(run("invoice", { formulas: [{ key: "f1", label: "Bad", expression: "{total}); delete from invoices; --" }] })).rejects.toThrow(/isn't something a sum can use/);
+
+    // A saved search keeps its calculated columns.
+    const response = await searchesRoute.POST(apiRequest("/api/saved-searches", { method: "POST", cookie: await sessionCookieFor(owner), body: { organisationId: org, recordType: "invoice", name: "GST parts", definition: { formulas: [{ key: "f1", label: "GST part", expression: "{total} - {total} / 1.15" }], columns: ["number", "f1"] } } }), noContext);
+    const saved = ((await response.json()) as { search: SavedSearch }).search;
+    expect(saved.definition.formulas).toEqual([{ key: "f1", label: "GST part", expression: "{total} - {total} / 1.15" }]);
+    expect(saved.definition.columns).toEqual(["number", "f1"]);
+  });
 });

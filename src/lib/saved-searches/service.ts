@@ -7,7 +7,7 @@ import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { dec, toFixedString } from "@/lib/money/decimal";
 import { type FieldType, fieldOf, type RecordType, recordType } from "@/lib/saved-searches/catalogue";
 import { loadRecordTypes } from "@/lib/saved-searches/org-catalogue";
-import { buildSearch, parseDefinition, type SearchDefinition } from "@/lib/saved-searches/query";
+import { buildSearch, parseDefinition, type SearchDefinition, searchType } from "@/lib/saved-searches/query";
 import { asRecord, optionalId, requireId, requireOneOf, requireString } from "@/lib/validation";
 
 /**
@@ -223,7 +223,7 @@ export async function runSearch(tx: OrgTx, input: { recordType: unknown; definit
   const limitRaw = Number(input.limit ?? PAGE);
   const limit = Number.isInteger(limitRaw) && limitRaw > 0 && limitRaw <= 5000 ? limitRaw : PAGE;
   const built = buildSearch(type, definition, { today: input.today ?? todayIsoDate(), limit, offset });
-  const fields = definition.columns.map((key) => fieldOf(type, key)!);
+  const fields = definition.columns.map((key) => fieldOf(searchType(type, definition), key)!);
   const page = await tx.query<Record<string, string | null>>(built.rowsSql, built.params);
   const summary = (await tx.query<Record<string, string | number>>(built.summarySql, built.params)).rows[0];
   const rows = page.rows.slice(0, limit);

@@ -16,6 +16,13 @@ describe("Save this view", () => {
     expect(read(savedSearchFromList("bill", { status: null, awaitingPayment: false, sort: { column: "salesperson", direction: "desc" } }))).toEqual({ filters: [], sort: null });
   });
 
+  it("carries what's typed in the list's search box", () => {
+    const start = read(savedSearchFromList("invoice", { status: "draft", awaitingPayment: false, sort: null, search: "  hill " }))!;
+    expect(start.filters).toEqual([{ field: "anyText", op: "contains", value: "hill" }, { field: "status", op: "is", value: "draft" }]);
+    expect(parseDefinition(recordType("invoice")!, start).filters).toHaveLength(2);
+    expect(parseDefinition(recordType("bill")!, read(savedSearchFromList("bill", { status: null, awaitingPayment: false, sort: null, search: "fuel" }))!).filters).toHaveLength(1);
+  });
+
   it("reads a tampered address as nothing, or as plain text for the server to check", () => {
     expect(startFromAddress("not json")).toBeNull();
     expect(startFromAddress(null)).toBeNull();

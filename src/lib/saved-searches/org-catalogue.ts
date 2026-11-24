@@ -23,6 +23,13 @@ const CUSTOM: Record<string, Array<{ column: string; record: CustomFieldRecord; 
   ],
 };
 
+/** The contact a record is for, whose own custom fields can be used on it: "Customer: Region" on an invoice. */
+const CONTACT_OF: Record<string, { said: string; uses: CustomFieldUse[] }> = {
+  invoice: { said: "Customer", uses: ["customer"] },
+  bill: { said: "Supplier", uses: ["supplier"] },
+  bank_transaction: { said: "Who", uses: ["customer", "supplier"] },
+};
+
 /** Where tracking sits: on the row itself (a ledger line), or on the record's lines. */
 const TRACKING: Record<string, { own: string } | { lines: string; link: string }> = {
   journal_line: { own: "l.tracking" },
@@ -33,10 +40,10 @@ const TRACKING: Record<string, { own: string } | { lines: string; link: string }
 
 const DIGITS = /^\d{1,18}$/;
 
-function customField(column: string, field: CustomField): SearchField | null {
+function customField(column: string, field: CustomField, prefix = "cf", said = ""): SearchField | null {
   if (!DIGITS.test(field.id)) return null;
   const value = `(${column}->>'${field.id}')`;
-  const base = { key: `cf_${field.id}`, label: field.label };
+  const base = { key: `${prefix}_${field.id}`, label: said ? `${said}: ${field.label}` : field.label };
   switch (field.type) {
     case "text":
     case "long_text":
@@ -56,8 +63,16 @@ function customField(column: string, field: CustomField): SearchField | null {
       return { ...base, type: "choice", sql: `coalesce(${value}, 'false')`, choices: [{ value: "true", label: "Yes" }, { value: "false", label: "No" }] };
     case "list":
       return { ...base, type: "choice", sql: value, choices: field.options.filter((option) => DIGITS.test(option.id)).map((option) => ({ value: option.id, label: option.name })) };
+    case "multi_select":
+      // Several choices at once: "is" asks whether the one chosen is among them, and the column lists them all.
+      return {
+        ...base,
+        type: "choice",
+        sql: `(select string_agg(o.name, ', ' order by o.sort_order, o.name) from jsonb_array_elements_text(case when jsonb_typeof(${column}->'${field.id}') = 'array' then ${column}->'${field.id}' else '[]'::jsonb end) v join custom_field_options o on o.id::text = v)`,
+        matchSql: `(case when jsonb_typeof(${column}->'${field.id}') = 'array' then ${column}->'${field.id}' else '[]'::jsonb end) @> to_jsonb($value)`,
+        choices: field.options.filter((option) => DIGITS.test(option.id)).map((option) => ({ value: option.id, label: option.name })),
+      };
     default:
-      // A field that holds several choices at once isn't one value to compare; it waits for a later stage.
       return null;
   }
 }
@@ -78,6 +93,10 @@ export async function loadRecordTypes(tx: OrgTx): Promise<RecordType[]> {
     };
     for (const place of CUSTOM[type.key] ?? []) {
       for (const field of fieldsFor(custom.fields, place.record, place.uses, {}, custom)) add(customField(place.column, field));
+    }
+    const contact = CONTACT_OF[type.key];
+    if (contact) {
+      for (const field of fieldsFor(custom.fields, "contact", contact.uses, {}, custom)) add(customField("c.custom_fields", field, "cc", contact.said));
     }
     const where = TRACKING[type.key];
     if (where && tracking.advancedFeatures) {
