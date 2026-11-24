@@ -49,8 +49,8 @@ before connecting an assistant.
 > organisation and review accounting outputs. Tohyee is provided as is, without
 > warranty; see the [licence](LICENSE).
 
-Latest release: [v0.42.0](https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.42.0)
-([notes](docs/releases/0.42.0.md)). Get the installer and what each download
+Latest release: [v0.43.0](https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.43.0)
+([notes](docs/releases/0.43.0.md)). Get the installer and what each download
 includes from the [latest release](https://github.com/Willy-nz/Tohyee-ERP/releases/latest).
 The [feature register](docs/FEATURES.md) records implemented features and limits;
 [release notes](docs/releases) describe packaged versions.
@@ -130,7 +130,8 @@ real phone or in a paddock yet.
 
 | Release | What's new |
 | --- | --- |
-| [**0.42.0**](docs/releases/0.42.0.md) | Spreading: one worksheet for prepayments, income in advance and accruals, with Spread this on bills, invoices and bank lines; sorting and counts on Invoices and Bills; CRM bars over time. |
+| [**0.43.0**](docs/releases/0.43.0.md) | Saved searches: filtered lists kept under a name, on Home or emailed to you, with calculated columns; tracking and custom fields on Spreading; Shopify orders' regions; an Analytics fix. |
+| [0.42.0](docs/releases/0.42.0.md) | Spreading: one worksheet for prepayments, income in advance and accruals, with Spread this on bills, invoices and bank lines; sorting and counts on Invoices and Bills; CRM bars over time. |
 | [0.41.0](docs/releases/0.41.0.md) | A fix for Analytics locking itself on Windows; farm pictures; three figures on a farm's Today; search on Invoices and Bills; plainer farm, bank and CRM screens. |
 | [0.40.0](docs/releases/0.40.0.md) | Income tax for trusts with the IR6 and IR6Bs; business structure; a medicine cabinet for each farm; the fuel excise refund on off-road petrol; a new website. |
 | [0.39.0](docs/releases/0.39.0.md) | Farm chat with photos and links to paddocks, mobs and tasks; voice notes; a Chat app for the whole organisation; AI can read and post in chat. |

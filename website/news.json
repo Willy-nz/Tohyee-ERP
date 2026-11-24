@@ -2,28 +2,34 @@
   "about": "Announcements shown on the Home page of the Tohyee server app (Windows), next to the GitHub releases. Edit this file on main and GitHub Pages publishes it to https://willy-nz.github.io/Tohyee-ERP/news.json. Each item: date (YYYY-MM-DD), title, body, and optionally link (https) and kind (\"conference\" shows it in the conference card).",
   "items": [
     {
+      "date": "2026-11-24",
+      "title": "Tohyee 0.43.0: Saved searches",
+      "body": "Filter invoices, bills, ledger lines, bank transactions, contacts or items, choose the columns, and keep the list under a name. Put it on Home or have it emailed to you. Also tracking and custom fields on Spreading, and an Analytics fix.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.43.0"
+    },
+    {
       "date": "2026-11-23",
       "title": "Tohyee 0.42.0: Spreading",
       "body": "One worksheet in place of the spreadsheet for prepayments, income in advance and accruals. Add something once, check each month, press Post. Spread this on a bill, invoice or bank line. Also sorting on Invoices and Bills.",
-      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.42.0"
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.43.0"
     },
     {
       "date": "2026-11-23",
       "title": "Tohyee 0.41.0: Farm pictures and plainer screens",
       "body": "Pictures on the farm Log, tabs and menu, and three figures at the top of a farm's Today. Search invoices and bills. Fixes Analytics refreshes failing on Windows with a locked message.",
-      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.42.0"
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.43.0"
     },
     {
       "date": "2026-11-22",
       "title": "Tohyee 0.40.0: Trusts, a medicine cabinet and the fuel refund",
       "body": "Income tax for trusts, with the IR6 and a statement for each beneficiary. Each farm gets a medicine cabinet showing what's on hand, running low and expiring. Work out the excise refund on off-road petrol for NZTA in three simple steps.",
-      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.42.0"
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.43.0"
     },
     {
       "date": "2026-11-19",
       "title": "Tohyee 0.39.0: Chat, with photos and voice notes",
       "body": "Each farm has its own chat, with photos and messages about paddocks, mobs and tasks. Record voice notes on your phone. Any organisation can turn on a Chat app for the whole team, kept on your own server. Your AI can read the chat and post when you ask.",
-      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.42.0"
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.43.0"
     },
     {
       "date": "2026-11-18",
