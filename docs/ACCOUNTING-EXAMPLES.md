@@ -10820,6 +10820,10 @@ Setup:
     Anyone who can see the group can read it; an admin or owner of every
     organisation changes it, as for the group's rates. Each save is in the
     audit history.
+  - **Through an AI key.** `get_consolidation_chart_mapping` reads it
+    (the accounts to look at, unless asked for all), and a Full access key
+    whose owner is an admin of every organisation sets it with
+    `set_consolidation_chart_mapping`, under the same rules.
 - **FX1** Holdings (NZD) turns on ECB rates. The ECB's rates for 5 Oct 2026
   are, per EUR, NZD 1.9000 and AUD 1.7000, so Holdings' list gets AUD
   **1.117647** on 5 Oct, from "European Central Bank". A rate the owner typed for

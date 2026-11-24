@@ -4,7 +4,9 @@ import * as mcpRoute from "@/app/api/mcp/route";
 import { FULL_READ_TOOLS, FULL_WRITE_TOOLS } from "@/lib/ai/full-tools";
 import { TRACKING_TOOLS } from "@/lib/ai/tool-modules";
 import { createApprovalRule } from "@/lib/approvals/rules";
+import { createAccount } from "@/lib/accounts/service";
 import type { SessionUser } from "@/lib/auth/sessions";
+import { createGroup } from "@/lib/consolidation/groups";
 import { type Contact, createContact } from "@/lib/contacts/service";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { createFixedAssetType } from "@/lib/fixed-assets/service";
@@ -236,5 +238,29 @@ describeWithDatabase("Full access AI keys outside banking (AIF1-AIF6)", () => {
     const grid = (await call(tokens.full, "get_budget", { budgetId: budget.id, from: "2026-04", months: 12 })) as { budget: { version: number } };
     const set = await call(tokens.full, "set_budget_amounts", { budgetId: budget.id, version: grid.budget.version, amounts: [{ accountCode: "4000", month: "2026-04", amount: "1000.00" }] });
     expect(set).toMatchObject({ changed: 1 });
+  });
+
+  it("CO16 through an AI key: reads a group's chart mapping and sets it", async () => {
+    await createTestOrganisation(owner, "ai-full-us", { baseCurrency: "USD" });
+    const marketing = (await inOrganisation("ai-full-us", { userId: owner.id, email: owner.email }, (tx) => createAccount(tx, { code: "6500", name: "Marketing", accountType: "expense" }))).id;
+    const group = await createGroup({ id: owner.id, email: owner.email }, { name: "AI mapping group", parentOrganisationId: ORG, organisationIds: ["ai-full-us"] });
+    type Mapped = { id: string; code: string; mappedTo: string | null; accountClass: string };
+    const seen = (await call(tokens.full, "get_consolidation_chart_mapping", { groupId: group.id, organisationId: "ai-full-us" })) as { accounts: Mapped[]; parentAccounts: Mapped[]; toLookAtCount: number };
+    // Only what needs a look by default: the one account the parent has no code for.
+    expect(seen.accounts.map((account) => account.code)).toEqual(["6500"]);
+    expect(seen.toLookAtCount).toBe(1);
+    const target = seen.parentAccounts.find((account) => account.accountClass === "expense")!;
+    const asset = seen.parentAccounts.find((account) => account.accountClass === "asset")!;
+    await expect(call(tokens.full, "set_consolidation_chart_mapping", { groupId: group.id, organisationId: "ai-full-us", maps: [{ accountId: marketing, parentAccountId: asset.id }] })).rejects.toThrow(
+      "An account can only go to one of the same kind.",
+    );
+    // A Make and post key can't change a group's settings.
+    await expect(call(tokens.post, "set_consolidation_chart_mapping", { groupId: group.id, organisationId: "ai-full-us", maps: [{ accountId: marketing, parentAccountId: target.id }] })).rejects.toThrow(/Full access/);
+    const set = (await call(tokens.full, "set_consolidation_chart_mapping", { groupId: group.id, organisationId: "ai-full-us", maps: [{ accountId: marketing, parentAccountId: target.id }] })) as { changed: Mapped[]; toLookAtCount: number };
+    expect(set.changed).toMatchObject([{ code: "6500", mappedTo: target.id }]);
+    expect(set.toLookAtCount).toBe(0);
+    const all = (await call(tokens.full, "get_consolidation_chart_mapping", { groupId: group.id, organisationId: "ai-full-us", show: "all" })) as { accounts: Mapped[]; accountCount: number };
+    expect(all.accounts.length).toBe(all.accountCount);
+    expect(all.accounts.find((account) => account.code === "6500")?.mappedTo).toBe(target.id);
   });
 });
