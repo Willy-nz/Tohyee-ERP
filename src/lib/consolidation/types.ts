@@ -47,6 +47,8 @@ export type ConsolidationAdjustment = {
 export type ConsolidatedLine = {
   code: string;
   name: string;
+  /** Set when the code alone doesn't name the line: the same code is a different kind of account in another member. */
+  key?: string;
   /** Per organisation, in the group's currency. */
   amounts: Record<string, string>;
   /** Per foreign-currency organisation, in its own currency (null for translated-only lines). */
@@ -79,6 +81,7 @@ export type ConsolidatedBudgetVsActual = {
   from: string;
   to: string;
   lines: BudgetVsActualLine[];
+  /** Net profit: income less costs. */
   total: { actual: string; budget: string; variance: string };
 };
 

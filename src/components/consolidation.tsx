@@ -42,17 +42,23 @@ const TABS = [
 ] as const;
 type Tab = (typeof TABS)[number][0];
 
+/** A nil amount, shown as an empty cell (and left out altogether when the table stacks on a phone). */
+function isBlank(value: string | undefined): boolean {
+  return value === undefined || Number(value) === 0;
+}
+
 function monthStart(date: string): string {
   return `${date.slice(0, 7)}-01`;
 }
 
 /** Reports › Consolidation: the groups you can see, and making one. */
 export function ConsolidationGroups() {
-  const { organisations } = useWorkspace();
+  const { organisations, current: here } = useWorkspace();
   const loaded = useApiData<{ groups: ConsolidationGroup[] }>("/api/consolidation/groups");
   const adminOf = organisations.filter((organisation) => organisation.role === "admin" || organisation.role === "owner");
   const [name, setName] = useState("");
-  const [parent, setParent] = useState(adminOf[0]?.id ?? "");
+  // The organisation you're in is the likeliest parent.
+  const [parent, setParent] = useState(adminOf.find((organisation) => organisation.id === here?.id)?.id ?? adminOf[0]?.id ?? "");
   const [others, setOthers] = useState<string[]>([]);
   const [error, setError] = useState<string | null>(null);
   const [busy, setBusy] = useState(false);
@@ -120,7 +126,10 @@ export function ConsolidationGroups() {
                 </select>
               </Field>
             </div>
-            <div className={ui.choiceList} aria-label="Organisations in the group">
+            <p>
+              <strong>The other organisations in the group</strong>
+            </p>
+            <div className={ui.choiceList} aria-label="The other organisations in the group">
               {adminOf
                 .filter((organisation) => organisation.id !== parent)
                 .map((organisation) => (
@@ -153,7 +162,7 @@ function ReportTable({ report, id, showOwn }: { report: ConsolidatedReport; id: 
     <>
       {members.map((member) => (
         <td key={member.organisationId} data-label={member.name} className={ui.num}>
-          <Money value={line.amounts[member.organisationId]} blankZero />
+          {isBlank(line.amounts[member.organisationId]) ? null : <Money value={line.amounts[member.organisationId]} />}
           {showOwn && line.ownAmounts && line.ownAmounts[member.organisationId] !== undefined ? (
             <div className={ui.muted}>
               {member.currencyCode} {formatMoney(line.ownAmounts[member.organisationId])}
@@ -162,7 +171,7 @@ function ReportTable({ report, id, showOwn }: { report: ConsolidatedReport; id: 
         </td>
       ))}
       <td data-label="Eliminations" className={ui.num}>
-        <Money value={line.eliminations} blankZero />
+        {isBlank(line.eliminations) ? null : <Money value={line.eliminations} />}
       </td>
       <td data-label="Consolidated" className={ui.num}>
         <Money value={line.consolidated} />
@@ -216,7 +225,7 @@ function SectionRows({
         <td colSpan={colSpan}>{section.label}</td>
       </tr>
       {section.lines.map((line) => (
-        <tr key={`${section.key}-${line.code}-${line.name}`}>
+        <tr key={`${section.key}-${line.key ?? line.code}-${line.name}`}>
           <td data-label="Account">{line.code ? `${line.code} ${line.name}` : line.name}</td>
           {cells(line)}
         </tr>
@@ -283,6 +292,7 @@ function Reports({ group, kind, canEdit }: { group: ConsolidationGroup; kind: "p
             ))}
             <ReportExport
               organisationId={group.parentOrganisationId}
+              organisationName={group.members.find((member) => member.organisationId === group.parentOrganisationId)?.name ?? group.name}
               report={kind === "balance_sheet" ? "consolidated-balance-sheet" : "consolidated-profit-and-loss"}
               title={`${title}: ${group.name}`}
               period={period}
@@ -341,7 +351,7 @@ function BudgetVsActual({ group }: { group: ConsolidationGroup }) {
             </thead>
             <tbody>
               {report.lines.map((line) => (
-                <tr key={line.code}>
+                <tr key={`${line.code}-${line.name}`}>
                   <td data-label="Account">
                     {line.code} {line.name}
                   </td>
@@ -356,6 +366,18 @@ function BudgetVsActual({ group }: { group: ConsolidationGroup }) {
                   </td>
                 </tr>
               ))}
+              <tr className={ui.reportTotal}>
+                <td data-label="Account">Net profit</td>
+                <td data-label="Actual" className={ui.num}>
+                  <Money value={report.total.actual} />
+                </td>
+                <td data-label="Budget" className={ui.num}>
+                  <Money value={report.total.budget} />
+                </td>
+                <td data-label="Variance" className={ui.num}>
+                  <Money value={report.total.variance} />
+                </td>
+              </tr>
             </tbody>
           </table>
         </div>

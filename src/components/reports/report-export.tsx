@@ -64,6 +64,8 @@ function tableData(target: ReportExportTableTarget): ReportExportTable | null {
 
 export type ReportExportProps = {
   organisationId: string;
+  /** The name to head the report with when it isn't the organisation you're in (a group's parent, seen from another member). */
+  organisationName?: string;
   report: ReportExportName;
   title: string;
   period: string;
@@ -86,7 +88,7 @@ const FORMAT_LABELS = { pdf: "PDF", csv: "CSV", xlsx: "Excel (.xlsx)" } as const
  */
 function useReportDownload(props: ReportExportProps) {
   const { current } = useWorkspace();
-  const organisationName = current?.id === props.organisationId ? current.displayName : "Organisation";
+  const organisationName = current?.id === props.organisationId ? current.displayName : (props.organisationName ?? "Organisation");
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [producedAt, setProducedAt] = useState(() => new Date().toISOString());

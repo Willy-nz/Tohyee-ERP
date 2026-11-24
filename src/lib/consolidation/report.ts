@@ -44,6 +44,28 @@ import type {
 const ASSET_TYPES: AccountType[] = ["bank", "current_asset", "inventory", "fixed_asset", "non_current_asset"];
 const LIABILITY_TYPES: AccountType[] = ["credit_card", "current_liability", "non_current_liability"];
 
+/** Where an account sits in the reports. Accounts add up across organisations by code, within one of these. */
+type Place = "assets" | "liabilities" | "equity" | "revenue" | "cost_of_sales" | "other_income" | "expenses";
+
+const PLACE_SAID: Record<Place, string> = {
+  assets: "an asset",
+  liabilities: "a liability",
+  equity: "equity",
+  revenue: "revenue",
+  cost_of_sales: "a cost of sales",
+  other_income: "other income",
+  expenses: "an expense",
+};
+
+function placeOf(account: { accountClass: AccountClass; accountType: AccountType }): Place {
+  if (account.accountClass === "asset") return "assets";
+  if (account.accountClass === "liability") return "liabilities";
+  if (account.accountClass === "equity") return "equity";
+  if (account.accountType === "direct_costs") return "cost_of_sales";
+  if (account.accountType === "other_income") return "other_income";
+  return account.accountClass === "revenue" ? "revenue" : "expenses";
+}
+
 type Account = { id: string; code: string; name: string; accountClass: AccountClass; accountType: AccountType; systemKey: string | null };
 type DayRow = { accountId: string; date: string; debit: Decimal; credit: Decimal };
 
@@ -116,6 +138,7 @@ async function loadMember(record: OrganisationRecord, user: GroupUser, asAt: str
 // ---------------------------------------------------------------- rates
 
 class Translator {
+  /** The dates a rate was needed for and the parent's list had none. */
   readonly missing = new Set<string>();
   private readonly weightCache = new Map<string, Decimal | null>();
 
@@ -124,7 +147,7 @@ class Translator {
     private readonly groupCurrency: string,
     private readonly parentName: string,
     /** The parent's list for this currency, newest first. */
-    private readonly list: Array<{ rate: string; date: string }>,
+    private readonly list: Array<{ rate: string; date: string; until?: string | null }>,
     private readonly overrides: Map<string, string>,
   ) {}
 
@@ -134,18 +157,38 @@ class Translator {
 
   rateOn(date: string): Decimal | null {
     if (!this.foreign) return dec("1");
-    const found = this.list.find((entry) => entry.date <= date);
+    // As the list is read everywhere else: a rate from a set stops at the end of its period.
+    const found = this.list.find((entry) => entry.date <= date && (entry.until == null || date <= entry.until));
     if (!found) {
-      this.missing.add(`${this.parentName}'s exchange rates list has no ${this.member.currency} rate for ${formatDate(date)}.`);
+      this.missing.add(date);
       return null;
     }
     return dec(found.rate);
   }
 
-  current(asAt: string): Decimal {
+  /** What's missing, said once for the currency: the earliest date is the one a rate is needed on or before. */
+  missingSaid(): string | null {
+    const dates = [...this.missing].sort();
+    if (dates.length === 0) return null;
+    const oldest = this.list.at(-1)?.date;
+    const who = `${this.parentName}'s exchange rates list has no ${this.member.currency} rate for ${formatDate(dates[0])}`;
+    if (dates.length === 1) return `${who}.`;
+    // Every date is before the list starts: one rate dated on or before the first covers them all.
+    if (!oldest || dates.every((date) => date < oldest)) {
+      return `${who}, or for ${dates.length - 1} later ${dates.length === 2 ? "date" : "dates"} in ${this.member.record.displayName}'s books up to ${formatDate(dates.at(-1)!)}. One ${this.member.currency} rate dated ${formatDate(dates[0])} or earlier covers them all.`;
+    }
+    return `${who}, or for ${dates.length - 1} other ${dates.length === 2 ? "date" : "dates"} up to ${formatDate(dates.at(-1)!)}.`;
+  }
+
+  /** The rate on a date for the balance sheet, or null when the list has none (a report is then refused, never run at 1). */
+  currentOrNull(asAt: string): Decimal | null {
     if (!this.foreign) return dec("1");
     const changed = this.overrides.get(`${monthOf(asAt)}|current`);
-    return changed ? dec(changed) : (this.rateOn(asAt) ?? dec("1"));
+    return changed ? dec(changed) : this.rateOn(asAt);
+  }
+
+  current(asAt: string): Decimal {
+    return this.currentOrNull(asAt) ?? dec("1");
   }
 
   /** The month's average (P&L) or historical (equity) rate: each day's amounts times its rate, over their total. */
@@ -185,7 +228,26 @@ type Loaded = {
   translators: Map<string, Translator>;
   parent: Member;
   yearEndMonth: number;
+  /**
+   * Codes (lower case) that are different kinds of account in different
+   * members: an expense in one, an asset in another. Each kind gets its own
+   * line, so neither is left out of its report.
+   */
+  clashing: Set<string>;
 };
+
+/** The line an account's amounts go on: its code, or its code and place when the code clashes. */
+function keyOf(loaded: { clashing: Set<string> }, account: Account): string {
+  return loaded.clashing.has(account.code.toLowerCase()) ? `${account.code}~${placeOf(account)}` : account.code;
+}
+
+function clashingCodes(members: Member[]): Set<string> {
+  const places = new Map<string, Set<Place>>();
+  for (const member of members) {
+    for (const [code, account] of member.byCode) places.set(code, (places.get(code) ?? new Set<Place>()).add(placeOf(account)));
+  }
+  return new Set([...places].filter(([, found]) => found.size > 1).map(([code]) => code));
+}
 
 /**
  * The group as it was on `asAt`: the members in it that day,
@@ -238,13 +300,14 @@ async function load(user: GroupUser, groupId: unknown, asAt: string, withBudget 
     const own = new Map(overrides.filter((entry) => entry.currencyCode === member.currency).map((entry) => [`${entry.month}|${entry.kind}`, entry.rate]));
     translators.set(member.record.id, new Translator(member, group.currencyCode, parentRecord.displayName, lists.get(member.currency) ?? [], own));
   }
-  return { group, periods, members, translators, parent: members.find((member) => member.record.id === group.parentOrganisationId)!, yearEndMonth };
+  return { group, periods, members, translators, parent: members.find((member) => member.record.id === group.parentOrganisationId)!, yearEndMonth, clashing: clashingCodes(members) };
 }
 
 function refuseMissing(loaded: Loaded): void {
-  const missing = [...new Set([...loaded.translators.values()].flatMap((translator) => [...translator.missing]))];
+  // One sentence a currency, not one a date.
+  const missing = [...new Set([...loaded.translators.values()].flatMap((translator) => translator.missingSaid() ?? []))];
   if (missing.length > 0) {
-    throw new ValidationError(`${missing.slice(0, 5).join(" ")}${missing.length > 5 ? ` And ${missing.length - 5} more.` : ""} Add the rates (or turn on ECB rates) in the parent's Exchange rates, or change the month's rate.`);
+    throw new ValidationError(`${missing.join(" ")} Add the rates in the parent's Exchange rates (ECB rates, when turned on, only reach back about 90 days), or change the month's rate on the Rates tab.`);
   }
 }
 
@@ -260,13 +323,13 @@ function bump(map: Signed, organisationId: string, code: string, amount: Decimal
 }
 
 /** Each account's translated profit and loss between dates, month by month at the month's average rate. */
-function translatedPnl(member: Member, translator: Translator, from: string | null, to: string): Map<string, Decimal> {
+function translatedPnl(loaded: { clashing: Set<string> }, member: Member, translator: Translator, from: string | null, to: string): Map<string, Decimal> {
   const byMonth = new Map<string, Decimal>();
   for (const row of member.days) {
     if ((from && row.date < from) || row.date > to) continue;
     const account = member.accounts.get(row.accountId)!;
     if (account.accountClass !== "revenue" && account.accountClass !== "expense") continue;
-    const key = `${account.code}|${monthOf(row.date)}`;
+    const key = `${keyOf(loaded, account)}|${monthOf(row.date)}`;
     byMonth.set(key, add(byMonth.get(key) ?? ZERO_DECIMAL, sub(row.debit, row.credit)));
   }
   const result = new Map<string, Decimal>();
@@ -279,13 +342,14 @@ function translatedPnl(member: Member, translator: Translator, from: string | nu
   return result;
 }
 
-function ownPnl(member: Member, from: string | null, to: string): Map<string, Decimal> {
+function ownPnl(loaded: { clashing: Set<string> }, member: Member, from: string | null, to: string): Map<string, Decimal> {
   const result = new Map<string, Decimal>();
   for (const row of member.days) {
     if ((from && row.date < from) || row.date > to) continue;
     const account = member.accounts.get(row.accountId)!;
     if (account.accountClass !== "revenue" && account.accountClass !== "expense") continue;
-    result.set(account.code, add(result.get(account.code) ?? ZERO_DECIMAL, sub(row.debit, row.credit)));
+    const key = keyOf(loaded, account);
+    result.set(key, add(result.get(key) ?? ZERO_DECIMAL, sub(row.debit, row.credit)));
   }
   return result;
 }
@@ -294,9 +358,42 @@ function natural(accountClass: AccountClass, signed: Decimal): Decimal {
   return accountClass === "asset" || accountClass === "expense" ? signed : neg(signed);
 }
 
-function classify(loaded: Loaded, code: string): Account | null {
-  const key = code.toLowerCase();
-  return loaded.parent.byCode.get(key) ?? loaded.members.map((member) => member.byCode.get(key)).find((account) => account !== undefined) ?? null;
+/** The account a line stands for: the parent's if it has one, or the first member's that does. */
+function classify(loaded: Loaded, key: string): Account | null {
+  const [code, place] = key.split("~");
+  const found = [loaded.parent, ...loaded.members].map((member) => member.byCode.get(code.toLowerCase())).filter((account): account is Account => account !== undefined);
+  return (place ? found.find((account) => placeOf(account) === place) : found[0]) ?? null;
+}
+
+/**
+ * Says so when a code means different things in different members: split
+ * into two lines when they're different kinds of account, added together
+ * under one name when they're the same kind.
+ */
+function codeNotices(loaded: Loaded, sections: ConsolidatedSection[]): string[] {
+  const split: string[] = [];
+  const merged: string[] = [];
+  const seen = new Set<string>();
+  for (const entry of sections.flatMap((section) => section.lines)) {
+    const code = entry.code.toLowerCase();
+    if (!code || seen.has(code)) continue;
+    seen.add(code);
+    const held = loaded.members.flatMap((member) => {
+      const account = member.byCode.get(code);
+      return account ? [{ member, account }] : [];
+    });
+    if (loaded.clashing.has(code)) {
+      split.push(`${entry.code} is ${held.map(({ member, account }) => `${account.name} (${PLACE_SAID[placeOf(account)]}) in ${member.record.displayName}`).join(" and ")}`);
+      continue;
+    }
+    const names = new Set(held.map(({ account }) => account.name.trim().toLowerCase()));
+    if (names.size > 1) merged.push(`${entry.code} (${held.map(({ member, account }) => `${account.name} in ${member.record.displayName}`).join(", ")})`);
+  }
+  const few = (list: string[]) => `${list.slice(0, 6).join("; ")}${list.length > 6 ? `; and ${list.length - 6} more` : ""}`;
+  return [
+    ...(split.length ? [`The same code is a different kind of account in different organisations, so each is on its own line: ${few(split)}. Give them different codes to tidy this up.`] : []),
+    ...(merged.length ? [`Accounts add up by code. These codes have different names in different organisations and are added together under the first name: ${few(merged)}. If they aren't the same thing, give one a different code.`] : []),
+  ];
 }
 
 function line(loaded: Loaded, code: string, name: string, accountClass: AccountClass, perOrg: Signed, elims: Map<string, Decimal>, own: Signed | null, key = code): ConsolidatedLine {
@@ -331,7 +428,9 @@ function sectionOf(loaded: Loaded, key: string, label: string, types: AccountTyp
   for (const code of [...codes].sort((left, right) => left.localeCompare(right, "en-NZ", { numeric: true }))) {
     const account = classify(loaded, code);
     if (!account || !types.includes(account.accountType)) continue;
-    const entry = line(loaded, account.code, account.name, account.accountClass, perOrg, elims, own, code);
+    // A clashing code's line belongs to the place in its key, whatever kind the first account found is.
+    if (code.includes("~") && placeOf(account) !== code.split("~")[1]) continue;
+    const entry = { ...line(loaded, account.code, account.name, account.accountClass, perOrg, elims, own, code), ...(code !== account.code ? { key: code } : {}) };
     if ([...Object.values(entry.amounts), entry.eliminations].every((value) => isZero(dec(value)))) continue;
     lines.push(entry);
   }
@@ -355,8 +454,11 @@ function differenceNotices(loaded: Loaded, items: Array<{ from: string; to: stri
   for (const list of pairs.values()) {
     const difference = list.reduce((total, item) => add(total, item.signed), ZERO_DECIMAL);
     if (isZero(difference)) continue;
+    // Books in different currencies: a balance that agreed on the day drifts apart as the rate moves.
+    const currencies = [...new Set(list.flatMap((item) => [item.from, item.to]).map((id) => loaded.members.find((member) => member.record.id === id)?.currency ?? ""))].filter(Boolean);
+    const drift = currencies.length > 1 ? ` Their books are in different currencies (${currencies.join(" and ")}), so some or all of this can be the exchange rate moving since the amounts were recorded.` : "";
     notices.push(
-      `${list.map((item) => `${pairName(loaded, item.from)} ${item.label} ${formatMoney(money(abs(item.signed)))}`).join(" and ")} don't agree (a difference of ${formatMoney(money(abs(difference)))}). Check them.`,
+      `${list.map((item) => `${pairName(loaded, item.from)} ${item.label} ${formatMoney(money(abs(item.signed)))}`).join(" and ")} don't agree (a difference of ${formatMoney(money(abs(difference)))}). Check them.${drift}`,
     );
   }
   return notices;
@@ -377,15 +479,16 @@ export async function consolidatedProfitAndLoss(user: GroupUser, groupId: unknow
   const memberIds = new Set(loaded.members.map((member) => member.record.id));
   for (const member of loaded.members) {
     const translator = loaded.translators.get(member.record.id)!;
-    const amounts = translatedPnl(member, translator, from, to);
+    const amounts = translatedPnl(loaded, member, translator, from, to);
     for (const [code, amount] of amounts) bump(perOrg, member.record.id, code, amount);
-    for (const [code, amount] of ownPnl(member, from, to)) bump(own, member.record.id, code, amount);
+    for (const [code, amount] of ownPnl(loaded, member, from, to)) bump(own, member.record.id, code, amount);
     for (const [accountId, counterpart] of member.intercompanyAccounts) {
       const account = member.accounts.get(accountId);
       if (!account || !memberIds.has(counterpart) || (account.accountClass !== "revenue" && account.accountClass !== "expense")) continue;
-      const amount = amounts.get(account.code) ?? ZERO_DECIMAL;
+      const lineKey = keyOf(loaded, account);
+      const amount = amounts.get(lineKey) ?? ZERO_DECIMAL;
       if (isZero(amount)) continue;
-      elims.set(account.code, sub(elims.get(account.code) ?? ZERO_DECIMAL, amount));
+      elims.set(lineKey, sub(elims.get(lineKey) ?? ZERO_DECIMAL, amount));
       items.push({ from: member.record.id, to: counterpart, label: `${account.code}`, signed: amount });
     }
   }
@@ -394,7 +497,8 @@ export async function consolidatedProfitAndLoss(user: GroupUser, groupId: unknow
     for (const entry of adjustment.lines) {
       const account = loaded.members.find((member) => member.record.id === entry.organisationId)?.byCode.get(entry.accountCode.toLowerCase());
       if (!account || (account.accountClass !== "revenue" && account.accountClass !== "expense")) continue;
-      elims.set(account.code, add(elims.get(account.code) ?? ZERO_DECIMAL, sub(dec(entry.debit), dec(entry.credit))));
+      const lineKey = keyOf(loaded, account);
+      elims.set(lineKey, add(elims.get(lineKey) ?? ZERO_DECIMAL, sub(dec(entry.debit), dec(entry.credit))));
     }
   }
   refuseMissing(loaded);
@@ -436,7 +540,7 @@ export async function consolidatedProfitAndLoss(user: GroupUser, groupId: unknow
     yearStart,
     sections,
     totals: [gross, net],
-    notices: differenceNotices(loaded, items),
+    notices: [...differenceNotices(loaded, items), ...codeNotices(loaded, sections)],
   };
 }
 
@@ -462,12 +566,13 @@ export async function consolidatedBalanceSheet(user: GroupUser, groupId: unknown
     for (const row of member.days) {
       const account = member.accounts.get(row.accountId)!;
       const signed = sub(row.debit, row.credit);
-      if (account.accountClass === "asset" || account.accountClass === "liability") balances.set(account.code, add(balances.get(account.code) ?? ZERO_DECIMAL, signed));
+      const lineKey = keyOf(loaded, account);
+      if (account.accountClass === "asset" || account.accountClass === "liability") balances.set(lineKey, add(balances.get(lineKey) ?? ZERO_DECIMAL, signed));
       if (account.accountClass === "equity") {
-        const key = `${account.code}|${monthOf(row.date)}`;
+        const key = `${lineKey}|${monthOf(row.date)}`;
         equityByMonth.set(key, add(equityByMonth.get(key) ?? ZERO_DECIMAL, signed));
       }
-      if (account.accountClass !== "revenue" && account.accountClass !== "expense") bump(own, id, account.code, signed);
+      if (account.accountClass !== "revenue" && account.accountClass !== "expense") bump(own, id, lineKey, signed);
     }
     let total = ZERO_DECIMAL;
     for (const [code, balance] of balances) {
@@ -483,15 +588,15 @@ export async function consolidatedBalanceSheet(user: GroupUser, groupId: unknown
       bump(perOrg, id, code, translated);
       total = add(total, translated);
     }
-    const prior = [...translatedPnl(member, translator, null, priorEnd(yearStart)).values()].reduce((sum, value) => add(sum, value), ZERO_DECIMAL);
-    const thisYear = [...translatedPnl(member, translator, yearStart, asAt).values()].reduce((sum, value) => add(sum, value), ZERO_DECIMAL);
+    const prior = [...translatedPnl(loaded, member, translator, null, priorEnd(yearStart)).values()].reduce((sum, value) => add(sum, value), ZERO_DECIMAL);
+    const thisYear = [...translatedPnl(loaded, member, translator, yearStart, asAt).values()].reduce((sum, value) => add(sum, value), ZERO_DECIMAL);
     bump(perOrg, id, RETAINED, prior);
     bump(perOrg, id, CURRENT, thisYear);
     total = add(add(total, prior), thisYear);
     // What translation leaves over is the reserve (CO5); nil for a member in the group's currency.
     bump(perOrg, id, RESERVE, neg(total));
-    const ownPrior = [...ownPnl(member, null, priorEnd(yearStart)).values()].reduce((sum, value) => add(sum, value), ZERO_DECIMAL);
-    const ownYear = [...ownPnl(member, yearStart, asAt).values()].reduce((sum, value) => add(sum, value), ZERO_DECIMAL);
+    const ownPrior = [...ownPnl(loaded, member, null, priorEnd(yearStart)).values()].reduce((sum, value) => add(sum, value), ZERO_DECIMAL);
+    const ownYear = [...ownPnl(loaded, member, yearStart, asAt).values()].reduce((sum, value) => add(sum, value), ZERO_DECIMAL);
     bump(own, id, RETAINED, ownPrior);
     bump(own, id, CURRENT, ownYear);
 
@@ -499,24 +604,29 @@ export async function consolidatedBalanceSheet(user: GroupUser, groupId: unknown
     for (const [accountId, counterpart] of member.intercompanyAccounts) {
       const account = member.accounts.get(accountId);
       if (!account || !memberIds.has(counterpart) || !["asset", "liability", "equity"].includes(account.accountClass)) continue;
-      const amount = perOrg.get(id)?.get(account.code) ?? ZERO_DECIMAL;
+      const lineKey = keyOf(loaded, account);
+      const amount = perOrg.get(id)?.get(lineKey) ?? ZERO_DECIMAL;
       if (isZero(amount)) continue;
-      elims.set(account.code, sub(elims.get(account.code) ?? ZERO_DECIMAL, amount));
+      elims.set(lineKey, sub(elims.get(lineKey) ?? ZERO_DECIMAL, amount));
       items.push({ from: id, to: counterpart, label: account.code, signed: amount });
     }
-    const receivableCode = [...member.accounts.values()].find((account) => account.systemKey === "accounts_receivable")?.code;
-    const payableCode = [...member.accounts.values()].find((account) => account.systemKey === "accounts_payable")?.code;
+    const systemKeyOf = (systemKey: string) => {
+      const account = [...member.accounts.values()].find((each) => each.systemKey === systemKey);
+      return account ? keyOf(loaded, account) : undefined;
+    };
+    const receivableCode = systemKeyOf("accounts_receivable");
+    const payableCode = systemKeyOf("accounts_payable");
     for (const [counterpart, owed] of member.owed) {
       if (!memberIds.has(counterpart)) continue;
       if (receivableCode && !isZero(owed.receivable)) {
         const amount = round(mul(owed.receivable, current));
         elims.set(receivableCode, sub(elims.get(receivableCode) ?? ZERO_DECIMAL, amount));
-        items.push({ from: id, to: counterpart, label: `${receivableCode} (owed by ${pairName(loaded, counterpart)})`, signed: amount });
+        items.push({ from: id, to: counterpart, label: `${receivableCode.split("~")[0]} (owed by ${pairName(loaded, counterpart)})`, signed: amount });
       }
       if (payableCode && !isZero(owed.payable)) {
         const amount = neg(round(mul(owed.payable, current)));
         elims.set(payableCode, sub(elims.get(payableCode) ?? ZERO_DECIMAL, amount));
-        items.push({ from: id, to: counterpart, label: `${payableCode} (owed to ${pairName(loaded, counterpart)})`, signed: amount });
+        items.push({ from: id, to: counterpart, label: `${payableCode.split("~")[0]} (owed to ${pairName(loaded, counterpart)})`, signed: amount });
       }
     }
   }
@@ -526,7 +636,7 @@ export async function consolidatedBalanceSheet(user: GroupUser, groupId: unknown
       const account = loaded.members.find((member) => member.record.id === entry.organisationId)?.byCode.get(entry.accountCode.toLowerCase());
       if (!account) continue;
       const signed = sub(dec(entry.debit), dec(entry.credit));
-      const key = account.accountClass === "revenue" || account.accountClass === "expense" ? (adjustment.date >= yearStart ? CURRENT : RETAINED) : account.code;
+      const key = account.accountClass === "revenue" || account.accountClass === "expense" ? (adjustment.date >= yearStart ? CURRENT : RETAINED) : keyOf(loaded, account);
       elims.set(key, add(elims.get(key) ?? ZERO_DECIMAL, signed));
     }
   }
@@ -569,7 +679,7 @@ export async function consolidatedBalanceSheet(user: GroupUser, groupId: unknown
     yearStart,
     sections,
     totals: [sections[0].total, liabilitiesAndEquity],
-    notices: differenceNotices(loaded, items),
+    notices: [...differenceNotices(loaded, items), ...codeNotices(loaded, sections)],
   };
 }
 
@@ -590,6 +700,9 @@ export async function consolidatedBudgetVsActual(user: GroupUser, groupId: unkno
   for (const member of loaded.members) {
     for (const entry of member.budget) {
       if (entry.month < fromMonth || entry.month > actual.to) continue;
+      const account = member.byCode.get(entry.code.toLowerCase());
+      // Only income and costs are in a profit and loss budget.
+      if (!account || (account.accountClass !== "revenue" && account.accountClass !== "expense")) continue;
       let rate = dec("1");
       if (member.currency !== loaded.group.currencyCode) {
         const found = budgetRates.find((item) => item.currencyCode === member.currency && item.month === entry.month);
@@ -599,22 +712,37 @@ export async function consolidatedBudgetVsActual(user: GroupUser, groupId: unkno
         }
         rate = dec(found.rate);
       }
-      budgets.set(entry.code, add(budgets.get(entry.code) ?? ZERO_DECIMAL, round(mul(entry.amount, rate))));
+      const lineKey = keyOf(loaded, account);
+      budgets.set(lineKey, add(budgets.get(lineKey) ?? ZERO_DECIMAL, round(mul(entry.amount, rate))));
     }
   }
   if (missing.size > 0) throw new ValidationError(`Enter the budget exchange rates: ${[...missing].sort().join(", ")}.`);
   const actuals = new Map<string, { name: string; amount: Decimal }>();
   for (const section of actual.sections) {
-    for (const entry of section.lines) if (entry.code) actuals.set(entry.code, { name: entry.name, amount: dec(entry.consolidated) });
+    for (const entry of section.lines) if (entry.code) actuals.set(entry.key ?? entry.code, { name: entry.name, amount: dec(entry.consolidated) });
   }
-  const codes = [...new Set([...actuals.keys(), ...budgets.keys()])].sort((left, right) => left.localeCompare(right, "en-NZ", { numeric: true }));
-  const lines = codes.map((code) => {
-    const amount = actuals.get(code)?.amount ?? ZERO_DECIMAL;
-    const budget = budgets.get(code) ?? ZERO_DECIMAL;
-    return { code, name: actuals.get(code)?.name ?? classify(loaded, code)?.name ?? code, actual: money(amount), budget: money(budget), variance: money(sub(amount, budget)) };
+  const keys = [...new Set([...actuals.keys(), ...budgets.keys()])].sort((left, right) => left.localeCompare(right, "en-NZ", { numeric: true }));
+  // Net profit: income less costs. Adding every line up would add costs to income.
+  let net = { actual: ZERO_DECIMAL, budget: ZERO_DECIMAL };
+  const lines = keys.map((lineKey) => {
+    const amount = actuals.get(lineKey)?.amount ?? ZERO_DECIMAL;
+    const budget = budgets.get(lineKey) ?? ZERO_DECIMAL;
+    const account = classify(loaded, lineKey);
+    const income = account?.accountClass === "revenue";
+    net = { actual: (income ? add : sub)(net.actual, amount), budget: (income ? add : sub)(net.budget, budget) };
+    return { code: lineKey.split("~")[0], name: actuals.get(lineKey)?.name ?? account?.name ?? lineKey, actual: money(amount), budget: money(budget), variance: money(sub(amount, budget)) };
   });
-  const totalOf = (pick: (entry: (typeof lines)[number]) => string) => money(lines.reduce((total, entry) => add(total, dec(pick(entry))), ZERO_DECIMAL));
-  return { group: loaded.group, currencyCode: loaded.group.currencyCode, from: actual.from!, to: actual.to, lines, total: { actual: totalOf((entry) => entry.actual), budget: totalOf((entry) => entry.budget), variance: totalOf((entry) => entry.variance) } };
+  // What the intercompany amounts didn't agree by is in the actual net profit, as on the profit and loss.
+  const differences = actual.sections.find((section) => section.key === "intercompany_differences");
+  if (differences) net = { ...net, actual: sub(net.actual, dec(differences.total.consolidated)) };
+  return {
+    group: loaded.group,
+    currencyCode: loaded.group.currencyCode,
+    from: actual.from!,
+    to: actual.to,
+    lines,
+    total: { actual: money(net.actual), budget: money(net.budget), variance: money(sub(net.actual, net.budget)) },
+  };
 }
 
 /** The consolidation rates for each foreign-currency member, month by month (CO3), as worked out or changed. */
@@ -635,7 +763,7 @@ export async function consolidationRates(user: GroupUser, groupId: unknown, inpu
         organisationId: member.record.id,
         currencyCode: member.currency,
         month,
-        current: asText(translator.current(monthEnd > to ? to : monthEnd)),
+        current: asText(translator.currentOrNull(monthEnd > to ? to : monthEnd)),
         average: asText(translator.weighted(month, "average")),
         historical: asText(translator.weighted(month, "historical")),
         changed,
