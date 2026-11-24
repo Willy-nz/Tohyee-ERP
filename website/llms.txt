@@ -1,0 +1,35 @@
+# Tohyee
+
+> Tohyee is free, open-source accounting software from New Zealand that an organisation runs on its own server. It covers invoices, bills, bank reconciliation, GST, payroll, fixed assets, multi-currency, consolidation, CRM, analytics and farm records. Each organisation has its own PostgreSQL database. It is written in TypeScript on Next.js and licensed AGPL-3.0.
+
+Tohyee is in early development. What makes it useful to read: every accounting behaviour is written down first as a worked example with real numbers (which accounts are debited and credited, and why), and each example has a test. The examples follow New Zealand law, Inland Revenue guidance and accounting standards.
+
+Source: https://github.com/Willy-nz/Tohyee-ERP
+
+## Start here
+
+- [README](https://raw.githubusercontent.com/Willy-nz/Tohyee-ERP/main/README.md): what Tohyee is, how to install it, and the release history.
+- [Features](https://raw.githubusercontent.com/Willy-nz/Tohyee-ERP/main/docs/FEATURES.md): every feature, in plain words, with the worked examples each one rests on.
+- [Design principles](https://raw.githubusercontent.com/Willy-nz/Tohyee-ERP/main/docs/DESIGN-PRINCIPLES.md): the short list of rules the screens and the wording follow.
+
+## How the accounting works
+
+- [Accounting examples](https://raw.githubusercontent.com/Willy-nz/Tohyee-ERP/main/docs/ACCOUNTING-EXAMPLES.md): the worked examples, grouped by area and numbered (for example MC for multi-currency, CO for consolidation, SW for spreading prepayments and accruals). Large: about 1.5 MB of text, so search it for a heading or a code.
+- [Architecture](https://raw.githubusercontent.com/Willy-nz/Tohyee-ERP/main/docs/ARCHITECTURE.md): one database per organisation, the ledger (posted journals can't be edited, only reversed), migrations, permissions and background jobs.
+- [Backup and recovery](https://raw.githubusercontent.com/Willy-nz/Tohyee-ERP/main/docs/BACKUP-RECOVERY.md): how each organisation is backed up and restored.
+
+## AI access
+
+- Tohyee has its own MCP server, so an AI app can read the books, prepare drafts or post, at the level the owner grants. The features list above says, feature by feature, what an AI key can read and do.
+- [Rules for coding agents](https://raw.githubusercontent.com/Willy-nz/Tohyee-ERP/main/AGENTS.md): what an agent changing this code must follow.
+
+## Optional
+
+- [Analytics](https://raw.githubusercontent.com/Willy-nz/Tohyee-ERP/main/docs/ANALYTICS-STUDIO.md): reports and dashboards over the books and other sources.
+- [Farm apps](https://raw.githubusercontent.com/Willy-nz/Tohyee-ERP/main/docs/FARM-APPS.md): paddocks, safety, effluent and other farm records.
+- [Choosing and setting up a server](https://raw.githubusercontent.com/Willy-nz/Tohyee-ERP/main/docs/SERVER-BUYING-GUIDE.md)
+- [Releases](https://github.com/Willy-nz/Tohyee-ERP/releases): downloads and notes for each version.
+
+## Licence
+
+AGPL-3.0. Software built from this code, including a hosted service, must share its source under the same licence.
