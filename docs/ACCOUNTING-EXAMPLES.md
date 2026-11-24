@@ -23454,8 +23454,7 @@ added when Spreading is turned on.
   aren't reopened: they're caught up in the next month to post. November's
   journal carries **500.00** for it (400.00 + 100.00) and December on
   carry 100.00. The same goes for any item, however it was added. (The
-  owner was asked on 23 Nov 2026 whether to refuse or catch up and hadn't
-  said; catching up in the current period is the common practice.)
+  owner chose catching up over refusing on 24 Nov 2026.)
 - **SW19 "Spread this" on a bank line.** Spend money on 1 Jul 2026, 690.00
   including GST to 6080: Dr 6080 **600.00** / Dr 2100 **90.00** / Cr the
   bank **690.00**. "Spread this" on the line works as on a bill (SW15): Dr
