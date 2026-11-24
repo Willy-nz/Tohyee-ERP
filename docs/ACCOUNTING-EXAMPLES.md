@@ -10781,6 +10781,45 @@ Setup:
     budget rate of 1.60) and costs 3,520.00 against 500.00, the last row
     is Net profit: actual **24,980.00**, budget **20,700.00**, variance
     **4,280.00**. Only income and cost accounts are in it.
+- **CO16** Chart mapping (25 Nov 2026; the owner asked for it; the rules
+  are Claude's, following common practice, not yet reviewed). In a group,
+  each account of a member other than the parent can be sent to one of the
+  parent's accounts. It then adds up on that line whatever its own code.
+  An account left alone goes by its own code, as before. Kept for the
+  group, in the core database (migration 0030); nothing in any
+  organisation's books changes.
+  - A New Zealand parent has 6910 Advertising (300.00) and 6900 Staff
+    training (700.00). Its US office (USD, at 1.70) has its own chart:
+    6500 Marketing (USD 1,000.00), 7100 Office rent (USD 2,000.00) and
+    6900 Deposits paid, an asset (USD 1,500.00).
+  - **Before:** 6500 Marketing 1,700.00 and 7100 Office rent 3,400.00 are
+    lines of their own, and 6900 clashes (CO15).
+  - **Map** 6500 Marketing to 6910 Advertising, and 6900 Deposits paid to
+    the parent's 1290 Deposits. **After:** 6910 Advertising is 300.00 +
+    1,700.00 = **2,000.00**; the balance sheet has 1290 Deposits
+    **2,550.00** and no 6900; there's no clash notice; net profit is
+    unchanged and the balance sheet agrees. 7100 Office rent, not mapped,
+    is still its own line.
+  - **Same kind only.** An account goes to one of the same class (asset,
+    liability, equity, revenue, expense): mapping 6500 Marketing to 1290
+    Deposits is refused, because the class decides which report and which
+    exchange rate an amount takes. Within a class it lands in the parent
+    account's section (a US expense mapped to a parent direct cost shows
+    under cost of sales).
+  - **Budgets follow.** The US office's budget of USD 800.00 on 6500, at a
+    budget rate of 1.50, is 1,200.00 against 6910 Advertising.
+  - **A map that no longer fits** (the parent's account was removed, or is
+    a different class now) is set aside: the account goes back to its own
+    code, the reports say "Some chart mapping no longer fits (1 in the US
+    office)", and the Chart mapping tab marks it to choose again.
+  - **The screen** (the group's Chart mapping tab) lists a member's
+    accounts with where each adds up. It opens on the ones to look at:
+    accounts with no map and no account of the same code and class in the
+    parent. "Match by name" proposes the parent's account with the same
+    name and class when there's exactly one; nothing is saved until Save.
+    Anyone who can see the group can read it; an admin or owner of every
+    organisation changes it, as for the group's rates. Each save is in the
+    audit history.
 - **FX1** Holdings (NZD) turns on ECB rates. The ECB's rates for 5 Oct 2026
   are, per EUR, NZD 1.9000 and AUD 1.7000, so Holdings' list gets AUD
   **1.117647** on 5 Oct, from "European Central Bank". A rate the owner typed for
@@ -10791,7 +10830,7 @@ Setup:
   in.
 
 Built (core migration 0007, tenant migration 0102).
-Test: `tests/integration/consolidation.test.ts` (CO1-CO12, CO15, FX1);
+Test: `tests/integration/consolidation.test.ts` (CO1-CO12, CO15, CO16, FX1);
 `tests/integration/group-workspace.test.ts` and
 `tests/unit/group-workspace.test.ts` (CO13, CO14; the tests use the
 same dates and numbers with a made-up Harakeke group). AI

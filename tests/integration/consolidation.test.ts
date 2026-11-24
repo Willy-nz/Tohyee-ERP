@@ -5,6 +5,7 @@ import { approveBill, createBill } from "@/lib/bills/service";
 import { getBudget, listBudgets, setBudgetAmounts } from "@/lib/budgets/service";
 import { createAdjustment, createGroup, listGroups, removeAdjustment, requireGroup, setBudgetRate, setRateOverride } from "@/lib/consolidation/groups";
 import { setIntercompany } from "@/lib/consolidation/intercompany";
+import { getChartMapping, setChartMapping } from "@/lib/consolidation/mapping";
 import { consolidatedBalanceSheet, consolidatedBudgetVsActual, consolidatedProfitAndLoss, consolidationRates } from "@/lib/consolidation/report";
 import type { ConsolidatedReport } from "@/lib/consolidation/types";
 import { createContact } from "@/lib/contacts/service";
@@ -412,6 +413,102 @@ describeWithDatabase("consolidation (CO1-CO11, FX1)", () => {
       ["6910", "2820.00", "500.00"],
     ]);
     expect(versus.total).toEqual({ actual: "24980.00", budget: "20700.00", variance: "4280.00" });
+  });
+
+  it("CO16: chart mapping sends a member's accounts to the parent's, whatever their codes", async () => {
+    const ids = { nz: "co16-nz", us: "co16-us" };
+    await createTestOrganisation(jade, ids.nz);
+    await createTestOrganisation(jade, ids.us, { baseCurrency: "USD" });
+    const user = { id: jade.id, email: jade.email };
+    const as = <T>(org: string, work: (tx: OrgTx) => Promise<T>) => inOrganisation(org, { userId: jade.id, email: jade.email }, work);
+    const journal = (org: string, postingDate: string, lines: Array<{ accountCode: string; debitAmount?: string; creditAmount?: string }>) =>
+      as(org, (tx) => postJournal(tx, { idempotencyKey: key("j"), postingDate, reference: "Setup", lines }));
+    const account = async (org: string, code: string, name: string, accountType: string) => (await as(org, (tx) => createAccount(tx, { code, name, accountType }))).id;
+    const advertising = await account(ids.nz, "6910", "Advertising", "expense");
+    const deposits = await account(ids.nz, "1290", "Deposits", "current_asset");
+    await account(ids.nz, "6900", "Staff training", "expense");
+    // The US office's own chart: other codes, and 6900 for something else altogether.
+    const marketing = await account(ids.us, "6500", "Marketing", "expense");
+    const usDeposits = await account(ids.us, "6900", "Deposits paid", "current_asset");
+    const usRent = await account(ids.us, "7100", "Office rent", "expense");
+    await journal(ids.nz, "2026-10-01", [{ accountCode: "1000", debitAmount: "50000.00" }, { accountCode: "3000", creditAmount: "50000.00" }]);
+    await journal(ids.nz, "2026-10-10", [{ accountCode: "6910", debitAmount: "300.00" }, { accountCode: "6900", debitAmount: "700.00" }, { accountCode: "1000", creditAmount: "1000.00" }]);
+    await journal(ids.us, "2026-10-01", [{ accountCode: "1000", debitAmount: "20000.00" }, { accountCode: "3000", creditAmount: "20000.00" }]);
+    await journal(ids.us, "2026-10-05", [{ accountCode: "6500", debitAmount: "1000.00" }, { accountCode: "7100", debitAmount: "2000.00" }, { accountCode: "6900", debitAmount: "1500.00" }, { accountCode: "1000", creditAmount: "4500.00" }]);
+    await as(ids.nz, (tx) => addExchangeRates(tx, { idempotencyKey: key("rates"), rates: [{ currencyCode: "USD", effectiveDate: "2026-10-01", rate: "1.70" }] }));
+    const made = await createGroup(user, { name: "Two charts", parentOrganisationId: ids.nz, organisationIds: [ids.us] });
+    const order = [ids.nz, ids.us];
+    const lines = (report: ConsolidatedReport, section: string) =>
+      report.sections.find((each) => each.key === section)!.lines.map((line) => [line.code, line.name, ...order.map((id) => line.amounts[id]), line.consolidated]);
+    const october = { from: "2026-10-01", to: "2026-10-31" };
+
+    // Before: each of the US office's own codes is a line of its own, and 6900 clashes.
+    const before = await consolidatedProfitAndLoss(user, made.id, october);
+    expect(lines(before, "expenses")).toEqual([
+      ["6500", "Marketing", "0.00", "1700.00", "1700.00"],
+      ["6900", "Staff training", "700.00", "0.00", "700.00"],
+      ["6910", "Advertising", "300.00", "0.00", "300.00"],
+      ["7100", "Office rent", "0.00", "3400.00", "3400.00"],
+    ]);
+    expect(before.notices.join(" ")).toContain("6900 is Staff training (an expense)");
+
+    // What the screen shows: the accounts with nowhere to go, and the one with the same code.
+    const mapping = await getChartMapping(user, made.id, ids.us);
+    expect(mapping.accounts.find((each) => each.id === marketing)).toMatchObject({ code: "6500", mappedTo: null, sameCode: null, typeLabel: "Expense" });
+    // 6900 is an expense in the parent and an asset here, so the same code is no match.
+    expect(mapping.accounts.find((each) => each.id === usDeposits)).toMatchObject({ sameCode: null });
+    expect(mapping.accounts.find((each) => each.code === "1000")?.sameCode).toBe(mapping.parentAccounts.find((each) => each.code === "1000")?.id);
+
+    // An account can only go to one of the same kind, and the parent has no mapping of its own.
+    await expect(setChartMapping(user, made.id, { organisationId: ids.us, maps: [{ accountId: marketing, parentAccountId: deposits }] })).rejects.toThrow(
+      "6500 Marketing is an expense account and 1290 Deposits is an asset account. An account can only go to one of the same kind.",
+    );
+    await expect(setChartMapping(user, made.id, { organisationId: ids.nz, maps: [] })).rejects.toThrow("The parent's chart is the one the others are mapped to");
+    await expect(setChartMapping(user, made.id, { organisationId: ids.us, maps: [{ accountId: marketing, parentAccountId: "999999" }] })).rejects.toThrow("The parent has no such account");
+
+    const saved = await setChartMapping(user, made.id, {
+      organisationId: ids.us,
+      maps: [
+        { accountId: marketing, parentAccountId: advertising },
+        { accountId: usDeposits, parentAccountId: deposits },
+      ],
+    });
+    expect(saved.accounts.find((each) => each.id === marketing)?.mappedTo).toBe(advertising);
+
+    // After: Marketing adds up on Advertising; the deposit is on the parent's Deposits; nothing clashes.
+    const after = await consolidatedProfitAndLoss(user, made.id, october);
+    expect(lines(after, "expenses")).toEqual([
+      ["6900", "Staff training", "700.00", "0.00", "700.00"],
+      ["6910", "Advertising", "300.00", "1700.00", "2000.00"],
+      ["7100", "Office rent", "0.00", "3400.00", "3400.00"],
+    ]);
+    expect(after.notices).toEqual([]);
+    expect(after.totals.at(-1)?.consolidated).toBe(before.totals.at(-1)?.consolidated);
+    const sheet = await consolidatedBalanceSheet(user, made.id, { asAt: "2026-10-31" });
+    expect(lines(sheet, "assets").find((line) => line[0] === "1290")).toEqual(["1290", "Deposits", "0.00", "2550.00", "2550.00"]);
+    expect(lines(sheet, "assets").some((line) => line[0] === "6900")).toBe(false);
+    expect(sheet.totals[0].consolidated).toBe(sheet.totals[1].consolidated);
+    expect(sheet.notices).toEqual([]);
+
+    // The member's budget follows its accounts.
+    await as(ids.us, async (tx) => {
+      const overall = (await listBudgets(tx))[0];
+      await setBudgetAmounts(tx, overall.id, { version: (await getBudget(tx, overall.id)).budget.version, amounts: [{ accountCode: "6500", month: "2026-10", amount: "800.00" }] });
+    });
+    await setBudgetRate(user, made.id, { currencyCode: "USD", month: "2026-10", rate: "1.5" });
+    const versus = await consolidatedBudgetVsActual(user, made.id, october);
+    expect(versus.lines.find((line) => line.code === "6910")).toEqual({ code: "6910", name: "Advertising", actual: "2000.00", budget: "1200.00", variance: "800.00" });
+
+    // A map whose parent account has gone is set aside, and the report says so.
+    await coreQuery("insert into consolidation_account_maps (group_id, organisation_id, account_id, parent_account_id, changed_by_email) values ($1, $2, $3, 999999, 'test@example.com')", [made.id, ids.us, usRent]);
+    const stale = await consolidatedProfitAndLoss(user, made.id, october);
+    expect(lines(stale, "expenses").find((line) => line[0] === "7100")).toEqual(["7100", "Office rent", "0.00", "3400.00", "3400.00"]);
+    expect(stale.notices).toEqual(["Some chart mapping no longer fits (1 in Test co16-us): the parent's account was removed or changed kind. Those accounts are back on their own codes. Check Chart mapping."]);
+    expect((await getChartMapping(user, made.id, ids.us)).accounts.find((each) => each.id === usRent)).toMatchObject({ mappedTo: null, stale: true });
+
+    // Taking a map away puts the account back on its own code.
+    await setChartMapping(user, made.id, { organisationId: ids.us, maps: [{ accountId: marketing, parentAccountId: null }, { accountId: usRent, parentAccountId: null }] });
+    expect(lines(await consolidatedProfitAndLoss(user, made.id, october), "expenses").map((line) => line[0])).toEqual(["6500", "6900", "6910", "7100"]);
   });
 
   it("CO11: consolidated budget vs actual at the budget rates", async () => {

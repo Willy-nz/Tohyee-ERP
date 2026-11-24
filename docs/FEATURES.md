@@ -909,8 +909,11 @@ that something happened.
   consolidated budget vs actual ending in net profit. Accounts add up by
   code: a code that's a different kind of account in another member gets
   its own line, and codes with different names are named in a notice
-  (CO15). There's no mapping of one chart of accounts onto another. Seen
-  only by people in every member.
+  (CO15). **Chart mapping** (CO16, core migration 0030): a tab in the group
+  where each account of a member is sent to one of the parent's accounts
+  of the same class, so organisations with different charts add up on the
+  parent's lines. It opens on the accounts with nowhere to go and can
+  match them by name. Seen only by people in every member.
 - **Group workspace** (CO13-CO14, core migration 0015, tenant migration 0173), the first tab of a consolidation
   group: the members on a date, the consolidated revenue and net profit for
   the year to date (from the existing consolidated profit and loss), each

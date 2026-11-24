@@ -6,6 +6,7 @@ import Link from "next/link";
 import { useState } from "react";
 import { Money } from "@/components/books";
 import { useConfirm } from "@/components/confirm-dialog";
+import { ChartMappingTab } from "@/components/consolidation-chart-mapping";
 import { useApiData } from "@/components/hooks";
 import { ReportCommentary } from "@/components/report-commentary";
 import { ReportExport } from "@/components/reports/report-export";
@@ -34,6 +35,7 @@ const TABS = [
   ["balance_sheet", "Balance sheet"],
   ["budget_vs_actual", "Budget vs actual"],
   ["rates", "Rates"],
+  ["mapping", "Chart mapping"],
   ["adjustments", "Adjustments"],
   ["intercompany", "Intercompany"],
   ["customers", "Customers"],
@@ -904,6 +906,7 @@ export function ConsolidationGroupView({ groupId }: { groupId: string }) {
       {tab === "profit_and_loss" || tab === "balance_sheet" ? <Reports key={tab} group={detail.group} kind={tab} canEdit={everyAtLeast(["bookkeeper", "admin", "owner"])} /> : null}
       {tab === "budget_vs_actual" ? <BudgetVsActual group={detail.group} /> : null}
       {tab === "rates" ? <Rates detail={detail} canAdmin={everyAtLeast(["admin", "owner"])} onChanged={loaded.reload} /> : null}
+      {tab === "mapping" ? <ChartMappingTab group={detail.group} canAdmin={everyAtLeast(["admin", "owner"])} /> : null}
       {tab === "adjustments" ? <Adjustments detail={detail} canEdit={everyAtLeast(["bookkeeper", "admin", "owner"])} onChanged={loaded.reload} /> : null}
       {tab === "intercompany"
         ? detail.group.members.map((member) => (
