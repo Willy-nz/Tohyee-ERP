@@ -8,6 +8,8 @@ import {
   forecastDays,
   forecastRequest,
   forecastWarnings,
+  dayPictures,
+  gustyAt,
   freshness,
   hoursAhead,
   METSERVICE_ATTRIBUTION,
@@ -90,6 +92,24 @@ describe("weather forecast rules", () => {
     // 6 November 2026 in New Zealand (NZDT, +13) starts at 11:00 UTC on the 5th.
     const hours = day("2026-11-05T11:00:00Z", (index) => ({ rainMm: index < 4 ? "1.5" : "0.0", temperatureC: String(5 + index / 2), gustKmh: index === 10 ? "55" : "20" }));
     expect(forecastDays(hours, NZ)).toEqual([{ date: "2026-11-06", hours: 24, rainMm: "6.0", minC: "5", maxC: "16.5", maxWindKmh: "10", maxGustKmh: "55" }]);
+  });
+
+  it("WX12 a day's pictures: frost, rain from 1 mm, and wind from the farm's own figure or gusts at half as much again", () => {
+    const base = { date: "2026-11-06", hours: 24, rainMm: "0.0", minC: "6.0", maxC: "15.0", maxWindKmh: "25", maxGustKmh: null };
+    expect(dayPictures(base)).toEqual([]);
+    expect(dayPictures({ ...base, maxWindKmh: "39" })).toEqual([]);
+    expect(dayPictures({ ...base, maxWindKmh: "40" })).toEqual([{ kind: "wind", label: "Windy" }]);
+    // Gusts on their own: 60 on a farm that calls 40 windy.
+    expect(gustyAt(40)).toBe(60);
+    expect(dayPictures({ ...base, maxGustKmh: "59" })).toEqual([]);
+    expect(dayPictures({ ...base, maxGustKmh: "60" })).toEqual([{ kind: "wind", label: "Windy" }]);
+    // An exposed farm on 55: 45 isn't windy there, and gusts count from 83.
+    expect(dayPictures({ ...base, maxWindKmh: "45", maxGustKmh: "82" }, 55)).toEqual([]);
+    expect(dayPictures({ ...base, maxWindKmh: "55" }, 55)).toEqual([{ kind: "wind", label: "Windy" }]);
+    expect(dayPictures({ ...base, minC: "2.0", rainMm: "1.0", maxWindKmh: "48" })).toEqual([{ kind: "frost", label: "Frost" }, { kind: "rain", label: "Rain" }, { kind: "wind", label: "Windy" }]);
+    expect(dayPictures({ ...base, minC: "2.1", rainMm: "0.9" })).toEqual([]);
+    // Nothing fetched, nothing shown.
+    expect(dayPictures({ ...base, rainMm: null, minC: null, maxC: null, maxWindKmh: null })).toEqual([]);
   });
 
   it("WX5 frost at 2 degrees or below, heavy rain at 25 mm in a day or 10 mm in an hour; one of each a day", () => {

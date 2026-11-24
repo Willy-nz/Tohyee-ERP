@@ -123,7 +123,7 @@ describeWithDatabase("MetService weather forecast", () => {
   it("WX1 farms, choices and turning on: needs a tested key and a pin; units are estimated", async () => {
     expect((await call(owner, weatherRoute.PATCH as Handler, "/api/farming/weather", "PATCH", { enabled: true })).status).toBe(409);
     const placed = await call(owner, weatherRoute.PATCH as Handler, "/api/farming/weather", "PATCH", { locations: [{ farmId, point: [169.9, -46.1] }] });
-    expect(placed.body.setup.locations).toEqual([{ farmId, farmName: "Home farm", point: { latitude: "-46.100000", longitude: "169.900000" }, centre: null }]);
+    expect(placed.body.setup.locations).toEqual([{ farmId, farmName: "Home farm", point: { latitude: "-46.100000", longitude: "169.900000" }, centre: null, windyKmh: 40 }]);
     expect((await call(owner, weatherRoute.PATCH as Handler, "/api/farming/weather", "PATCH", { choices: ["rain", "snow"] })).status).toBe(400);
     expect((await call(owner, weatherRoute.PATCH as Handler, "/api/farming/weather", "PATCH", { refreshHours: 2 })).status).toBe(400);
     const chosen = await call(owner, weatherRoute.PATCH as Handler, "/api/farming/weather", "PATCH", { choices: ["rain", "temperature", "wind"], refreshHours: 3 });
@@ -150,6 +150,16 @@ describeWithDatabase("MetService weather forecast", () => {
     expect(seen.body.forecast.forecast.hours.length).toBeLessThanOrEqual(48);
     expect(seen.body.forecast.forecast.days.length).toBeLessThanOrEqual(7);
     expect(seen.body.forecast.forecast.hours[0]).toHaveProperty("gustKmh", null);
+    // WX12 what counts as windy is the farm's own figure: changing it keeps the pin and the kept forecast.
+    expect(seen.body.forecast.forecast.windyKmh).toBe(40);
+    expect((await call(owner, weatherRoute.PATCH as Handler, "/api/farming/weather", "PATCH", { locations: [{ farmId, point: [169.9, -46.1], windyKmh: 5 }] })).status).toBe(400);
+    expect((await call(owner, weatherRoute.PATCH as Handler, "/api/farming/weather", "PATCH", { locations: [{ farmId, point: [169.9, -46.1], windyKmh: "fast" }] })).status).toBe(400);
+    const exposed = await call(owner, weatherRoute.PATCH as Handler, "/api/farming/weather", "PATCH", { locations: [{ farmId, point: [169.9, -46.1], windyKmh: 55 }] });
+    expect(exposed.body.setup.locations[0]).toMatchObject({ point: { latitude: "-46.100000", longitude: "169.900000" }, windyKmh: 55 });
+    expect(await as(keptForecastCount)).toEqual({ cache: 1, records: 0 });
+    expect((await call(worker, forecastRoute.GET as Handler, `/api/farming/weather/forecast?farmId=${farmId}`)).body.forecast.forecast.windyKmh).toBe(55);
+    // Saving the pin again without a figure leaves it as it was.
+    expect((await call(owner, weatherRoute.PATCH as Handler, "/api/farming/weather", "PATCH", { locations: [{ farmId, point: [169.9, -46.1] }] })).body.setup.locations[0].windyKmh).toBe(55);
     // A refresh not yet due does nothing.
     expect((await refreshWeather(await organisation(), WEATHER_ACTOR, { now: new Date(Date.now() + 4 * 3_600_000 + 60_000) })).skipped).toBe("not_due");
   });
