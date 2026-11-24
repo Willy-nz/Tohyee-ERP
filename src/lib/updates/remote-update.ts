@@ -67,7 +67,7 @@ function statusDir(): string | null {
 }
 
 const NOT_HERE =
-  "Update now works on servers installed with the Tohyee Windows installer (0.41.0 or later). On this server, update it the way it was installed.";
+  "Update now works on servers installed with the Tohyee Windows installer (0.44.0 or later). On this server, update it the way it was installed.";
 
 /** What the request file says, or null when there isn't one (or it isn't readable). */
 async function readRequest(dir: string, now: Date): Promise<RemoteUpdateState["pending"]> {
