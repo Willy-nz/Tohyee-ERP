@@ -10,6 +10,7 @@ import { add, dec, type Decimal, divide, isNegative, isZero, mul, neg, sub, toFi
 import { getOrganisation, type OrganisationRecord } from "@/lib/organisations/registry";
 import { PAYABLES_SQL } from "@/lib/reports/aged-payables";
 import { financialYearEndMonth } from "@/lib/reports/financial";
+import { listAccountMaps } from "@/lib/consolidation/mapping";
 import { type GroupUser, listAdjustments, listBudgetRates, listRateOverrides, requireGroup, rolesOf } from "@/lib/consolidation/groups";
 import { membersOn, periodCrossesMembership } from "@/lib/consolidation/membership";
 import { roleAtLeast } from "@/lib/auth/roles";
@@ -66,7 +67,16 @@ function placeOf(account: { accountClass: AccountClass; accountType: AccountType
   return account.accountClass === "revenue" ? "revenue" : "expenses";
 }
 
-type Account = { id: string; code: string; name: string; accountClass: AccountClass; accountType: AccountType; systemKey: string | null };
+type Account = {
+  id: string;
+  code: string;
+  name: string;
+  accountClass: AccountClass;
+  accountType: AccountType;
+  systemKey: string | null;
+  /** The parent's account this one is mapped to in the group (CO16): it adds up on that line, whatever its own code. */
+  target?: Account;
+};
 type DayRow = { accountId: string; date: string; debit: Decimal; credit: Decimal };
 
 type Member = {
@@ -234,17 +244,25 @@ type Loaded = {
    * line, so neither is left out of its report.
    */
   clashing: Set<string>;
+  /** Saved chart maps that can't be used (the account has gone, or isn't the same class any more), a count for each member. */
+  staleMaps: Map<string, number>;
 };
 
 /** The line an account's amounts go on: its code, or its code and place when the code clashes. */
-function keyOf(loaded: { clashing: Set<string> }, account: Account): string {
+function keyOf(loaded: { clashing: Set<string> }, mapped: Account): string {
+  const account = mapped.target ?? mapped;
   return loaded.clashing.has(account.code.toLowerCase()) ? `${account.code}~${placeOf(account)}` : account.code;
 }
 
 function clashingCodes(members: Member[]): Set<string> {
   const places = new Map<string, Set<Place>>();
   for (const member of members) {
-    for (const [code, account] of member.byCode) places.set(code, (places.get(code) ?? new Set<Place>()).add(placeOf(account)));
+    // A mapped account stands where the parent's account does, so it can't clash.
+    for (const mapped of member.accounts.values()) {
+      const account = mapped.target ?? mapped;
+      const code = account.code.toLowerCase();
+      places.set(code, (places.get(code) ?? new Set<Place>()).add(placeOf(account)));
+    }
   }
   return new Set([...places].filter(([, found]) => found.size > 1).map(([code]) => code));
 }
@@ -300,7 +318,19 @@ async function load(user: GroupUser, groupId: unknown, asAt: string, withBudget 
     const own = new Map(overrides.filter((entry) => entry.currencyCode === member.currency).map((entry) => [`${entry.month}|${entry.kind}`, entry.rate]));
     translators.set(member.record.id, new Translator(member, group.currencyCode, parentRecord.displayName, lists.get(member.currency) ?? [], own));
   }
-  return { group, periods, members, translators, parent: members.find((member) => member.record.id === group.parentOrganisationId)!, yearEndMonth, clashing: clashingCodes(members) };
+  const parent = members.find((member) => member.record.id === group.parentOrganisationId)!;
+  // Chart mapping (CO16): send each mapped account to the parent's account, when that still fits.
+  const staleMaps = new Map<string, number>();
+  for (const map of await listAccountMaps(group.id)) {
+    const member = members.find((each) => each.record.id === map.organisationId);
+    if (!member || member === parent) continue;
+    const account = member.accounts.get(map.accountId);
+    if (!account) continue;
+    const target = parent.accounts.get(map.parentAccountId);
+    if (target && target.accountClass === account.accountClass) account.target = target;
+    else staleMaps.set(member.record.id, (staleMaps.get(member.record.id) ?? 0) + 1);
+  }
+  return { group, periods, members, translators, parent, yearEndMonth, clashing: clashingCodes(members), staleMaps };
 }
 
 function refuseMissing(loaded: Loaded): void {
@@ -378,9 +408,10 @@ function codeNotices(loaded: Loaded, sections: ConsolidatedSection[]): string[] 
     const code = entry.code.toLowerCase();
     if (!code || seen.has(code)) continue;
     seen.add(code);
+    // An account mapped elsewhere isn't on this line; one mapped here was put here on purpose.
     const held = loaded.members.flatMap((member) => {
       const account = member.byCode.get(code);
-      return account ? [{ member, account }] : [];
+      return account && !account.target ? [{ member, account }] : [];
     });
     if (loaded.clashing.has(code)) {
       split.push(`${entry.code} is ${held.map(({ member, account }) => `${account.name} (${PLACE_SAID[placeOf(account)]}) in ${member.record.displayName}`).join(" and ")}`);
@@ -389,8 +420,10 @@ function codeNotices(loaded: Loaded, sections: ConsolidatedSection[]): string[] 
     const names = new Set(held.map(({ account }) => account.name.trim().toLowerCase()));
     if (names.size > 1) merged.push(`${entry.code} (${held.map(({ member, account }) => `${account.name} in ${member.record.displayName}`).join(", ")})`);
   }
+  const stale = [...loaded.staleMaps].map(([id, count]) => `${count} in ${pairName(loaded, id)}`);
   const few = (list: string[]) => `${list.slice(0, 6).join("; ")}${list.length > 6 ? `; and ${list.length - 6} more` : ""}`;
   return [
+    ...(stale.length ? [`Some chart mapping no longer fits (${stale.join(", ")}): the parent's account was removed or changed kind. Those accounts are back on their own codes. Check Chart mapping.`] : []),
     ...(split.length ? [`The same code is a different kind of account in different organisations, so each is on its own line: ${few(split)}. Give them different codes to tidy this up.`] : []),
     ...(merged.length ? [`Accounts add up by code. These codes have different names in different organisations and are added together under the first name: ${few(merged)}. If they aren't the same thing, give one a different code.`] : []),
   ];

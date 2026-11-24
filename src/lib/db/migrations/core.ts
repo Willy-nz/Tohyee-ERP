@@ -28,6 +28,7 @@ import { migration as m0026 } from "@/lib/db/migrations/core/0026-ai-key-end-dat
 import { migration as m0027 } from "@/lib/db/migrations/core/0027-ai-tool-scope";
 import { migration as m0028 } from "@/lib/db/migrations/core/0028-ai-key-ending-warned";
 import { migration as m0029 } from "@/lib/db/migrations/core/0029-ai-key-addresses";
+import { migration as m0030 } from "@/lib/db/migrations/core/0030-consolidation-account-maps";
 
 /**
  * Migrations for the core (control-plane) database named in DATABASE_URL.
@@ -74,4 +75,5 @@ export const coreMigrations: readonly Migration[] = [
   m0027,
   m0028,
   m0029,
+  m0030,
 ];
