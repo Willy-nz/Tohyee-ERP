@@ -326,7 +326,9 @@ that something happened.
   kept under a name. Invoices, bills, ledger lines, money spent and
   received, contacts (customers and suppliers) and items. An organisation's
   own custom fields are fields too (text, numbers, money, dates, tick boxes
-  and lists; not ones holding several choices), and so are its tracking
+  and lists; one holding several choices is found by any one of them), and
+  the custom fields of the customer or supplier a record is for ("Customer:
+  Region" on an invoice), with their email and phone. So are its tracking
   categories: a ledger line's own, and on an invoice, bill or bank
   transaction "on any line", where "is" finds those with a line that has
   the value and "isn't" those with none. Filters are
@@ -342,8 +344,14 @@ that something happened.
   and only its maker or an admin changes or deletes a shared one. A search
   can only name fields from a fixed list for its kind of record, and what's
   typed is passed as a value, never as part of the query. Invoices and
-  Bills have **Save this view**, which starts a search from the tab and
-  sort being looked at. **Show on Home** (tenant migration 0306) puts a search
+  A search can have up to five **calculated
+  columns**: a name and a sum over the record's own number and money fields
+  ({total} - {owing}), with plus, minus, times, divide and brackets. They
+  show, filter and sort like any number; dividing by zero leaves the cell
+  empty. Money added to or taken from money is shown and totalled as money. The sum is read by a small grammar of its own and written out from
+  the fixed field list, so nothing typed is run as it stands. Invoices and
+  Bills have **Save this view**, which starts a search from the tab, the
+  search text and the sort being looked at. **Show on Home** (tenant migration 0306) puts a search
   on Home with how many match now and its first money total: a private one
   on its maker's Home, a shared one on everyone's. **Email me this** is each
   person's own choice for a search they can open: every day, every week

@@ -163,7 +163,7 @@ function Invoices({ organisationId }: { organisationId: string }) {
       </div>
       <ListSearch label="Search invoices" placeholder="Number, customer or reference" onSearch={setSearch} />
       <p className={ui.muted}>
-        Need more filters, or want to keep this one? <Link href={savedSearchFromList("invoice", { status: filter.status, awaitingPayment: filter.awaitingPayment, sort })}>Save this view</Link>
+        Need more filters, or want to keep this one? <Link href={savedSearchFromList("invoice", { status: filter.status, awaitingPayment: filter.awaitingPayment, sort, search })}>Save this view</Link>
       </p>
       <InvoiceList key={`${filter.label}:${search}:${sort?.column}:${sort?.direction}`} organisationId={organisationId} filter={filter} search={search} sort={sort} onSort={setSort} />
     </div>

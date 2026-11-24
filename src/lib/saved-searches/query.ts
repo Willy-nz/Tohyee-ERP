@@ -1,6 +1,7 @@
 import { ValidationError } from "@/lib/errors";
 import { dec, toFixedString } from "@/lib/money/decimal";
 import { DATE_RANGES, fieldOf, OPERATORS, type RecordType, type SearchField } from "@/lib/saved-searches/catalogue";
+import { parseFormulas, type SearchFormula, withFormulas } from "@/lib/saved-searches/formulas";
 
 /**
  * A saved search's definition and the SQL it turns into. Pure: no database
@@ -13,6 +14,8 @@ export type SearchDefinition = {
   filters: SearchFilter[];
   columns: string[];
   sort: { field: string; direction: "asc" | "desc" } | null;
+  /** Calculated columns (f1 to f5), usable as columns, in filters and to sort by. */
+  formulas?: SearchFormula[];
 };
 
 export const MAX_FILTERS = 12;
@@ -52,8 +55,10 @@ function cleanValue(field: SearchField, op: string, raw: unknown, which: string)
 }
 
 /** Checks a definition against its record type and returns it tidied: unknown fields and operators are refused, not dropped. */
-export function parseDefinition(type: RecordType, input: unknown): SearchDefinition {
+export function parseDefinition(baseType: RecordType, input: unknown): SearchDefinition {
   if (!isRecord(input)) throw new ValidationError("A search needs filters, columns and a sort.");
+  const formulas = parseFormulas(baseType, input.formulas);
+  const type = withFormulas(baseType, formulas);
   const rawFilters = input.filters === undefined ? [] : input.filters;
   if (!Array.isArray(rawFilters)) throw new ValidationError("filters is a list.");
   if (rawFilters.length > MAX_FILTERS) throw new ValidationError(`A search can have up to ${MAX_FILTERS} filters.`);
@@ -83,7 +88,12 @@ export function parseDefinition(type: RecordType, input: unknown): SearchDefinit
     if (!field) throw new ValidationError(`${type.label} have no field "${String(input.sort.field)}".`);
     sort = { field: field.key, direction: input.sort.direction === "asc" ? "asc" : "desc" };
   }
-  return { filters, columns, sort };
+  return { filters, columns, sort, ...(formulas.length > 0 ? { formulas } : {}) };
+}
+
+/** The record type as a search sees it: with its own calculated columns. */
+export function searchType(type: RecordType, definition: SearchDefinition): RecordType {
+  return withFormulas(type, definition.formulas ?? []);
 }
 
 function addDays(date: string, days: number): string {
@@ -136,7 +146,8 @@ function escapeLike(text: string): string {
 }
 
 /** Turns a checked definition into SQL. `today` is the organisation's date, for moving ranges and days overdue. */
-export function buildSearch(type: RecordType, definition: SearchDefinition, options: { today: string; limit: number; offset: number }): BuiltSearch {
+export function buildSearch(baseType: RecordType, definition: SearchDefinition, options: { today: string; limit: number; offset: number }): BuiltSearch {
+  const type = searchType(baseType, definition);
   const params: unknown[] = [];
   const param = (value: unknown): string => {
     params.push(value);

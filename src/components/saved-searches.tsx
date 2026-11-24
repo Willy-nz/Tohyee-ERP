@@ -6,6 +6,7 @@ import { useEffect, useState } from "react";
 import { Money } from "@/components/books";
 import { useConfirm } from "@/components/confirm-dialog";
 import { DateInput } from "@/components/date-input";
+import { Formulas } from "@/components/saved-search-formulas";
 import { useApiData } from "@/components/hooks";
 import { Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
@@ -14,6 +15,7 @@ import { formatDate } from "@/lib/format";
 import { DATE_RANGES, OPERATORS } from "@/lib/saved-searches/catalogue";
 import { startFromAddress } from "@/lib/saved-searches/from-list";
 import type { PublicRecordType as RecordType } from "@/lib/saved-searches/org-catalogue";
+import type { SearchFormula } from "@/lib/saved-searches/formulas";
 import type {
   SearchDefinition,
   SearchFilter,
@@ -79,12 +81,34 @@ function complete(type: RecordType, filter: SearchFilter): boolean {
   return true;
 }
 
+/** A calculated column that's ready to send: named, with a sum. */
+function ready(formula: SearchFormula): boolean {
+  return formula.label.trim() !== "" && formula.expression.trim() !== "";
+}
+
+/** What's ready to send: half-typed filters and calculated columns wait, along with anything that leans on them. */
 function sendable(draft: Draft): SearchDefinition {
+  const all = draft.definition.formulas ?? [];
+  const waiting = new Set(
+    all.filter((formula) => !ready(formula)).map((formula) => formula.key),
+  );
+  const columns = draft.definition.columns.filter((key) => !waiting.has(key));
+  const formulas = all.filter(ready);
   return {
-    ...draft.definition,
-    filters: draft.definition.filters.filter((filter) =>
-      complete(draft.type, filter),
+    filters: draft.definition.filters.filter(
+      (filter) => !waiting.has(filter.field) && complete(draft.type, filter),
     ),
+    columns:
+      columns.length > 0
+        ? columns
+        : draft.definition.columns
+            .filter((key) => !key.startsWith("f"))
+            .slice(0, 1),
+    sort:
+      draft.definition.sort && !waiting.has(draft.definition.sort.field)
+        ? draft.definition.sort
+        : null,
+    ...(formulas.length > 0 ? { formulas } : {}),
   };
 }
 
@@ -228,7 +252,23 @@ function Editor({
   const [error, setError] = useState<string | null>(null);
   const [showColumns, setShowColumns] = useState(false);
 
-  const definitionKey = JSON.stringify([draft.type.key, sendable(draft)]);
+  // The record's fields plus this search's calculated columns, which filter, show and sort like any number.
+  const formulas = draft.definition.formulas ?? [];
+  const shown: Draft = {
+    ...draft,
+    type: {
+      ...draft.type,
+      fields: [
+        ...draft.type.fields,
+        ...formulas.map((formula) => ({
+          key: formula.key,
+          label: formula.label.trim() || "Calculated",
+          type: "number" as const,
+        })),
+      ],
+    },
+  };
+  const definitionKey = JSON.stringify([draft.type.key, sendable(shown)]);
   useEffect(() => {
     let stale = false;
     // A short wait, so typing a value doesn't search on every key.
@@ -278,7 +318,7 @@ function Editor({
           name: draft.name,
           shared: draft.shared,
           onHome: draft.onHome,
-          definition: sendable(draft),
+          definition: sendable(shown),
         },
       });
       onSaved(got.search);
@@ -317,7 +357,7 @@ function Editor({
         organisationId,
         recordType: draft.type.key,
         name: draft.name,
-        definition: sendable(draft),
+        definition: sendable(shown),
       });
       const url = URL.createObjectURL(blob);
       const link = document.createElement("a");
@@ -341,7 +381,7 @@ function Editor({
         }
       >
         <div className={ui.stack}>
-          <Filters draft={draft} onChange={(filters) => change({ filters })} />
+          <Filters draft={shown} onChange={(filters) => change({ filters })} />
           <div className={styles.sortRow}>
             <Field label="Sort by">
               <select
@@ -359,7 +399,7 @@ function Editor({
                   })
                 }
               >
-                {draft.type.fields.map((field) => (
+                {shown.type.fields.map((field) => (
                   <option key={field.key} value={field.key}>
                     {field.label}
                   </option>
@@ -398,9 +438,40 @@ function Editor({
                 : `Columns (${draft.definition.columns.length})`}
             </button>
           </div>
+          <Formulas
+            type={draft.type}
+            formulas={formulas}
+            onChange={(next) => {
+              // A calculated column that's gone takes its filters, its column and its sort with it.
+              const keys = new Set([
+                ...draft.type.fields.map((field) => field.key),
+                ...next.map((formula) => formula.key),
+              ]);
+              const added = next
+                .filter(
+                  (formula) =>
+                    !formulas.some((each) => each.key === formula.key),
+                )
+                .map((formula) => formula.key);
+              change({
+                formulas: next,
+                filters: draft.definition.filters.filter((filter) =>
+                  keys.has(filter.field),
+                ),
+                columns: [
+                  ...draft.definition.columns.filter((key) => keys.has(key)),
+                  ...added,
+                ],
+                sort:
+                  draft.definition.sort && keys.has(draft.definition.sort.field)
+                    ? draft.definition.sort
+                    : null,
+              });
+            }}
+          />
           {showColumns ? (
             <div className={styles.columns}>
-              {draft.type.fields.map((field) => {
+              {shown.type.fields.map((field) => {
                 const on = draft.definition.columns.includes(field.key);
                 return (
                   <label key={field.key}>
@@ -411,7 +482,7 @@ function Editor({
                       onChange={() =>
                         // Columns stay in the record's own order, whichever was ticked last.
                         change({
-                          columns: draft.type.fields
+                          columns: shown.type.fields
                             .map((each) => each.key)
                             .filter((key) =>
                               key === field.key
