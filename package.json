@@ -34,11 +34,11 @@
     "exceljs": "^4.4.0",
     "geographiclib-geodesic": "^2.2.0",
     "html-to-image": "^1.11.13",
-    "imapflow": "^2.11.0",
-    "mssql": "^12.7.14",
+    "imapflow": "^2.12.1",
+    "mssql": "^12.7.16",
     "mysql2": "^3.24.6",
     "next": "16.4.6",
-    "nodemailer": "^10.5.0",
+    "nodemailer": "^10.6.0",
     "pdf-lib": "^1.17.1",
     "pg": "^8.23.1",
     "qrcode": "^1.5.4",
@@ -69,12 +69,12 @@
     "eslint": "^9",
     "eslint-config-next": "16.4.6",
     "fake-indexeddb": "6.2.8",
-    "mailparser": "^3.14.3",
-    "smtp-server": "^3.21.4",
+    "mailparser": "^3.14.5",
+    "smtp-server": "^3.21.6",
     "tsx": "^4.23.15",
     "typescript": "^5",
-    "unpdf": "^1.8.1",
-    "vitest": "^5.1.0"
+    "unpdf": "^1.9.1",
+    "vitest": "^5.1.1"
   },
   "engines": {
     "node": ">=20.19"
