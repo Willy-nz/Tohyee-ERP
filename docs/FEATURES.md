@@ -3212,19 +3212,21 @@ that something happened.
   a read-only `rainfall` tool. No outside weather data is mixed in (the
   MetService forecast below is kept apart).
 
-- **MetService weather forecast** (WX1-WX12, tenant migrations 0257, 0260, 0261 and 0307): each organisation uses its own MetService key.
+- **MetService weather forecast** (WX1-WX13, tenant migrations 0257, 0260, 0261 and 0307): each organisation uses its own MetService key.
   Settings › Farm › **Weather (MetService)** (admins) walks through what it
   costs (MetService's API units, paid to MetService), getting a key, pasting
   and testing it, each farm's pin (the middle of its paddocks to start),
-  what to fetch (rain, temperature, wind, gusts) with a units estimate, and
+  what to fetch (rain, temperature, wind, gusts, cloud) with a units estimate, and
   turning it on. Today has a **Weather forecast** card (the next 48 hours
   and 7 days, frost and heavy rain flags, when it was updated) and More has
   a **Weather** page by the hour; both carry "This data was provided by
   MetService Limited." Each day in the week shows a picture with its
   word: **Frost**, **Rain** (from 1 mm) and **Windy**, from each farm's own
   "Windy from" figure (40 km/h unless an admin changes it; gusts count at
-  half as much again). There are no sun or cloud pictures, as the forecast
-  holds no cloud cover. Refreshed every 3 hours by default; a refused key or
+  half as much again). Ticking **Cloud** in what to fetch (one more unit a
+  farm at each refresh) adds **Sunny**, **Some cloud** and **Cloudy**, from
+  the day's average cloud between 7 am and 7 pm, on days with no rain
+  picture. Refreshed every 3 hours by default; a refused key or
   no units left stops refreshing. Only the latest forecast is kept (24
   hours at most), never offline or in backups. An admin can enable forecast
   records after acknowledging responsibility for compliance with MetService's

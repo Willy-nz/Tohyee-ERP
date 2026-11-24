@@ -24,13 +24,14 @@ export const METSERVICE_ATTRIBUTION = "This data was provided by MetService Limi
 /** What the forecast numbers are, said beside the warnings, so they aren't taken for official ones. */
 export const WARNINGS_NOTE = "Worked out by Tohyee from the forecast numbers. These aren't MetService's official warnings.";
 
-export type WeatherChoice = "rain" | "temperature" | "wind" | "gusts";
+export type WeatherChoice = "rain" | "temperature" | "wind" | "gusts" | "cloud";
 
 export const WEATHER_CHOICES: Array<{ key: WeatherChoice; label: string; note: string; variables: string[] }> = [
   { key: "rain", label: "Rain", note: "mm an hour, and the day's total.", variables: ["precipitation.rate"] },
   { key: "temperature", label: "Temperature", note: "Also gives the frost risk, at no extra cost.", variables: ["air.temperature.at-2m"] },
   { key: "wind", label: "Wind", note: "Speed and direction (2 variables).", variables: ["wind.speed.at-10m", "wind.direction.at-10m"] },
   { key: "gusts", label: "Gusts", note: "The strongest gust each hour.", variables: ["wind.speed.gust.at-10m"] },
+  { key: "cloud", label: "Cloud", note: "How much of the sky is covered, for the sun and cloud pictures.", variables: ["cloud.cover"] },
 ];
 
 export const DEFAULT_CHOICES: WeatherChoice[] = ["rain", "temperature", "wind"];
@@ -93,6 +94,8 @@ export type ForecastHour = {
   windKmh: string | null;
   windDirection: string | null;
   gustKmh: string | null;
+  /** How much of the sky is covered, 0 to 100. Only there when cloud was fetched (WX13). */
+  cloudPct?: string | null;
 };
 
 type VariableBlock = { units?: unknown; data?: unknown; noData?: unknown; dimensions?: unknown };
@@ -129,6 +132,13 @@ function toKmh(value: number | null, units: string): number | null {
   return value * 3.6;
 }
 
+/** Cloud cover as a percentage, whether it came as 0 to 100 or as a fraction of 1. */
+function toPercent(value: number | null, units: string): number | null {
+  if (value === null) return null;
+  const percent = units.includes("%") || units.includes("percent") ? value : units === "1" || units.includes("fraction") ? value * 100 : value;
+  return Math.min(100, Math.max(0, percent));
+}
+
 function toMmPerHour(value: number | null, units: string): number | null {
   if (value === null) return null;
   if (units.includes("/s") || units.includes("s-1") || units.includes("per second")) return value * 3600;
@@ -154,6 +164,7 @@ export function parseForecast(body: unknown): ForecastHour[] {
   const wind = variables["wind.speed.at-10m"];
   const direction = variables["wind.direction.at-10m"];
   const gust = variables["wind.speed.gust.at-10m"];
+  const cloud = variables["cloud.cover"];
   // The first point's values: with time first, a time's values are `points` apart.
   const indexFor = (block: VariableBlock | undefined, timeIndex: number) => {
     const dims = Array.isArray(block?.dimensions) ? (block!.dimensions as unknown[]) : ["time", "point"];
@@ -166,6 +177,7 @@ export function parseForecast(body: unknown): ForecastHour[] {
     windKmh: fixed(toKmh(numberAt(wind, indexFor(wind, timeIndex)), unitsOf(wind)), 0),
     windDirection: fixed(numberAt(direction, indexFor(direction, timeIndex)), 0),
     gustKmh: fixed(toKmh(numberAt(gust, indexFor(gust, timeIndex)), unitsOf(gust)), 0),
+    ...(cloud ? { cloudPct: fixed(toPercent(numberAt(cloud, indexFor(cloud, timeIndex)), unitsOf(cloud)), 0) } : {}),
   }));
 }
 
@@ -183,6 +195,7 @@ export function onlyChosen(hours: ForecastHour[], choices: readonly WeatherChoic
     windKmh: choices.includes("wind") ? hour.windKmh : null,
     windDirection: choices.includes("wind") ? hour.windDirection : null,
     gustKmh: choices.includes("gusts") ? hour.gustKmh : null,
+    ...(choices.includes("cloud") ? { cloudPct: hour.cloudPct ?? null } : {}),
   }));
 }
 
@@ -203,7 +216,24 @@ export type ForecastDay = {
   maxC: string | null;
   maxWindKmh: string | null;
   maxGustKmh: string | null;
+  /** The average cloud cover through the daytime (7 am to 7 pm), 0 to 100. Only there when cloud was fetched. */
+  cloudPct?: string | null;
 };
+
+/** Daytime, for how sunny a day is: 7 am up to 7 pm. */
+const DAY_FROM_HOUR = 7;
+const DAY_TO_HOUR = 19;
+
+/** The day's cloud: the average over its daytime hours. With none left today, there's no sky to picture. */
+function dayCloud(list: ForecastHour[], timeZone: string): string | null {
+  const used = list.filter((hour) => {
+    if (typeof hour.cloudPct !== "string") return false;
+    const { hour: at } = localParts(hour.at, timeZone);
+    return at >= DAY_FROM_HOUR && at < DAY_TO_HOUR;
+  });
+  if (!used.length) return null;
+  return String(Math.round(used.reduce((sum, hour) => sum + Number(hour.cloudPct), 0) / used.length));
+}
 
 function maxOf(values: Array<string | null>): string | null {
   return values.reduce<string | null>((best, value) => (value === null ? best : best === null || cmp(dec(value), dec(best)) > 0 ? value : best), null);
@@ -236,6 +266,7 @@ export function forecastDays(hours: ForecastHour[], timeZone: string): ForecastD
       maxC: maxOf(list.map((hour) => hour.temperatureC)),
       maxWindKmh: maxOf(list.map((hour) => hour.windKmh)),
       maxGustKmh: maxOf(list.map((hour) => hour.gustKmh)),
+      ...(list.some((hour) => hour.cloudPct !== undefined) ? { cloudPct: dayCloud(list, timeZone) } : {}),
     }));
 }
 
@@ -277,19 +308,30 @@ export function gustyAt(windyKmh: number): number {
   return Math.round(windyKmh * 1.5);
 }
 
-export type DayPicture = { kind: "frost" | "rain" | "wind"; label: string };
+/** A day is sunny up to this much cloud through the daytime, and cloudy from CLOUDY_FROM_PCT; between is some cloud. */
+export const SUNNY_TO_PCT = 25;
+export const CLOUDY_FROM_PCT = 75;
+
+/** "part" is some cloud: drawn as the sun and the cloud together. */
+export type DayPicture = { kind: "sun" | "part" | "cloud" | "frost" | "rain" | "wind"; label: string };
 
 /**
  * The pictures beside a day (WX12), each with its word: frost at FROST_AT_C
  * or below, rain from RAIN_PICTURE_MM in the day, and wind once the day's
  * strongest wind reaches the farm's figure or its strongest gust reaches
- * half as much again. Sun and cloud aren't shown: the forecast holds no
- * cloud cover to choose them from.
+ * half as much again. With cloud fetched (WX13), a day with no rain picture
+ * leads with the sky: Sunny up to SUNNY_TO_PCT of cloud through the daytime,
+ * Cloudy from CLOUDY_FROM_PCT, and Some cloud between.
  */
 export function dayPictures(day: ForecastDay, windyKmh: number = WINDY_AT_KMH): DayPicture[] {
   const pictures: DayPicture[] = [];
+  const rainy = day.rainMm !== null && cmp(dec(day.rainMm), dec(RAIN_PICTURE_MM)) >= 0;
+  if (!rainy && typeof day.cloudPct === "string") {
+    const cloud = Number(day.cloudPct);
+    pictures.push(cloud <= SUNNY_TO_PCT ? { kind: "sun", label: "Sunny" } : cloud >= CLOUDY_FROM_PCT ? { kind: "cloud", label: "Cloudy" } : { kind: "part", label: "Some cloud" });
+  }
   if (day.minC !== null && cmp(dec(day.minC), dec(FROST_AT_C)) <= 0) pictures.push({ kind: "frost", label: "Frost" });
-  if (day.rainMm !== null && cmp(dec(day.rainMm), dec(RAIN_PICTURE_MM)) >= 0) pictures.push({ kind: "rain", label: "Rain" });
+  if (rainy) pictures.push({ kind: "rain", label: "Rain" });
   const windy = day.maxWindKmh !== null && cmp(dec(day.maxWindKmh), dec(String(windyKmh))) >= 0;
   const gusty = day.maxGustKmh !== null && cmp(dec(day.maxGustKmh), dec(String(gustyAt(windyKmh)))) >= 0;
   if (windy || gusty) pictures.push({ kind: "wind", label: "Windy" });

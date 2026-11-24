@@ -22557,7 +22557,7 @@ and `tests/integration/rainfall.test.ts`.
   `tohyee_farm_rainfall` (a row a reading, removed ones left out): RF1-RF7
   sum to 99.0 mm over 6 readings for Cowshed.
 
-## Farming: MetService weather forecast (WX1-WX12; built by Claude 5 Nov 2026 when the owner asked for MetService forecasts with each farm's own key, Claude's rules, not yet reviewed)
+## Farming: MetService weather forecast (WX1-WX13; built by Claude 5 Nov 2026 when the owner asked for MetService forecasts with each farm's own key, Claude's rules, not yet reviewed)
 
 Records only: nothing posts to the books.. MetService's
 API hasn't been tried live from Tohyee: these use the made-up forecast
@@ -22633,9 +22633,20 @@ API hasn't been tried live from Tohyee: these use the made-up forecast
   with gusts fetched, 59 isn't and 60 is. An exposed farm set to 55 doesn't
   call 45 windy, and counts gusts from 83. Changing the figure keeps the
   pin and the kept forecast. It means a windy day, not a limit for
-  spraying. Frost and heavy rain warnings carry their picture too. Sun and
-  cloud aren't shown: the forecast holds no cloud cover to choose them
-  from.
+  spraying. Frost and heavy rain warnings carry their picture too.
+- **WX13 Sun and cloud** (24 Nov 2026; the owner asked for the pictures to
+  be finished; the cut-offs are Claude's, not yet reviewed). **Cloud** is a
+  fifth thing to fetch (MetService's `cloud.cover`, a percentage), off
+  until an admin ticks it: one more unit a farm at each refresh, so rain,
+  temperature, wind and cloud for one farm is 5 units a refresh, 40 a day
+  every 3 hours. A day's cloud is the average through the daytime, 7 am up
+  to 7 pm: clear by day and overcast all night is 10%, not 55%. With only
+  night hours left in today, it has no sky picture. A day with no Rain picture
+  leads with the sky: **Sunny** up to 25%, **Cloudy** from 75%, and **Some
+  cloud** between (the sun and the cloud together): 25 is Sunny, 26 and 74
+  are Some cloud, 75 is Cloudy. Rain says enough about the sky, so a wet
+  day shows Rain alone. The hour-by-hour table has a Cloud (%) column.
+  Without cloud fetched, nothing about it is kept or shown.
 
 ## Farming: farm team tasks (FT1-FT7; built by Claude 5 Nov 2026 when the owner asked for the missing farm features, Claude's rules, not yet reviewed)
 

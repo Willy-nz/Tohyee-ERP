@@ -160,6 +160,18 @@ describeWithDatabase("MetService weather forecast", () => {
     expect((await call(worker, forecastRoute.GET as Handler, `/api/farming/weather/forecast?farmId=${farmId}`)).body.forecast.forecast.windyKmh).toBe(55);
     // Saving the pin again without a figure leaves it as it was.
     expect((await call(owner, weatherRoute.PATCH as Handler, "/api/farming/weather", "PATCH", { locations: [{ farmId, point: [169.9, -46.1] }] })).body.setup.locations[0].windyKmh).toBe(55);
+    // WX13 cloud is fetched once it's ticked, and each day then says how cloudy it is.
+    expect(seen.body.forecast.forecast.hours[0]).not.toHaveProperty("cloudPct");
+    expect(seen.body.forecast.forecast.days[0]).not.toHaveProperty("cloudPct");
+    const withCloud = await call(owner, weatherRoute.PATCH as Handler, "/api/farming/weather", "PATCH", { choices: ["rain", "temperature", "wind", "cloud"] });
+    expect(withCloud.body.setup.estimate).toMatchObject({ perRefresh: 5 });
+    expect((await refreshWeather(await organisation(), WEATHER_ACTOR, { now: new Date(Date.now() + 5 * 3_600_000) })).refreshed).toBe(1);
+    const cloudy = await call(worker, forecastRoute.GET as Handler, `/api/farming/weather/forecast?farmId=${farmId}`);
+    expect(cloudy.body.forecast.forecast.choices).toContain("cloud");
+    expect(cloudy.body.forecast.forecast.hours[0].cloudPct).toMatch(/^\d{1,3}$/);
+    expect(cloudy.body.forecast.forecast.days[1].cloudPct).toMatch(/^\d{1,3}$/);
+    await call(owner, weatherRoute.PATCH as Handler, "/api/farming/weather", "PATCH", { choices: ["rain", "temperature", "wind"] });
+    expect((await refreshWeather(await organisation(), WEATHER_ACTOR, { now: new Date(Date.now() + 6 * 3_600_000) })).refreshed).toBe(1);
     // A refresh not yet due does nothing.
     expect((await refreshWeather(await organisation(), WEATHER_ACTOR, { now: new Date(Date.now() + 4 * 3_600_000 + 60_000) })).skipped).toBe("not_due");
   });

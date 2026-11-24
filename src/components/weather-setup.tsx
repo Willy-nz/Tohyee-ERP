@@ -512,7 +512,7 @@ function ChooseStep({ organisationId, setup, onSetup }: StepProps) {
             </span>
           </label>
         ))}
-        <p className={ui.muted}>Frost risk comes from the temperature, so tick Temperature to get it.</p>
+        <p className={ui.muted}>Frost risk comes from the temperature, so tick Temperature to get it. Tick Cloud for the sun and cloud pictures: it&apos;s one more unit a farm at each refresh.</p>
       </fieldset>
       <Field label="Refresh every" hint="Forecasts change a few times a day. Every 3 hours is plenty for most farms.">
         <select value={refreshHours} onChange={(event) => setRefreshHours(Number(event.target.value))}>

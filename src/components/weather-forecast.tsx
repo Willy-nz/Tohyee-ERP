@@ -156,7 +156,14 @@ function DayPictures({ day, windyKmh }: { day: ForecastDay; windyKmh: number }) 
     <span className={styles.pictures}>
       {pictures.map((picture) => (
         <span key={picture.kind} className={styles.picture}>
-          <IllustratedIcon name={picture.kind} size={28} />
+          {picture.kind === "part" ? (
+            <>
+              <IllustratedIcon name="sun" size={28} />
+              <IllustratedIcon name="cloud" size={28} />
+            </>
+          ) : (
+            <IllustratedIcon name={picture.kind} size={28} />
+          )}
           {picture.label}
         </span>
       ))}
@@ -210,6 +217,7 @@ function HoursTable({ hours, choices }: { hours: ForecastHour[]; choices: Weathe
             {choices.includes("temperature") ? <th scope="col">Temp (°C)</th> : null}
             {choices.includes("wind") ? <th scope="col">Wind (km/h)</th> : null}
             {choices.includes("gusts") ? <th scope="col">Gusts (km/h)</th> : null}
+            {choices.includes("cloud") ? <th scope="col">Cloud (%)</th> : null}
           </tr>
         </thead>
         <tbody>
@@ -220,6 +228,7 @@ function HoursTable({ hours, choices }: { hours: ForecastHour[]; choices: Weathe
               {choices.includes("temperature") ? <td>{dash(hour.temperatureC)}</td> : null}
               {choices.includes("wind") ? <td>{windText(hour.windKmh, hour.windDirection)}</td> : null}
               {choices.includes("gusts") ? <td>{dash(hour.gustKmh)}</td> : null}
+              {choices.includes("cloud") ? <td>{dash(hour.cloudPct ?? null)}</td> : null}
             </tr>
           ))}
         </tbody>
