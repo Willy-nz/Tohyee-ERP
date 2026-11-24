@@ -242,7 +242,7 @@ export const SCREEN_COVERAGE: Record<string, ScreenCoverage> = {
   "DELETE /api/consolidation/groups/[groupId]/adjustments/[adjustmentId]": {"next": "groups"},
   "POST /api/consolidation/groups/[groupId]/adjustments": {"next": "groups"},
   "PUT /api/consolidation/groups/[groupId]/budget-rates": {"next": "groups"},
-  "PUT /api/consolidation/groups/[groupId]/chart-mapping": {"next": "groups"},
+  "PUT /api/consolidation/groups/[groupId]/chart-mapping": {"tool": "set_consolidation_chart_mapping"},
   "PUT /api/consolidation/groups/[groupId]/commentary/[commentaryId]": {"next": "groups"},
   "DELETE /api/consolidation/groups/[groupId]/commentary/[commentaryId]": {"next": "groups"},
   "POST /api/consolidation/groups/[groupId]/commentary": {"next": "groups"},

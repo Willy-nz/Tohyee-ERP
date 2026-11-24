@@ -43,6 +43,7 @@ import {
 } from "@/lib/supplier-credit-notes/service";
 import { createTrackingCategory, createTrackingValue, getTrackingSetup, updateTrackingCategory, updateTrackingValue } from "@/lib/tracking/service";
 import { roleAtLeast } from "@/lib/auth/roles";
+import { setChartMapping } from "@/lib/consolidation/mapping";
 import { ConflictError, ForbiddenError, ValidationError } from "@/lib/errors";
 import { setTaxDetails, type TaxAsset, type TaxDetails, taxDetailsByAsset } from "@/lib/tax/income/assets";
 import { TAX_DEPRECIATION_METHODS } from "@/lib/tax/income/depreciation";
@@ -896,6 +897,40 @@ export const FULL_WRITE_TOOLS: readonly AiTool[] = [
       ["budgetId", "version", "amounts"],
     ),
     run: (tx, args) => setBudgetAmounts(tx, args.budgetId, { version: args.version, amounts: args.amounts }),
+  },
+  {
+    name: "set_consolidation_chart_mapping",
+    title: "Set a group's chart mapping",
+    level: "full",
+    description:
+      "Sends accounts of one organisation in a consolidation group (not the parent) to the parent's accounts, so they add up on the parent's lines in the group's reports whatever their own codes. Read get_consolidation_chart_mapping first for the account ids. Each account goes to a parent account of the same accountClass, or parentAccountId null puts it back on its own code. Only the accounts named change, and nothing in any organisation's books does. The key's owner must be an admin or owner of every organisation in the group. Map only what you're sure is the same thing: tell the person which ones you weren't sure of instead of guessing.",
+    inputSchema: schema(
+      {
+        groupId: { type: "string", description: "From list_consolidations." },
+        organisationId: { type: "string", description: "The member whose accounts these are (not the parent)." },
+        maps: {
+          type: "array",
+          maxItems: 2000,
+          items: {
+            type: "object",
+            properties: { accountId: { type: "string", description: "The member's account." }, parentAccountId: { type: ["string", "null"], description: "The parent's account, or null for the account's own code." } },
+            required: ["accountId", "parentAccountId"],
+          },
+        },
+      },
+      ["groupId", "organisationId", "maps"],
+    ),
+    async run(tx, args) {
+      if (!tx.actor.userId) throw new ConflictError("This key has no person behind it, so it can't change a consolidation group.");
+      const mapping = await setChartMapping({ id: tx.actor.userId, email: tx.actor.email }, args.groupId, { organisationId: args.organisationId, maps: args.maps });
+      const sent = new Set((Array.isArray(args.maps) ? args.maps : []).map((map) => String((map as { accountId?: unknown }).accountId)));
+      return {
+        member: mapping.member,
+        parent: mapping.parent,
+        changed: mapping.accounts.filter((account) => sent.has(account.id)),
+        toLookAtCount: mapping.accounts.filter((account) => account.stale || (account.mappedTo === null && account.sameCode === null && !account.archived)).length,
+      };
+    },
   },
   {
     name: "create_fixed_asset_type",

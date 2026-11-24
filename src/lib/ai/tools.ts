@@ -3,6 +3,7 @@ import { directoryPage, getOrganisationDirectory } from "@/lib/organisations/dir
 import { ENTITY_TYPE_LABELS } from "@/lib/organisations/entity-types";
 import type { ToolGroupStatus } from "@/lib/ai/tool-modules";
 import { listGroups } from "@/lib/consolidation/groups";
+import { getChartMapping } from "@/lib/consolidation/mapping";
 import { consolidatedBalanceSheet, consolidatedBudgetVsActual, consolidatedProfitAndLoss } from "@/lib/consolidation/report";
 import { cashFlowForecast } from "@/lib/cash-flow/forecast";
 import { listApprovalRequests } from "@/lib/approvals/requests";
@@ -708,6 +709,33 @@ export const READ_TOOLS: readonly AiTool[] = (
       if (args.report === "balance_sheet") return consolidatedBalanceSheet(user, args.groupId, { asAt: args.asAt });
       if (args.report === "budget_vs_actual") return consolidatedBudgetVsActual(user, args.groupId, { from: args.from, to: args.to });
       return consolidatedProfitAndLoss(user, args.groupId, { from: args.from, to: args.to });
+    },
+  },
+  {
+    name: "get_consolidation_chart_mapping",
+    title: "A group's chart mapping",
+    description:
+      "For one organisation in a consolidation group (not the parent): its accounts and which of the parent's accounts each adds up on in the group's reports. An account with mappedTo null goes by its own code: onto the parent's account with that code when sameCode is set, or a line of its own when it isn't. By default only the accounts to look at come back (no map and no account of the same code and class in the parent, or a map marked stale because the parent's account went or changed class); show \"all\" gives every account. parentAccounts are what set_consolidation_chart_mapping can send an account to: only ones of the same accountClass.",
+    inputSchema: schema(
+      {
+        groupId: { type: "string", description: "From list_consolidations." },
+        organisationId: { type: "string", description: "A member of the group other than its parent, from list_consolidations." },
+        show: { type: "string", enum: ["to_look_at", "all"], description: "Default to_look_at." },
+      },
+      ["groupId", "organisationId"],
+    ),
+    async run(tx, args) {
+      if (!tx.actor.userId) throw new ValidationError("This key has no person behind it, so it can't read consolidations.");
+      const mapping = await getChartMapping({ id: tx.actor.userId, email: tx.actor.email }, args.groupId, args.organisationId);
+      const toLookAt = mapping.accounts.filter((account) => account.stale || (account.mappedTo === null && account.sameCode === null && !account.archived));
+      return {
+        member: mapping.member,
+        parent: mapping.parent,
+        accountCount: mapping.accounts.length,
+        toLookAtCount: toLookAt.length,
+        accounts: args.show === "all" ? mapping.accounts : toLookAt,
+        parentAccounts: mapping.parentAccounts.filter((account) => !account.archived),
+      };
     },
   },
   {
