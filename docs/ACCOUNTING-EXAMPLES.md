@@ -24294,3 +24294,72 @@ backed up before Update now starts.
   Tohyee's data folder, which only Administrators can change) sees the
   unfinished update, puts v1.0.0 back and starts it, as in UPD11. From this
   version on; an update from 0.45.0 doesn't have it yet.
+
+## Moving stock to another farm (OPF7-OPF13; 26 Nov 2026; following common practice, not yet reviewed)
+
+Made-up examples. One organisation farms two blocks, Home and Runoff.
+Livestock is on from 1 Jun 2026 with 300 mixed-age dairy cows in the
+opening. "Milkers" (200 mixed-age cows) is in Home's paddock A. A move
+between farms in the same organisation is a move, not a sale: the stock
+stays in the same books. Records only: nothing is posted. Tested in
+`tests/integration/farm-move.test.ts` and `tests/unit/farm-move.test.ts`.
+
+- **OPF7 A whole mob moves.** Milkers go to Runoff on 10 Nov 2026, as a new
+  mob in Runoff's paddock B. On Home, Milkers come out of A on 10 Nov, have
+  0 head and are closed; their history says "Moved to Runoff: Milkers from
+  Home, 200 head". On Runoff, a new mob "Milkers from Home" (the name is
+  free to change) has 200 mixed-age cows in B from 10 Nov; its history says
+  "Came from Milkers on Home: 200 head". Kind and class don't change.
+  **No livestock movement is recorded**: the year's head count for
+  mixed-age cows is still opening 300, closing 300, with nothing sold,
+  bought, born or died. The valuation doesn't change, and home-bred stock
+  stays home-bred (no purchase, so nothing is added to the cost of bought
+  stock). Farm staff can record it, like any move, if they work on both
+  farms. A farm they can't see is "not found". An archived farm can't take
+  stock.
+- **OPF8 Part of a mob.** 50 of Milkers go to Runoff on 10 Nov: Home's
+  Milkers have **150**, Runoff's new mob **50**. If 160 of Milkers are
+  tagged, Tohyee asks which tagged animals go (at least 10, so no more than
+  150 tagged stay). The chosen tags go onto Runoff's animal register and
+  into the new mob. A tag that's already on Runoff's register for the same
+  kind is refused, and nothing moves. Moving all 200 as "part" is the whole
+  mob (OPF7); 201 is refused.
+- **OPF9 Into a mob already on the other farm.** Runoff's "Dry cows" (80
+  mixed-age cows) take the 50 on 10 Nov: Dry cows have **130**, in their
+  own paddock. The rules are the merge rules: same kind and class (heifers
+  into cows is refused: change the class first), and a mob is never more
+  than 100,000 head.
+- **OPF10 Withholding goes with them.** Milkers were treated on Home on 8
+  Nov with 28 days' meat withholding and 96 hours' milk withholding: safe
+  for slaughter from **6 Dec**, milk safe from **13 Nov** (end of day, no
+  time given). Moving 50 to Runoff on 10 Nov is allowed, and the step warns
+  first: "These animals are within a withholding period (safe for slaughter
+  from 6 Dec, milk safe from 13 Nov). It goes with them to Runoff." Runoff's
+  new mob then shows the same dates, in its list, on the paddock, in
+  "what's due", and a sale from it on 20 Nov is saved with the withholding
+  warning, as TRT4. Into Dry cows, treated on Runoff on 20 Oct with 30
+  days' meat withholding (safe 19 Nov), the merged mob takes the later
+  dates: **6 Dec** and 13 Nov. A treatment given to Home's Milkers on 15
+  Nov, after the move, doesn't follow the 50 that left on 10 Nov. Home's
+  150 keep their own withholding.
+- **OPF11 Sent twice, recorded once.** The move is recorded on a phone with
+  no signal and kept on the device. When it's sent, and sent again because
+  the reply was lost, it's one move: Home 150, Runoff 50, not 100 and 100.
+  The same move sent with different details (49 head) is refused and
+  nothing changes. Both farms change together, on the same date, or
+  neither does.
+- **OPF12 Both ways.** The 50 come back from Runoff into Home's Milkers on
+  20 Nov: Milkers have 200 again and Runoff's mob is closed. Milkers'
+  withholding is still 6 Dec and 13 Nov (from the one treatment, not
+  counted twice). Both farms' histories show the trip out and back.
+- **OPF13 What it isn't.** It's never a sale, purchase, death or birth:
+  no livestock movement, no invoice, bill or journal, and Livestock's
+  movements, head count reconciliation and valuation are the same before
+  and after. The Livestock locations aren't changed either (a farm isn't
+  linked to one). For cattle and deer the step and its answer remind:
+  "Tohyee doesn't tell NAIT. If this move needs recording in NAIT, record
+  it with OSPRI." Tohyee doesn't decide whether it does. Stock going to a
+  farm in another organisation is still a sale there and a purchase in the
+  other. Moving tagged animals by tag between mobs on different farms
+  points to this step ("use Move to another farm") instead of "sell and
+  buy".
