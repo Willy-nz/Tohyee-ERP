@@ -21,6 +21,7 @@ import {
 } from "@/lib/farming/fuel-refund-rules";
 import { requireFarming } from "@/lib/farming/paddocks";
 import { add, cmp, dec, type Decimal, parseDecimalInput, toFixedString, ZERO_DECIMAL } from "@/lib/money/decimal";
+import { getGstRegistration, isRegisteredOn } from "@/lib/tax/registration";
 import { optionalBoolean, requireId, requireOneOf, requireString } from "@/lib/validation";
 
 /*
@@ -71,6 +72,14 @@ export type FuelQuarter = {
   /** Petrol lines with no litres: the claim can't be worked out (FUEL3). */
   missingLitres: number;
   result: RefundResult | null;
+  /**
+   * How to code the refund when it comes in (FUEL11, TXF5): with GST at 15%
+   * only when registered for GST at the quarter's end (GST was claimed on the
+   * petrol); with no GST otherwise.
+   */
+  gstRegistered: boolean;
+  /** Petrol added by hand (FUEL4): usually no GST was claimed on it. */
+  handAddedPetrol: boolean;
   notes: string[];
 };
 
@@ -210,6 +219,8 @@ export async function fuelQuarter(tx: OrgTx, input: { quarterEnd: unknown; today
     users: shown,
     missingLitres,
     result,
+    gstRegistered: isRegisteredOn(await getGstRegistration(tx), end),
+    handAddedPetrol: petrol.some((line) => line.source === "manual"),
     notes,
   };
 }

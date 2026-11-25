@@ -92,6 +92,11 @@ describeWithDatabase("farm fuel excise refund", () => {
     quarter = await as((tx) => fuelQuarter(tx, { quarterEnd: "2026-09-30", today: "2026-11-21" }));
     // 600 + 50 + 350 = 1,000 bought; 200 + 1,000 − 300 = 900 used; 70% off-road.
     expect(quarter.result).toMatchObject({ bought: "1000.00", used: "900.00", offRoadLitres: "630.00", refund: "507.32", gst: "66.17", excise: "441.15", problems: [] });
+    // TXF5: code the refund with GST only when registered for GST.
+    expect(quarter).toMatchObject({ gstRegistered: true, handAddedPetrol: true });
+    await as((tx) => tx.query("update organisation_settings set gst_registered_until = '2026-06-30' where id = true"));
+    expect((await as((tx) => fuelQuarter(tx, { quarterEnd: "2026-09-30", today: "2026-11-21" }))).gstRegistered).toBe(false);
+    await as((tx) => tx.query("update organisation_settings set gst_registered_until = null where id = true"));
 
     // FUEL5, FUEL6: the next quarter starts from this one's tank and shares.
     const next = await as((tx) => fuelQuarter(tx, { quarterEnd: "2026-12-31", today: "2026-11-21" }));
