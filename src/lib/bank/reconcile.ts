@@ -9,7 +9,7 @@ import { assertSameRequest, requestHash } from "@/lib/idempotency";
 import { thirdCurrencyMessage } from "@/lib/fx/documents";
 import { recordPayment } from "@/lib/invoices/payments";
 import { assertPostingDateAllowed } from "@/lib/ledger/period-controls";
-import { dec, parseDecimalInput, toFixedString } from "@/lib/money/decimal";
+import { dec, isPositive, parseDecimalInput, toFixedString } from "@/lib/money/decimal";
 import {
   asRecord,
   optionalId,
@@ -162,6 +162,32 @@ async function loadJournalLines(tx: OrgTx, ids: string[]): Promise<CandidateRow[
 }
 
 /**
+ * A customer payment recorded from a statement line (BK5). Anything paid
+ * beyond what the invoice owes would be an overpayment (OP4): from a bank
+ * line that's usually a mistake (the invoice was already paid, and the line
+ * is that payment), so it's refused unless the person chose to keep the
+ * extra as credit (BKF2). Refusing rolls the whole reconciliation back.
+ */
+async function invoicePaymentFromLine(
+  tx: OrgTx,
+  invoiceId: unknown,
+  allowOverpayment: boolean,
+  command: Parameters<typeof recordPayment>[2],
+) {
+  const { payment, invoice } = await recordPayment(tx, invoiceId, command);
+  if (allowOverpayment || !isPositive(dec(payment.overpaymentAmount))) return payment;
+  const name = invoice.invoiceNumber ? `Invoice ${invoice.invoiceNumber}` : `Invoice #${invoice.id}`;
+  if (!isPositive(dec(payment.invoiceAmount))) {
+    throw new ConflictError(
+      `${name} is already paid, so paying it again from this line would record ${payment.amount} as an overpayment. If this line is the payment already recorded on the invoice, match the line to that payment instead. If the customer really paid twice, choose to keep the extra as an overpayment.`,
+    );
+  }
+  throw new ConflictError(
+    `${name} only owed ${payment.invoiceAmount}, but ${payment.amount} is set against it. Lower the amount to ${payment.invoiceAmount} (with an adjustment for any difference), or choose to keep the extra ${payment.overpaymentAmount} as an overpayment.`,
+  );
+}
+
+/**
  * Reconciles an unreconciled statement line. `command.kind`:
  * - "match": `journalLineIds` already posted on the line's account (BK4);
  * - "payments": `allocations` of `{ invoiceId | billId, amount }` paid from the line (BK5);
@@ -172,6 +198,10 @@ async function loadJournalLines(tx: OrgTx, ids: string[]): Promise<CandidateRow[
  * - "split": `journalLineId`, one posted journal line, and `otherLineIds`, the
  *   other unreconciled statement lines that together with this one make it up
  *   (BK26-BK28; see reconcileSplit).
+ *
+ * For "payments", `allowOverpayment: true` keeps anything paid beyond an
+ * invoice's amount due as the customer's overpayment; without it, that's
+ * refused (BKF2).
  *
  * For "match" and "payments", an `adjustment` (`accountCode`, optional
  * `taxCode`, `contactId`, `description`, `tracking`) records a difference
@@ -291,12 +321,13 @@ export async function reconcileStatementLine(
       throw new ValidationError(`The payments add up to ${formatCents(total)}, but the line is ${unsigned}. They must add up to the line.`);
     }
     const reference = (line.reference ?? line.particulars ?? line.payee ?? undefined)?.slice(0, 100);
+    // BKF2: paying more than an invoice owes makes an overpayment only when asked for (allowOverpayment: true).
+    const allowOverpayment = command.allowOverpayment === true;
     journalLineIds = [];
     for (const [index, allocation] of allocations.entries()) {
       const payment =
         "invoiceId" in allocation
-          ? (
-              await recordPayment(tx, allocation.invoiceId, {
+          ? await invoicePaymentFromLine(tx, allocation.invoiceId, allowOverpayment, {
                 source,
                 idempotencyKey: subKey(`payment:${index}`),
                 paymentDate: line.date,
@@ -306,7 +337,6 @@ export async function reconcileStatementLine(
                 // A foreign-currency line: the rate typed, or the one shown on the line (D4, MC5).
                 ...(foreignLine ? { exchangeRate: command.exchangeRate ?? line.suggestedRate?.rate } : {}),
               })
-            ).payment
           : (
               await recordSupplierPayment(tx, allocation.billId, {
                 source,
