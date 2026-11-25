@@ -254,7 +254,32 @@ export type KiwiSaverInput = {
   payDate: string;
   /** The employee has an approved temporary rate reduction (from 1 April 2026). */
   temporaryRateReduction?: boolean;
+  /** For the employer minimum: none is required under 16 (18 before 1 April 2026) or from 65 (TXF6). */
+  dateOfBirth?: string | null;
 };
+
+/** The day 16 and 17 year olds started getting compulsory employer contributions (specification 2.3). */
+const EMPLOYER_CONTRIBUTIONS_FROM_16 = "2026-04-01";
+
+function ageOn(dateOfBirth: string, date: string): number {
+  const [by, bm, bd] = dateOfBirth.split("-").map(Number);
+  const [y, m, d] = date.split("-").map(Number);
+  return y - by - (m < bm || (m === bm && d < bd) ? 1 : 0);
+}
+
+/**
+ * Whether compulsory employer contributions are required for an employee on
+ * a pay date (TXF6): not under 16 (under 18 before 1 April 2026), and not
+ * from 65 (IRD's payroll specification 2026-27, 2.3 and 4.5.2; IRD's page on
+ * employer contributions: "aged under 65"). Without a date of birth they're
+ * required.
+ */
+export function employerContributionRequired(dateOfBirth: string | null | undefined, payDate: string): boolean {
+  if (!dateOfBirth) return true;
+  const age = ageOn(dateOfBirth, payDate);
+  const youngest = payDate >= EMPLOYER_CONTRIBUTIONS_FROM_16 ? 16 : 18;
+  return age >= youngest && age < 65;
+}
 
 function parseRate(input: unknown, label: string): Decimal {
   if (typeof input !== "string" || input.trim() === "") {
@@ -298,7 +323,8 @@ export function kiwiSaverEmployeeContribution(input: KiwiSaverInput): string {
 /**
  * The employer's gross KiwiSaver contribution (before ESCT): gross x rate,
  * truncated to cents. The rate can't be below the compulsory minimum on the
- * pay date (or the temporary rate reduction's, if the employee has one).
+ * pay date (or the temporary rate reduction's, if the employee has one),
+ * unless no employer contribution is required at the employee's age (TXF6).
  */
 export function kiwiSaverEmployerContribution(input: KiwiSaverInput): string {
   const rates = payrollRatesOn(input.payDate);
@@ -307,11 +333,12 @@ export function kiwiSaverEmployerContribution(input: KiwiSaverInput): string {
   const minimum = input.temporaryRateReduction
     ? temporaryRateReductionFor(rates).employerRate
     : rates.kiwiSaver.minimumEmployerRate;
-  if (cmp(rate, dec(minimum)) < 0) {
+  // Under 16 (18 before 1 April 2026) or 65 and over, any employer contribution is voluntary, so 0% is fine.
+  if (cmp(rate, dec(minimum)) < 0 && employerContributionRequired(input.dateOfBirth, input.payDate)) {
     throw new ValidationError(
       `The compulsory KiwiSaver employer contribution on ${rates.payDate} is at least ${minimum}%${
         input.temporaryRateReduction ? " with a temporary rate reduction" : ""
-      }.`,
+      }.${input.dateOfBirth ? "" : " None is needed for an employee under 16 or 65 or over: give their date of birth."}`,
     );
   }
   return money(mul(gross, percent(input.rate)));

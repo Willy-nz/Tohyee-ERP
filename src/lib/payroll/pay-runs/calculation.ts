@@ -62,6 +62,7 @@ export type EmployeeRow = {
   kiwisaver_reduction_from: string | null;
   kiwisaver_reduction_to: string | null;
   is_archived: boolean;
+  date_of_birth: string | null;
   start_date: string;
   finish_date: string | null;
   gross: string | null;
@@ -106,7 +107,7 @@ async function loadEmployees(tx: OrgTx, run: RunRow): Promise<EmployeeRow[]> {
             ${pick("esct_rate", "::text")} as esct_rate,
             ${pick("kiwisaver_reduction_from", "::text")} as kiwisaver_reduction_from,
             ${pick("kiwisaver_reduction_to", "::text")} as kiwisaver_reduction_to,
-            e.is_archived, e.start_date::text, e.finish_date::text,
+            e.is_archived, e.date_of_birth::text, e.start_date::text, e.finish_date::text,
             pe.gross::text, pe.taxable_earnings::text, pe.non_taxable_earnings::text, pe.kiwisaver_earnings::text,
             pe.paye::text, pe.student_loan_deduction::text, pe.kiwisaver_employee::text, pe.deductions::text,
             pe.net_pay::text, pe.kiwisaver_employer::text, pe.esct::text, pe.kiwisaver_employer_net::text,
@@ -250,6 +251,7 @@ function calculate(
       kiwiSaverEmployeeRate: employee.kiwisaver_employee_rate,
       kiwiSaverEmployerRate: employee.kiwisaver_employer_rate,
       esctRate: employee.esct_rate,
+      dateOfBirth: employee.date_of_birth,
       kiwiSaverReduction:
         employee.kiwisaver_reduction_from && employee.kiwisaver_reduction_to
           ? { from: employee.kiwisaver_reduction_from, to: employee.kiwisaver_reduction_to }

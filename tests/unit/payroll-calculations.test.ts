@@ -271,3 +271,25 @@ describe("refused and invalid input", () => {
     return esctRateFor({ thresholdAmount, payDate: Y2026 });
   }
 });
+
+describe("KiwiSaver employer minimum and age (TXF6)", () => {
+  const pay = (rate: string, payDate: string, dateOfBirth: string | null) => kiwiSaverEmployerContribution({ gross: "1000.00", rate, payDate, dateOfBirth });
+
+  it("allows 0% for an employee 65 or over, or under 16", () => {
+    expect(pay("0", "2026-10-15", "1960-05-01")).toBe("0.00");
+    expect(pay("0", "2026-10-15", "1961-10-15")).toBe("0.00");
+    expect(pay("0", "2026-10-15", "2011-01-01")).toBe("0.00");
+  });
+
+  it("still requires the minimum from 16 to 64, and without a date of birth", () => {
+    expect(() => pay("0", "2026-10-15", "2009-01-01")).toThrow("at least 3.5%");
+    expect(() => pay("0", "2026-10-15", "1961-10-16")).toThrow("at least 3.5%");
+    expect(() => pay("0", "2026-10-15", null)).toThrow("give their date of birth");
+    expect(pay("3.5", "2026-10-15", "1990-01-01")).toBe("35.00");
+  });
+
+  it("before 1 April 2026 none was needed under 18", () => {
+    expect(pay("0", "2026-03-15", "2009-01-01")).toBe("0.00");
+    expect(() => pay("0", "2026-03-15", "2008-01-01")).toThrow("at least 3%");
+  });
+});
