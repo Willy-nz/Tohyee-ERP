@@ -28,6 +28,7 @@ export const GOOGLE_SIGN_IN_MESSAGES = {
   taken: "That Google account is already linked to another Tohyee login.",
   link_used: "This setup link has expired or was already used. Ask whoever invited you, or your server admin, for a new one.",
   server_admin: "Server admins always keep a password, so this login can't be set up with Google. Choose a password instead.",
+  server_admin_sign_in: "Server admins sign in with their password and two-step sign-in, not with Google.",
   other_session: "You're signed in as someone else in this browser now, so the Google account wasn't linked. Sign in again and try once more.",
   failed: "Signing in with Google didn't work. Try again.",
   remote: "Tohyee can't be reached this way right now. Try on the local network.",

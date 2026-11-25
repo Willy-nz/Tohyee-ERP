@@ -12,7 +12,18 @@ export function invitationMessage(
   email: string,
   role: Role | null,
   invitation: InvitationOutcome | null,
+  waiting: { emailed: boolean } | null = null,
 ): { tone: "success" | "warning"; text: string } {
+  if (waiting) {
+    // Their login's address isn't confirmed yet, so they weren't added.
+    const lead = `${email} already has a login on this server, but nobody has confirmed the email address belongs to whoever uses it. They haven't been added yet.`;
+    return waiting.emailed
+      ? { tone: "warning", text: `${lead} We've emailed them a link. They'll join once they use it (within 7 days; the invitation waits 30 days).` }
+      : {
+          tone: "warning",
+          text: `${lead} We couldn't email them. Ask a server admin to send them a setup link from Users. They'll join once they use it (within 30 days).`,
+        };
+  }
   if (!invitation) {
     // They already had a login: added, as before (nothing is sent).
     return { tone: "success", text: `Added ${email}${role ? ` as ${ROLE_LABELS[role].toLowerCase()}` : ""}.` };
