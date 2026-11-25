@@ -1,5 +1,6 @@
 import { describe, expect, it } from "vitest";
 import { dec, toPlainString } from "@/lib/money/decimal";
+import { trusteeAfterCredits } from "@/lib/tax/income/trust-return";
 import { type Beneficiary, trustTax, trusteeRate } from "@/lib/tax/income/trusts";
 
 const person = (id: string, name: string, dateOfBirth: string | null, extra: Partial<Beneficiary> = {}): Beneficiary => ({
@@ -40,6 +41,24 @@ describe("trust tax (TRU4-TRU11)", () => {
     expect([2030, 2031].map((year) => toPlainString(december(year).rate))).toEqual(["0.33", "0.39"]);
     // A late balance date (30 June) was already right: May 2025 is the 2025 income year, so 2028 is the last 33% year.
     expect([2028, 2029].map((year) => toPlainString(estate(year, 6).rate))).toEqual(["0.33", "0.39"]);
+  });
+
+  it("TXF12, TXF13: a lines trust at 33% and a legacy superannuation fund at 28%, whatever the income", () => {
+    const lines = trustTax({ ...base, kind: "lines_trust", year: 2027, yearEnd: "2027-03-31", netIncome: dec("50000"), allocations: [] });
+    expect(lines).toMatchObject({ trusteeRate: "0.33", trusteeTax: "16500.00" });
+    expect(lines.trusteeRateReason).toContain("lines trust");
+    const legacy = trustTax({ ...base, kind: "legacy_superannuation", year: 2027, yearEnd: "2027-03-31", netIncome: dec("50000"), allocations: [] });
+    expect(legacy).toMatchObject({ trusteeRate: "0.28", trusteeTax: "14000.00" });
+    expect(legacy.notes.join(" ")).toContain("IR44");
+    // 28% under $10,000 too (clause 6), not the 33% rule.
+    expect(trustTax({ ...base, kind: "legacy_superannuation", netIncome: dec("9000"), allocations: [] }).trusteeRate).toBe("0.28");
+    // Excess imputation credits become a loss at the trust's own rate (IR6 guide Q27G).
+    const credits = { overseas: dec("0"), imputation: dec("330"), other: dec("0") };
+    expect(toPlainString(trusteeAfterCredits({ tax: dec("0"), trusteeRate: dec("0.33"), credits }).imputationLoss)).toBe("1000");
+    expect(toPlainString(trusteeAfterCredits({ tax: dec("0"), trusteeRate: dec("0.28"), credits: { ...credits, imputation: dec("280") } }).imputationLoss)).toBe("1000");
+    // The minor beneficiary rule still applies to a lines trust.
+    const child = person("1", "Nikau", "2016-08-01");
+    expect(trustTax({ ...base, kind: "lines_trust", netIncome: dec("5000"), allocations: [{ beneficiary: child, amount: dec("3000") }] }).minorCorporateIncome).toBe("3000.00");
   });
 
   it("TXF7: income from a Māori authority distribution isn't caught by the minor beneficiary rule", () => {
