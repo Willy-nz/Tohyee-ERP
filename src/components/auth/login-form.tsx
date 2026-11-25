@@ -9,6 +9,7 @@ import { api, errorMessage } from "@/lib/client/api";
 import { Button, Field, Notice } from "@/components/ui";
 import { BrandMark } from "@/components/brand-mark";
 import styles from "./auth.module.css";
+import { SOURCE_CODE_REPOSITORY } from "@/lib/source-code";
 
 export type LoginStage = "password" | "verify" | "enrol";
 
@@ -19,6 +20,8 @@ type Props = {
   initialStage?: LoginStage;
   initialEmail?: string;
   emailResetAvailable?: boolean;
+  /** Where this version's source code is (AGPL section 13). */
+  sourceCodeUrl?: string;
   /** Sign in with Google is on for this server. */
   googleAvailable?: boolean;
   /** What the Google sign-in said, on the way back from it. */
@@ -51,6 +54,7 @@ export function LoginForm({
   initialStage = "password",
   initialEmail = "",
   emailResetAvailable = false,
+  sourceCodeUrl = SOURCE_CODE_REPOSITORY,
   googleAvailable = false,
   googleMessage = null,
   passkeyAvailable = false,
@@ -196,6 +200,12 @@ export function LoginForm({
             </p>
             <p className={styles.text}>
               <a href="/get-tohyee">Get Tohyee on this device</a>: put it on your phone or tablet&apos;s Home Screen.
+            </p>
+            <p className={styles.text}>
+              Tohyee is free, open-source software (GNU AGPL).{" "}
+              <a href={sourceCodeUrl} target="_blank" rel="noreferrer">
+                Source code
+              </a>
             </p>
           </>
         ) : null}

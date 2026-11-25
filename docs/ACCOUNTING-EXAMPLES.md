@@ -6088,10 +6088,8 @@ and **Tax** (always on), **CRM**, **Advanced reporting**, and **Not-for-profit**
 (each optional module is switched on per organisation in Settings).
 Advanced reporting is the existing
 "advanced features" switch: tracking categories and segments, custom fields,
-salespeople and their reports. The CRM follows
-[Twenty](https://github.com/twentyhq/twenty) (AGPL-3.0, the same licence as
-Tohyee): its companies, people, opportunities, tasks, notes and timeline,
-built into Tohyee rather than run alongside it.
+salespeople and their reports. The CRM has companies, people,
+opportunities, tasks, notes and a timeline, built into Tohyee.
 
 - **MOD1** A new organisation has the CRM and Advanced reporting off. Turning
   either on or off is recorded in the history. With the CRM off its menu and
@@ -6170,8 +6168,7 @@ email and phone. People are archived, never deleted.
 **Opportunities** (deals) have a name, a company, a point of contact (one of
 its people), an owner (a member of the organisation), an amount excluding
 GST, an expected close date and a **stage**: New, Screening, Meeting,
-Proposal, Won or Lost (Twenty's stages, with its "Customer" called Won, and
-Lost added; since CRMS1 these are the organisation's starting stages, which
+Proposal, Won or Lost (since CRMS1 these are the organisation's starting stages, which
 an admin can change, and "Won" means any Closed won stage). Stages change freely until an opportunity has made an invoice.
 A **won opportunity can make a draft invoice** for its company: one line with
 the opportunity's name and amount, the first active revenue account and the
@@ -6257,8 +6254,7 @@ when approved.
 ## CRM email and calendar sync
 
 The owner asked (29 Sep 2026) for email and calendar sync in the first round of
-the CRM; the details follow Twenty's connected accounts:
-each member of an organisation can connect their own **Gmail** or
+the CRM. Each member of an organisation can connect their own **Gmail** or
 **Microsoft 365** mailbox and calendar, and emails and meetings with people
 the CRM knows show on those people's and companies' timelines. Like Akahu,
 each organisation uses its own Google or Microsoft app: an admin enters its
@@ -16933,7 +16929,7 @@ cost of goods sold 400.00 (13 May) and 300.00 (9 Jun); interest 20.00
 
 ## Analytics: built-in values on the books copy (examples BM1-BM4; following common practice, not yet reviewed)
 
-Issue  asked for ready-made values on the books copy so a dashboard is a
+An issue asked for ready-made values on the books copy so a dashboard is a
 few clicks: Sales, Cost of sales, Gross profit, Gross margin %, Operating
 expenses, Net profit, Accounts receivable, Accounts payable, Cash in bank and
 Days to get paid. The owner hasn't said how each is worked out, so they follow
@@ -16989,10 +16985,9 @@ Tested in `tests/integration/analytics-books.test.ts`.
 
 ## Analytics: what a value means, and joins that don't double count (examples MD1-MD6; following common practice, not yet reviewed)
 
-Issue  asked that values say what they count and that totals, balances,
+An issue asked that values say what they count and that totals, balances,
 currencies and joins can't quietly give wrong figures. The owner hasn't answered
-how; these following common practice, as the issue names them
-, and the books copy's existing rules
+how, so these follow common practice and the books copy's existing rules
 (AB1-AB11, BM1-BM4). **following common practice, not yet reviewed.** They change no
 accounting: nothing here is posted, and the books copy is unchanged.
 
@@ -17076,10 +17071,10 @@ MD6), `tests/unit/analytics-merge-checks.test.ts` (MD4) and
 
 ## Analytics: field settings (examples FS1-FS3; following common practice, not yet reviewed)
 
-Issue  asked to sort by another column (month name by month
+An issue asked to sort by another column (month name by month
 number), with a default summary and format per field, folders and
-descriptions;  asked for month sorting in time reports.,
-following common practice' column properties. **following common practice, not yet
+descriptions; another asked for month sorting in time reports. These follow
+common practice for column properties. **following common practice, not yet
 reviewed.** Nothing is posted.
 
 Setup: sales Apr (month 1 of a 1 April year) 100.00 North, May (2) 50.00,
@@ -17101,9 +17096,9 @@ Tested in `tests/unit/analytics-field-settings.test.ts` and
 
 ## Analytics: relationships between tables (examples RL1-RL5; following common practice, not yet reviewed)
 
-Issue  asked for relationships (a simple star model) so a tile
-can use fields from two tables, asked that joins never repeat
-amounts (MD4)., following common practice' many-to-one
+An issue asked for relationships (a simple star model) so a tile
+can use fields from two tables, and another asked that joins never repeat
+amounts (MD4). These follow common practice for many-to-one
 relationships. **following common practice, not yet reviewed.** Nothing is posted.
 
 Setup: invoices INV-1 (id 1, Kererū Café, total **100.00**) and INV-2 (id
@@ -17133,8 +17128,8 @@ Tested in `tests/unit/analytics-relationships.test.ts` and
 
 ## Analytics: calculated fields on a data source (examples CF1-CF6; following common practice, not yet reviewed)
 
-Issue  asked for calculated fields on a source, BI tools
-style. Not accounting: a formula on each row of a loaded table, shared by
+An issue asked for calculated fields on a source, as reporting tools
+commonly have. Not accounting: a formula on each row of a loaded table, shared by
 reports. **following common practice, not yet reviewed.**
 
 Setup: lines on 31 Mar 2026 (Kererū Café, north, 2 × 12.50 = 25.00), 1 Apr
@@ -17171,11 +17166,12 @@ Tested in `tests/unit/analytics-calculated-fields.test.ts` (CF1-CF5) and
 
 ## Analytics: year to date and the same period last year (examples TI1-TI5; following common practice, not yet reviewed)
 
-Issue  asked for year, quarter and month to date (financial
-year aware), the same period last year and rolling 12 months;  asked
+An issue asked for year, quarter and month to date (financial
+year aware), the same period last year and rolling 12 months; another asked
 for custom NZ balance dates, partial years, leap days and month order. The
-financial year is the organisation's, as is common's reports use it (it ends on the balance date); the calculations following common practice'
-TOTALYTD and SAMEPERIODLASTYEAR. **following common practice,
+financial year is the organisation's, as its reports use it (it ends on the
+balance date); the calculations follow common practice for year to date and
+the same period last year. **following common practice,
 not yet reviewed.** Nothing is posted.
 
 Setup (31 March balance date unless said): sales of 10.00 (29 Feb 2024,
@@ -17219,10 +17215,10 @@ Tested in `tests/unit/analytics-time-intelligence.test.ts`.
 
 ## Analytics: quick calculations (examples QC1-QC8; following common practice, not yet reviewed)
 
-Issue  asked for running totals, shares, ranks, differences and
-moving averages on a value, asked that their denominators, totals,
-blanks and Top N be defined. The owner hasn't answered how; these follow Power
-BI's "Show value as" and quick measures. **following common practice, not yet reviewed.** Nothing is posted:
+An issue asked for running totals, shares, ranks, differences and
+moving averages on a value, and another asked that their denominators,
+totals, blanks and Top N be defined. The owner hasn't answered how, so these
+follow common practice for showing a value as a share, rank or running total. **following common practice, not yet reviewed.** Nothing is posted:
 they change what a chart or table shows, not the books.
 
 Setup: sales rows of 100.00 (5 Jan, North), 300.00 (20 Jan, South), 50.00
@@ -23824,3 +23820,61 @@ sale, $150.00 GST), due 31 October 2026.
 - **LATE12 Other currencies.** An invoice in another currency is charged in
   that currency, at the rate for the charge date, rounded to its smallest
   unit.
+
+## Update now and Windows updates that fail (UPD7-UPD13; 25 Nov 2026; following common practice, not yet reviewed)
+
+Tested in `tests/unit/remote-update.test.ts` (UPD7-UPD9) and on Windows in
+`installer/windows/test-install.ps1` (UPD7, UPD10, UPD11). UPD12 and UPD13
+aren't tested by a machine yet: they need a restart, or a new version that
+fails to start. A Windows server runs v1.0.0 and v1.1.0 is out. Nothing here
+changes the books: an update never touches the data, and everything is
+backed up before Update now starts.
+
+- **UPD7 Done means done.** A server admin presses Update now to v1.1.0, and
+  it installs. When Tohyee is back on v1.1.0 the page says "Updated to
+  v1.1.0", and when v1.2.0 comes out the Update now button works again.
+  (Before, the page kept treating the finished install as still going, and
+  the button stayed greyed out for every later release.) The installer now
+  writes the last word itself ("installed"); for a server whose installer
+  didn't, the page goes by the version Tohyee is running.
+- **UPD8 An install that didn't finish.** The updater said "installing
+  v1.1.0" at 8:30, and Tohyee started again at 8:36 still on v1.0.0. The
+  page says the update didn't finish, that the data is safe, and to try
+  again (or run the installer on the server computer and read its log). The
+  same after 20 minutes of "installing" with no answer, or 45 minutes of
+  "downloading" (the updater's time limit).
+- **UPD9 One at a time, and never stuck.** While a download or install is
+  going, Update now waits and a second request is refused. Once it has
+  finished, failed, been skipped or taken too long, it can be asked for
+  again. Only one TohyeeSetup can run at a time on the computer.
+- **UPD10 Can't stop, changes nothing.** Before copying anything, setup turns
+  off Windows' "restart if it stops" for both services and stops them from
+  starting by themselves, then stops Tohyee and waits until it really has
+  stopped. Anything Tohyee left running from its folder (a tunnel, a backup
+  in progress) is stopped; PostgreSQL is only ever asked to shut down
+  cleanly, and waited for, never forced. If something can't be stopped or
+  the old program can't be moved aside (a file held open, say), setup stops
+  there with exit code 7: what it moved goes back, the services are set
+  back and started, and the page says "Tohyee couldn't be stopped for the
+  update to v1.1.0, so nothing was changed and v1.0.0 is still running".
+- **UPD11 Fails before it starts, the old version comes back.** The old
+  program isn't deleted any more: it's moved into a "previous" folder. If
+  copying the new one fails, or setting up its services fails, before
+  v1.1.0 has started, the new files are removed, v1.0.0 is moved back,
+  Windows' list of programs says v1.0.0 again, and v1.0.0 is started. The
+  page says "v1.1.0 couldn't be installed, so v1.0.0 was put back and is
+  running". Setup's exit code is 20.
+- **UPD12 The point of no return.** Once v1.1.0 has started, it may already
+  have upgraded the organisations' databases, which v1.0.0 can't open. So a
+  problem after that (it doesn't answer within 10 minutes, say) isn't
+  undone: the page says v1.1.0 was started but setup didn't finish, not to
+  put the old version back by hand, where the backups are, and to run
+  TohyeeSetup-1.1.0.exe again (kept in Tohyee's update-download folder) or
+  send setup.log to whoever helps. Setup's exit code is 21. When v1.1.0
+  answers, the previous folder is removed.
+- **UPD13 A restart in the middle.** If the computer restarts while the
+  files are being copied, neither service starts by itself. When Windows
+  starts, a scheduled task ("Tohyee update recovery", run as SYSTEM from
+  Tohyee's data folder, which only Administrators can change) sees the
+  unfinished update, puts v1.0.0 back and starts it, as in UPD11. From this
+  version on; an update from 0.45.0 doesn't have it yet.
