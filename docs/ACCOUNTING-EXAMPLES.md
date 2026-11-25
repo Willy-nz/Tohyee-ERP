@@ -23795,7 +23795,7 @@ sale, $150.00 GST), due 31 October 2026.
   that currency, at the rate for the charge date, rounded to its smallest
   unit.
 
-## Operations and farm fixes (OPF1-OPF4; 25 Nov 2026; following common practice, not yet reviewed)
+## Operations and farm fixes (OPF1-OPF6; 25 Nov 2026; following common practice, not yet reviewed)
 
 Made-up examples. A job for "Harbour Bakery" (Wilfred is the staff member,
 as JV1-JV9), and a farm with two blocks, Home and Runoff.
