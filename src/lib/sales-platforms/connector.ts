@@ -101,9 +101,11 @@ export type PlatformOrderLine = {
 /** A fulfilment's lines, for sales when sent (SWS2-SWS8): what was sent, when. */
 export type PlatformSent = {
   externalId: string;
-  /** SUCCESS counts; CANCELLED and the rest don't (SWS8). */
+  /** SUCCESS counts; CANCELLED and the rest don't (SWS8). One cancelled after it was counted is reversed (SPF13). */
   status: string | null;
   createdAt: string | null;
+  /** When it last changed: for a cancelled one, about when it was cancelled (SPF18). Left out by older callers. */
+  updatedAt?: string | null;
   lines: Array<{ lineItemId: string; quantity: string }>;
   /** More lines than were asked for. */
   incomplete: boolean;

@@ -223,6 +223,7 @@ describe("refunds (SPC14)", () => {
       amountsMode: "inclusive",
       rates: ["0.15"],
       held: [],
+      restockSent: [],
       lines: [{ description: "Large candle", quantity: "1", unitPrice: "23.00", accountCode: "4000", taxCode: "GST", itemId: "11" }],
     });
   });

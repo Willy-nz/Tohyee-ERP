@@ -462,6 +462,7 @@ function sentFulfilment(raw: unknown): PlatformSent {
     externalId: shopifyId(f.id, "fulfilment"),
     status: text(f.status),
     createdAt: timestamp(f.createdAt),
+    updatedAt: timestamp(f.updatedAt),
     lines: nodesOf(items).map((node) => ({
       lineItemId: shopifyId(record(node.lineItem).id, "order line"),
       quantity: String(typeof node.quantity === "number" ? node.quantity : 0),

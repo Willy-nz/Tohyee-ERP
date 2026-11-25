@@ -425,12 +425,29 @@ export type RefundHeld = {
   shipping: ReadonlySet<string>;
   /** SPF6: held lines whose stock already came off with the invoice, by line: the item a restocked refund puts back. */
   stockOut?: ReadonlyMap<string, string>;
+  /**
+   * SPF18: lines held from the start whose stock leaves when they're sent (not on the invoice). A refund of
+   * what was sent of them carries no item, as the invoice doesn't; restocked, the stock comes back against
+   * what was sent (`restockSent`).
+   */
+  sentFromStock?: ReadonlySet<string>;
 };
 /** A part of a refund taken from what's held: its credit note lines (indexes) and the quantity. */
 export type HeldUse = { kind: "line" | "shipping"; externalId: string; quantity: string; lineIndexes: number[] };
 
 export type RefundPlan =
-  | { ok: true; lines: PlannedLine[]; rates: Array<string | null>; amountsMode: AmountsMode; total: string; refunded: string; date: string; held: HeldUse[] }
+  | {
+      ok: true;
+      lines: PlannedLine[];
+      rates: Array<string | null>;
+      amountsMode: AmountsMode;
+      total: string;
+      refunded: string;
+      date: string;
+      held: HeldUse[];
+      /** SPF18: what was sent of lines held from the start, refunded and restocked: put back against what was sent. */
+      restockSent: Array<{ lineId: string; quantity: string }>;
+    }
   | Refusal
   | { ok: "nothing"; reason: string };
 
@@ -463,6 +480,7 @@ export function planRefund(
   const rates: Array<string | null> = [];
   const byId = new Map<string, PlatformOrderLine>(order.lines.map((line) => [line.externalId, line]));
   const uses: HeldUse[] = [];
+  const restockSent: Array<{ lineId: string; quantity: string }> = [];
   for (const entry of refund.lines) {
     if (!isPositive(dec(entry.quantity)) && isZero(dec(entry.subtotal))) continue;
     const line = byId.get(entry.lineItemId);
@@ -504,7 +522,12 @@ export function planRefund(
       const restQuantity = sub(quantity, fromHeld);
       if (isPositive(restQuantity)) parts.push({ amount: sub(amount, heldAmount), quantity: toPlainString(restQuantity), held: false, heldQuantity: "0" });
     }
+    // SPF18: sent from a line held from the start: the invoice has no item, so neither does the refund.
+    const sentFromStock = held?.sentFromStock?.has(line.externalId) === true;
     for (const portion of parts) {
+      if (!portion.held && sentFromStock && entry.restocked && isPositive(dec(portion.quantity)) && isPositive(quantity)) {
+        restockSent.push({ lineId: line.externalId, quantity: portion.quantity });
+      }
       const indexes: number[] = [];
       for (const part of splitAmount(money(portion.amount), portion.quantity)) {
         indexes.push(lines.length);
@@ -515,7 +538,7 @@ export function planRefund(
           accountCode: portion.held ? held!.accountCode : (item?.incomeAccountCode ?? rules.salesAccountCode),
           taxCode: tax.code,
           // Held and never taken out of stock: no item. Held after its stock came off with the invoice (SPF6): restocked, the item comes back.
-          itemId: portion.held ? (entry.restocked ? (held!.stockOut?.get(line.externalId) ?? null) : null) : keepItem ? item!.id : null,
+          itemId: portion.held ? (entry.restocked ? (held!.stockOut?.get(line.externalId) ?? null) : null) : keepItem && !sentFromStock ? item!.id : null,
         });
         rates.push(tax.rate);
       }
@@ -550,7 +573,7 @@ export function planRefund(
   if (cmp(dec(total), refunded) !== 0) {
     return refuse(`${what}'s lines come to ${total} but ${rules.platformName ?? "Shopify"} refunded ${money(refunded)}, so nothing was posted.`);
   }
-  return { ok: true, lines, rates, amountsMode, total, refunded: money(refunded), date: localDate(at), held: uses };
+  return { ok: true, lines, rates, amountsMode, total, refunded: money(refunded), date: localDate(at), held: uses, restockSent };
 }
 
 // ---------------------------------------------------------------------------
