@@ -32,7 +32,7 @@ import {
 } from "../helpers/test-server";
 
 const mocks = vi.hoisted(() => ({
-  messages: [] as Array<{ id: string; receivedAt: string | null; attachments: Array<{ name: string; size: number; read: () => Promise<Buffer> }> }>,
+  messages: [] as Array<{ id: string; receivedAt: string | null; senderCheck?: "pass" | "fail" | "unknown"; from?: string; attachments: Array<{ name: string; size: number; read: () => Promise<Buffer> }> }>,
   failToken: false,
 }));
 vi.mock("@/lib/crm/mail/service", async (original) => ({
