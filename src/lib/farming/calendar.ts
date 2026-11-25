@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { forgetMemberFarmAccess, requireFarmAccess, visibleFarmIds } from "./access";
+import { farmWorkAllows } from "@/lib/auth/roles";
 import { writeAuditEvent } from "@/lib/audit";
 import { googleApp, microsoftApp } from "@/lib/crm/mail/service";
 import { exchangeCode, MAIL_PROVIDERS, type MailProvider, mailboxAddress, type ProviderApp, refreshAccess, authorisationUrl } from "@/lib/crm/mail/providers";
@@ -1349,7 +1350,8 @@ export async function calendarLinkFeed(organisationInput: string, fileInput: str
     return (await tx.query<{ user_id: string }>("select user_id::text from farm_calendar_links where token_hash = $1", [hash])).rows[0] ?? null;
   });
   const member = link ? await getMembership(organisationId, link.user_id) : null;
-  if (!link || !member) return null;
+  // A member whose role no longer allows farm work (moved to report-only or sales) gets nothing, like every farm screen.
+  if (!link || !member || !farmWorkAllows(member.role, "read")) return null;
   const name = await memberName(link.user_id);
   return withOrganisationTransaction(organisation, { userId: link.user_id, email: "calendar-link@tohyee", role: member.role }, async (tx) => {
     await tx.query("update farm_calendar_links set last_used_at = now() where user_id = $1", [link.user_id]);

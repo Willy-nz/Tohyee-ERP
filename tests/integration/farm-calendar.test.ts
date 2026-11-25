@@ -552,6 +552,13 @@ describeWithDatabase("farm calendar from email", () => {
     const mereLink = await w.as(mere, (tx) => makeCalendarLink(tx, "https://tohyee.test"));
     const mereFile = mereLink.url.split("/").pop()!;
     expect(await calendarLinkFeed(w.org, mereFile)).toContain("Pick up drench");
+    // Moved to a role that can't do farm work, the link stops; back again, it works.
+    await coreQuery("update organisation_members set role = 'report_viewer' where organisation_id = $1 and user_id = $2", [w.org, mere.id]);
+    expect(await calendarLinkFeed(w.org, mereFile)).toBeNull();
+    await coreQuery("update organisation_members set role = 'sales_rep' where organisation_id = $1 and user_id = $2", [w.org, mere.id]);
+    expect(await calendarLinkFeed(w.org, mereFile)).toBeNull();
+    await coreQuery("update organisation_members set role = 'admin' where organisation_id = $1 and user_id = $2", [w.org, mere.id]);
+    expect(await calendarLinkFeed(w.org, mereFile)).toContain("Pick up drench");
     const removed = await memberRoute.DELETE(
       apiRequest(`/api/organisations/${w.org}/members/${mere.id}`, { method: "DELETE", cookie: await sessionCookieFor(jade) }),
       params({ organisationId: w.org, userId: mere.id }),
