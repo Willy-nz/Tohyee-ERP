@@ -23898,3 +23898,14 @@ Tested in `tests/integration/sales-platform-negative-stock-sent.test.ts`,
   import adds 115.00. In a folder or mailbox feed, a file that fails to
   import in any unexpected way is now recorded as a failed file with a
   plain reason, and the feed goes on to the next file (BF rules).
+- **SPF6 A restocked refund of a line held after it was invoiced.** As
+  SWS12: the pendant's stock came off with the invoice (cost of goods sold
+  **20.00**), then 130.00 was moved to Income in advance. Before anything
+  is sent, Shopify refunds the pendant (115.00) and puts it back in stock.
+  The credit note's line comes out of 2350 (**100.00**) as SWS5, and now
+  carries the item, so the pendant comes back into stock at the cost it
+  went out at (ST5): Dr inventory **20.00** / Cr cost of goods sold
+  **20.00**. Stock is back to 1, the same as Shopify's. A line held from
+  the start (its stock never left) is as SWS5, with no item. Lines held
+  after invoicing before this change don't know their item, so they're as
+  before.

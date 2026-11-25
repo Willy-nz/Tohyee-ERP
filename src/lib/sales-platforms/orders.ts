@@ -419,7 +419,13 @@ export const PAID_STATUSES = ["PAID", "PARTIALLY_REFUNDED", "REFUNDED"];
  * What an order still holds for sales when sent (SWS5, SWS6): each order line's
  * quantity not yet sent or refunded, and its shipping lines not yet counted.
  */
-export type RefundHeld = { accountCode: string; lines: ReadonlyMap<string, Decimal>; shipping: ReadonlySet<string> };
+export type RefundHeld = {
+  accountCode: string;
+  lines: ReadonlyMap<string, Decimal>;
+  shipping: ReadonlySet<string>;
+  /** SPF6: held lines whose stock already came off with the invoice, by line: the item a restocked refund puts back. */
+  stockOut?: ReadonlyMap<string, string>;
+};
 /** A part of a refund taken from what's held: its credit note lines (indexes) and the quantity. */
 export type HeldUse = { kind: "line" | "shipping"; externalId: string; quantity: string; lineIndexes: number[] };
 
@@ -508,7 +514,8 @@ export function planRefund(
           unitPrice: part.unitPrice,
           accountCode: portion.held ? held!.accountCode : (item?.incomeAccountCode ?? rules.salesAccountCode),
           taxCode: tax.code,
-          itemId: portion.held ? null : keepItem ? item!.id : null,
+          // Held and never taken out of stock: no item. Held after its stock came off with the invoice (SPF6): restocked, the item comes back.
+          itemId: portion.held ? (entry.restocked ? (held!.stockOut?.get(line.externalId) ?? null) : null) : keepItem ? item!.id : null,
         });
         rates.push(tax.rate);
       }
