@@ -400,4 +400,22 @@ describeWithDatabase("rosters and clocking in (RS1-RS8)", () => {
     expect((await w.sheetFor(w.tamaId, "2026-09-28"))!.rows[0].hours).toEqual({ "2026-10-03": "7.50" });
     expect((await w.punch(w.tamaId, "5678", "in", "2026-10-04T09:00:00+13:00")).ok).toBe(true);
   });
+
+  for (const zone of ["UTC", "Pacific/Auckland"]) {
+    it(`TXF9: an entered out time is checked against the clock-in by the instant, whatever the database's time zone (${zone})`, async () => {
+      const w = await setup();
+      // 11:00 in New Zealand is 22:00 the day before in UTC.
+      await w.punch(w.tamaId, "5678", "in", "2026-10-03T11:00:00+13:00");
+      const { needsAttention } = await w.as((tx) => listClockRecords(tx, { from: "2026-10-03", to: "2026-10-03", now: new Date("2026-10-04T08:00:00+13:00") }));
+      const id = needsAttention[0].id;
+      const inZone = <T>(work: (tx: OrgTx) => Promise<T>) =>
+        w.as(async (tx) => {
+          await tx.query(`set local time zone '${zone}'`);
+          return work(tx);
+        });
+      await expect(inZone((tx) => enterClockOut(tx, id, { clockOutAt: "2026-10-03T10:00:00+13:00", reason: "Before the clock-in" }))).rejects.toThrow("has to be after the clock-in");
+      const fixed = await inZone((tx) => enterClockOut(tx, id, { clockOutAt: "2026-10-03T12:00:00+13:00", reason: "Left at 12" }));
+      expect(fixed).toMatchObject({ status: "closed", hours: "1.00" });
+    });
+  }
 });
