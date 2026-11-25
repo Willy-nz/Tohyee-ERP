@@ -259,15 +259,35 @@ function Invoke-WithRetry([scriptblock]$Action, [string]$What) {
 
 function Get-InstalledVersion { return (Get-ItemProperty -LiteralPath $UninstallKey -ErrorAction SilentlyContinue).DisplayVersion }
 
-# Moves what's in previous\ back, after removing whatever the new version left of the same folder.
-function Move-PreviousBack {
+# A plain rename of a folder, all or nothing. Not Move-Item: when a file in
+# the folder is open, Move-Item can fall back to copying the folder piece by
+# piece, leaving half of it in each place (seen in CI on 25 Nov 2026).
+function Move-Folder([string]$From, [string]$To) {
+  [System.IO.Directory]::Move($From, $To)
+}
+
+# Which program folders are in previous\ because this script moved them
+# there: those it recorded, and any whose own place is empty (a move whose
+# record was cut off). Anything else in previous\ isn't trusted, so the
+# folder in the program's own place is never deleted for it.
+function Get-MovedFolders($State) {
   $previous = Join-Path $InstallDir 'previous'
-  foreach ($folder in $ProgramFolders) {
+  $recorded = @()
+  if ($State -and $State.moved) { $recorded = @($State.moved | ForEach-Object { [string]$_ }) }
+  return @($ProgramFolders | Where-Object {
+      (Test-Path -LiteralPath (Join-Path $previous $_)) -and
+      (($recorded -contains $_) -or -not (Test-Path -LiteralPath (Join-Path $InstallDir $_)))
+    })
+}
+
+# Moves the folders this script moved aside back, after removing whatever the new version put in their place.
+function Move-PreviousBack($State) {
+  $previous = Join-Path $InstallDir 'previous'
+  foreach ($folder in Get-MovedFolders $State) {
     $kept = Join-Path $previous $folder
-    if (-not (Test-Path -LiteralPath $kept)) { continue }
     $target = Join-Path $InstallDir $folder
     if (Test-Path -LiteralPath $target) { Invoke-WithRetry { Remove-Item -LiteralPath $target -Recurse -Force } "remove the new $folder" }
-    Invoke-WithRetry { Move-Item -LiteralPath $kept -Destination $target } "move the old $folder back"
+    Invoke-WithRetry { Move-Folder $kept $target } "move the old $folder back"
     Write-Log "Put the old $folder back."
   }
   if ((Test-Path -LiteralPath $previous) -and -not (Get-ChildItem -LiteralPath $previous -Force)) { Remove-Item -LiteralPath $previous -Force }
@@ -280,7 +300,7 @@ function Invoke-Restore($State) {
   Write-Log "Putting v$from back (the update to v$to stopped at stage '$($State.stage)')."
   try {
     Stop-Everything
-    if ($State.stage -eq 'swapped') { Move-PreviousBack }
+    if ($State.stage -eq 'swapped') { Move-PreviousBack $State }
     # The installer may have written the new version into Windows' list of programs.
     if ($from) { Set-ItemProperty -LiteralPath $UninstallKey -Name DisplayVersion -Value $from -ErrorAction SilentlyContinue }
     Remove-Item -LiteralPath $StateFile -Force -ErrorAction SilentlyContinue
@@ -338,6 +358,8 @@ try {
         installDir = $InstallDir
         startedAt = (Get-Date).ToUniversalTime().ToString('o')
         stage = 'stopping'
+        # The program folders moved into previous\, recorded after each move.
+        moved = @()
         startTypes = [ordered]@{ Tohyee = (Get-StartType 'Tohyee'); TohyeePostgres = (Get-StartType 'TohyeePostgres') }
         wasRunning = [ordered]@{
           Tohyee = [bool]((Get-Service 'Tohyee' -ErrorAction SilentlyContinue).Status -eq 'Running')
@@ -347,7 +369,6 @@ try {
       # Written first, so a restart of the computer from here on can be undone at start-up.
       Save-State $state
       Write-Log "Updating v$($state.fromVersion) to v$Version in $InstallDir."
-      $moved = @()
       try {
         Disable-AutoStart
         Stop-Everything
@@ -359,22 +380,30 @@ try {
         foreach ($folder in $ProgramFolders) {
           $source = Join-Path $InstallDir $folder
           if (-not (Test-Path -LiteralPath $source)) { continue }
-          Invoke-WithRetry { Move-Item -LiteralPath $source -Destination (Join-Path $previous $folder) } "move $source aside"
-          $moved += $folder
+          Invoke-WithRetry { Move-Folder $source (Join-Path $previous $folder) } "move $source aside"
+          $state.moved = @($state.moved) + $folder
+          Save-State $state
         }
-        Write-Log "Kept the old program in $previous ($($moved -join ', ')). Ready to copy the new one."
+        Write-Log "Kept the old program in $previous ($(@($state.moved) -join ', ')). Ready to copy the new one."
         exit 0
       } catch {
         $reason = $_.Exception.Message
         Write-Log "Couldn't get ready: $reason"
         # Put back what was moved, the start types and restart-on-failure, and start what was running.
-        try { Move-PreviousBack } catch { Write-Log "Moving the old program back: $($_.Exception.Message)" }
+        $putBack = $true
+        try { Move-PreviousBack $state } catch { $putBack = $false; Write-Log "Moving the old program back: $($_.Exception.Message)" }
         Restore-AutoStart $state
-        Remove-Item -LiteralPath $StateFile -Force -ErrorAction SilentlyContinue
+        # Kept when something couldn't be moved back, so the next setup (or a restart) finishes the job.
+        if ($putBack) { Remove-Item -LiteralPath $StateFile -Force -ErrorAction SilentlyContinue }
+        $started = $true
         foreach ($name in @('TohyeePostgres', 'Tohyee')) {
-          if ($state.wasRunning[$name]) { try { Start-Service -Name $name } catch { Write-Log "Couldn't start $name again: $($_.Exception.Message)" } }
+          if ($state.wasRunning[$name]) { try { Start-Service -Name $name } catch { $started = $false; Write-Log "Couldn't start $name again: $($_.Exception.Message)" } }
         }
-        $message = "Tohyee couldn't be stopped for the update to v$Version, so nothing was changed and v$($state.fromVersion) is still running. ($reason) Try again; if it happens again, restart the server computer first."
+        if ($putBack -and $started) {
+          $message = "Tohyee couldn't be stopped for the update to v$Version, so nothing was changed and v$($state.fromVersion) is still running. ($reason) Try again; if it happens again, restart the server computer first."
+        } else {
+          $message = "Tohyee couldn't be stopped for the update to v$Version ($reason), and it couldn't be started again afterwards. Your data is safe. Restart the server computer, then run TohyeeSetup-$Version.exe on it. The details are in update-guard.log in Tohyee's logs."
+        }
         Write-Status 'failed' $Version $message
         Write-Result $message
         exit 1

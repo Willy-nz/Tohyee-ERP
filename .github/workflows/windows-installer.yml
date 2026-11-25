@@ -87,7 +87,8 @@ jobs:
         run: ./installer/windows/test-install.ps1
 
       # The whole of each install's log and Tohyee's own logs (the job log only
-      # shows their last lines). This machine's passwords are thrown away with it.
+      # shows their last lines; test-install.ps1 copies Tohyee's logs into
+      # dist/windows/logs when it fails). This machine's passwords are thrown away with it.
       - name: Keep the install logs
         if: failure()
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -96,8 +97,7 @@ jobs:
           if-no-files-found: ignore
           path: |
             dist/windows/install-*.log
-            C:/ProgramData/Tohyee/logs/*
-            C:/ProgramData/Tohyee/pgdata/log/*
+            dist/windows/logs
 
       - name: Keep the installer
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2

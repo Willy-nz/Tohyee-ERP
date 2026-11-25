@@ -385,6 +385,11 @@ try {
   Write-Host 'Uninstalled; services removed, data kept.'
 } catch {
   Show-Logs
+  # For the CI artifact (it can only take files under the checkout).
+  $kept = Join-Path $out 'logs'
+  New-Item -ItemType Directory -Force -Path $kept | Out-Null
+  Copy-Item -Path (Join-Path $dataRoot 'logs\*') -Destination $kept -Recurse -Force -ErrorAction SilentlyContinue
+  Copy-Item -Path (Join-Path $dataRoot 'pgdata\log') -Destination (Join-Path $kept 'pgdata-log') -Recurse -Force -ErrorAction SilentlyContinue
   # Also as annotations, which can be read without the full job log.
   function Write-Annotation([string]$Title, [string]$Text) {
     $escaped = $Text.Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')
