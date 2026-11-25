@@ -24294,3 +24294,57 @@ backed up before Update now starts.
   Tohyee's data folder, which only Administrators can change) sees the
   unfinished update, puts v1.0.0 back and starts it, as in UPD11. From this
   version on; an update from 0.45.0 doesn't have it yet.
+
+## Signed updates (UPD14-UPD19; 26 Nov 2026; asked for by the owner, the details following common practice, not yet reviewed)
+
+Tested on Windows in `installer/windows/test-release-signature.ps1` (with
+Windows PowerShell 5.1 and PowerShell 7, and the server app's own check),
+run again by `installer/windows/test-install.ps1` on the installed copies,
+and in `tests/unit/release-signing.test.ts` and
+`tests/unit/server-update-checker.test.ts`. The keys in the tests are
+throwaway keys made during the test. A Windows server runs v1.1.0 and
+v1.2.0 is out. Nothing here changes the books.
+
+- **UPD14 A signed update installs.** The release build signs
+  TohyeeSetup-1.2.0.exe with the owner's private key (a GitHub secret) and
+  puts TohyeeSetup-1.2.0.exe.sig beside it. v1.1.0 was installed with
+  `release-keys.txt` listing the owner's public key. Update now (and the
+  server app's Install) download both, check the SHA-256, then the
+  signature, and install. The page says "Its SHA-256 and signature are
+  right".
+- **UPD15 A changed installer is refused.** If even one byte of the
+  installer differs from what was signed, or the .sig names
+  TohyeeSetup-1.1.0.exe (an older signed installer under a newer name), or
+  it was signed by a key v1.1.0 doesn't list, nothing is run. The download
+  is deleted and the page says why, ending "Nothing was changed". v1.1.0
+  keeps running.
+- **UPD16 An unsigned release is refused.** If v1.2.0 has no .sig (the
+  signing key wasn't set up when it was built), a server that lists a key
+  says "Release v1.2.0 isn't signed, and this Tohyee only installs signed
+  updates" before downloading anything. The release notes also say the
+  installer isn't signed. Someone at the server computer can still run the
+  installer by hand.
+- **UPD17 A server from before signing.** A server installed before signing
+  existed has no public key. Its old updater doesn't look for a .sig at
+  all, and a newer one with an empty `release-keys.txt` checks only the
+  SHA-256 and says the update "wasn't checked for a signature, because this
+  Tohyee was installed before releases were signed". It isn't refused, so
+  the first signed version installs; that version brings the public key,
+  and from then on every update must be signed.
+- **UPD18 Replacing the key.** `release-keys.txt` can list more than one
+  key, and an update signed by any of them is accepted. To move to a new
+  key: add the new public key on a new line and make a release still signed
+  with the old key (servers trust it and pick up the new key); then put the
+  new private key in the secret and remove the old line. If the private key
+  is lost before that, servers that trust only it refuse every later
+  update: install the new version by hand on each server computer once,
+  which brings the new key list. If the key is stolen, do the same with a
+  new key straight away.
+- **UPD19 The Android app updates in place.** Every release APK is signed
+  with one permanent key from the secrets, and the release build stops if
+  the certificate differs from the previous release's APK, so a phone can
+  install v1.2.0 over v1.1.0 and keep its address and saved work. With no
+  key set up, the release has only the test build (its own throwaway key,
+  installed as "Tohyee (test)"), and the release notes say it can't be
+  installed over an earlier version: uninstall that first, which loses
+  what it saved on the phone.
