@@ -9,6 +9,7 @@ import { createSession, type SessionMeta, type SessionUser, twoStepRequired } fr
 import { coreQuery, type DbClient, withCoreTransaction } from "@/lib/db/transactions";
 import { sendEmail } from "@/lib/email/mailer";
 import { UnauthorizedError, ValidationError } from "@/lib/errors";
+import { joinWaitingOrganisations } from "@/lib/organisations/waiting-members";
 
 /**
  * Setup links. A server admin doesn't choose
@@ -50,13 +51,19 @@ async function linkOrigin(): Promise<{ origin: string; localOnly: boolean }> {
  * Makes a new setup link for a login, retiring any earlier one. Inside the
  * caller's transaction; emailSetupLink sends it afterwards.
  */
-export async function createSetupLink(client: DbClient, userId: string, actor: AdminActor): Promise<{ token: string; url: string; expiresAt: string; localOnly: boolean }> {
+export async function createSetupLink(
+  client: DbClient,
+  userId: string,
+  actor: AdminActor,
+  options: { byServerAdmin?: boolean } = {},
+): Promise<{ token: string; url: string; expiresAt: string; localOnly: boolean }> {
   const token = randomBytes(32).toString("base64url");
   await client.query("update user_setup_links set used_at = now() where user_id = $1 and used_at is null", [userId]);
+  // A server admin's link vouches for the address; anyone else's only once it has been emailed (markSetupLinkEmailed).
   const inserted = await client.query<{ expires_at: string }>(
-    `insert into user_setup_links (token_hash, user_id, created_by_email, expires_at)
-     values ($1, $2, $3, now() + ($4::int * interval '1 day')) returning expires_at`,
-    [hashToken(token), userId, actor.email, SETUP_LINK_DAYS],
+    `insert into user_setup_links (token_hash, user_id, created_by_email, expires_at, proves_email)
+     values ($1, $2, $3, now() + ($4::int * interval '1 day'), $5) returning expires_at`,
+    [hashToken(token), userId, actor.email, SETUP_LINK_DAYS, options.byServerAdmin === true],
   );
   await writeAdminAuditEvent(client, { userId: actor.id, email: actor.email }, {
     eventType: "user.setup_link_created",
@@ -70,6 +77,48 @@ export async function createSetupLink(client: DbClient, userId: string, actor: A
     expiresAt: new Date(inserted.rows[0].expires_at).toISOString(),
     localOnly,
   };
+}
+
+/**
+ * The link reached the person's mailbox and was shown to nobody else, so
+ * using it confirms the address is theirs. Only called after the email was
+ * sent: a link used before this stays unconfirming, which is the safe side.
+ */
+export async function markSetupLinkEmailed(token: string): Promise<void> {
+  await coreQuery("update user_setup_links set proves_email = true where token_hash = $1 and used_at is null", [hashToken(token)]);
+}
+
+/**
+ * Another organisation invited someone whose login's address isn't confirmed
+ * yet: a setup link to their mailbox. Using it confirms the address, and then
+ * they join. Says whether it was sent.
+ */
+export async function emailConfirmationInvite(
+  to: { email: string; displayName: string },
+  link: { url: string; localOnly: boolean },
+  invitedBy: { email: string; displayName: string },
+  organisationName: string,
+): Promise<boolean> {
+  try {
+    await sendEmail({
+      to: to.email,
+      subject: `Tohyee: you're invited to ${organisationName}`,
+      text: [
+        `Hi ${to.displayName},`,
+        "",
+        `${invitedBy.displayName} (${invitedBy.email}) has invited you to ${organisationName} in Tohyee.`,
+        "There's already a Tohyee login for this email address on this server. Before you can join, we need to check the address is yours.",
+        `Open this link within ${SETUP_LINK_DAYS} days and set up your login again: choose a password and set up two-step sign-in. Anyone else signed in to this login is signed out.`,
+        link.url,
+        ...(link.localOnly ? ["", "The link only works on the same network as the Tohyee server."] : []),
+        "",
+        "The link works once. If you weren't expecting this, ignore this email.",
+      ].join("\n"),
+    });
+    return true;
+  } catch {
+    return false;
+  }
 }
 
 /** Emails the link when the server can send email; says whether it did. */
@@ -136,7 +185,7 @@ export async function sendSetupLink(actor: AdminActor, userId: string): Promise<
     if (!row) throw new ValidationError("User not found.");
     if (!row.is_active) throw new ValidationError(`${row.email}'s login is off. Turn it back on first.`);
     if (row.two_step_enabled) throw new ValidationError(`${row.email} has already set up two-step sign-in. To start again (a lost phone), use Reset two-step.`);
-    return { link: await createSetupLink(client, userId, actor), user: { email: row.email, displayName: row.display_name } };
+    return { link: await createSetupLink(client, userId, actor, { byServerAdmin: true }), user: { email: row.email, displayName: row.display_name } };
   });
   const emailed = await emailSetupLink(user, link, actor.email);
   return { url: link.url, expiresAt: link.expiresAt, emailed, localOnly: link.localOnly };
@@ -170,24 +219,32 @@ export async function completeAccountSetup(input: { token: unknown; password: un
   if (!token) throw new UnauthorizedError("This setup link is missing its code. Open the link again.");
   const password = validateNewPassword(input.password);
   const passwordHash = await hashPassword(password);
-  return withCoreTransaction(async (client) => {
-    const claimed = await client.query<{ user_id: string }>(
+  let provesEmail = false;
+  const signedIn = await withCoreTransaction(async (client) => {
+    const claimed = await client.query<{ user_id: string; proves_email: boolean; was_confirmed: boolean }>(
       `update user_setup_links l set used_at = now()
          from users u
         where l.token_hash = $1 and l.used_at is null and l.expires_at > now() and u.id = l.user_id and u.is_active
-        returning l.user_id`,
+        returning l.user_id, l.proves_email, u.email_confirmed_at is not null as was_confirmed`,
       [hashToken(token)],
     );
     const userId = claimed.rows[0]?.user_id;
     if (!userId) throw new UnauthorizedError(SETUP_LINK_USED);
+    provesEmail = claimed.rows[0].proves_email;
     const updated = await client.query<{ email: string; display_name: string; is_server_admin: boolean }>(
       `update users set password_hash = $2, google_only = false, password_changed_at = now(), failed_login_count = 0, locked_until = null,
               totp_secret_ciphertext = null, totp_enabled_at = null, totp_last_step = null, updated_at = now(),
               -- Without two-step sign-in this is a full sign-in (it ends someone's "Invited").
-              last_login_at = case when $3 then last_login_at else now() end
+              last_login_at = case when $3 then last_login_at else now() end,
+              -- A link that was handed over by hand says nothing about who reads this mailbox.
+              email_confirmed_at = case when $4 then coalesce(email_confirmed_at, now()) else null end
         where id = $1 returning email, display_name, is_server_admin`,
-      [userId, passwordHash, twoStepRequired()],
+      [userId, passwordHash, twoStepRequired(), provesEmail],
     );
+    if (provesEmail && !claimed.rows[0].was_confirmed) {
+      // Whoever held the login before may have linked their own Google account to it.
+      await client.query("delete from user_google_identities where user_id = $1 and email <> $2", [userId, updated.rows[0].email]);
+    }
     await client.query("delete from user_backup_codes where user_id = $1", [userId]);
     await client.query("delete from sessions where user_id = $1", [userId]);
     await revokeUserAiKeys(client, userId);
@@ -201,4 +258,6 @@ export async function completeAccountSetup(input: { token: unknown; password: un
       expiresAt: session.expiresAt,
     };
   });
+  if (provesEmail) await joinWaitingOrganisations(signedIn.user.id);
+  return signedIn;
 }

@@ -2,8 +2,9 @@
 # machine and checks it end to end: services, health, first-time setup
 # (including two-step sign-in), creating an organisation, the Tohyee server
 # app (tray) reaching its server settings, surviving a service
-# restart, updating in place (signing in with a backup code), the bundled
-# cloudflared, an analytics CSV load through the installed DuckDB, and
+# restart, updating in place (signing in with a backup code), updates that
+# fail (nothing changed, or the old version put back: UPD10-UPD13), the
+# bundled cloudflared, an analytics CSV load through the installed DuckDB, and
 # uninstalling. Needs Administrator (GitHub's Windows runners are).
 
 $ErrorActionPreference = 'Stop'
@@ -43,11 +44,37 @@ function Get-TotpCode([string]$Secret, [long]$UnixSeconds = [DateTimeOffset]::Ut
   return ($binary % 1000000).ToString('000000')
 }
 
-function Install-Tohyee([string]$Label) {
+function Install-Tohyee([string]$Label, [string[]]$Extra = @(), [int]$Expect = 0) {
   Write-Host "== Install ($Label)"
   $log = Join-Path $out "install-$Label.log"
-  $process = Start-Process -FilePath $setup.FullName -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$log`"") -Wait -PassThru
-  if ($process.ExitCode -ne 0) { throw "Setup exited with $($process.ExitCode)" }
+  $process = Start-Process -FilePath $setup.FullName -ArgumentList (@('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$log`"") + $Extra) -Wait -PassThru
+  if ($process.ExitCode -ne $Expect) { throw "Setup exited with $($process.ExitCode), expected $Expect" }
+}
+
+$setupVersion = $setup.BaseName -replace '^TohyeeSetup-', ''
+$statusFile = Join-Path $dataRoot 'update-status\status.json'
+
+function Read-UpdaterStatus {
+  if (-not (Test-Path -LiteralPath $statusFile)) { throw 'update-status\status.json is missing.' }
+  $status = Get-Content -LiteralPath $statusFile -Raw | ConvertFrom-Json
+  Write-Host "status.json: $($status.state) v$($status.version): $($status.message)"
+  return $status
+}
+
+# After any update, finished or undone: no half-done update is left behind,
+# and Windows restarts the services by itself again (update-guard.ps1 turns
+# that off while it works).
+function Assert-NoUpdateLeftOver {
+  if (Test-Path -LiteralPath (Join-Path $installDir 'previous')) { throw "The old program was left in $installDir\previous." }
+  if (Test-Path -LiteralPath (Join-Path $dataRoot 'update-state.json')) { throw 'update-state.json was left behind.' }
+  foreach ($folder in @('app\server.js', 'node\node.exe', 'pgsql\bin\postgres.exe', 'scripts\configure-tohyee.ps1', 'tray\TohyeeTray.exe', 'cloudflared\cloudflared.exe')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $installDir $folder))) { throw "$folder is missing from $installDir." }
+  }
+  foreach ($name in @('Tohyee', 'TohyeePostgres')) {
+    $failure = (& sc.exe qfailure $name) -join "`n"
+    if ($failure -notmatch 'RESTART') { throw "$name won't be restarted by Windows if it stops:`n$failure" }
+  }
+  if (-not (Get-ScheduledTask -TaskName 'Tohyee update recovery' -TaskPath '\Tohyee\' -ErrorAction SilentlyContinue)) { throw 'The update recovery task was not set up.' }
 }
 
 function Wait-Healthy {
@@ -250,9 +277,17 @@ try {
   Assert-Services
   Wait-Healthy
 
+  # A file only the old copy has: the update must replace the folder, not add to it.
+  $marker = Join-Path $installDir 'app\ci-old-copy.txt'
+  Set-Content -LiteralPath $marker -Value 'old' -Encoding ASCII
   Install-Tohyee 'update'
+  if (Test-Path -LiteralPath $marker) { throw 'The update added to the old program folder instead of replacing it.' }
   Assert-Services
   Wait-Healthy
+  # UPD7: the installer writes the last word itself, so Update now isn't left "installing".
+  $after = Read-UpdaterStatus
+  if ($after.state -ne 'installed' -or $after.version -ne $setupVersion) { throw "Expected status.json to say installed v$setupVersion after the update." }
+  Assert-NoUpdateLeftOver
   $second = Read-Settings
   foreach ($name in @('POSTGRES_PASSWORD', 'TOHYEE_DB_ADMIN_PASSWORD', 'TOHYEE_DB_APP_PASSWORD')) {
     if ($second[$name] -ne $first[$name]) { throw "The update changed $name." }
@@ -289,7 +324,6 @@ try {
   $remote = Invoke-RestMethod -Uri "$url/api/server-update" -WebSession $again
   if ($remote.canUpdateHere -ne $true) { throw "Update now isn't offered on this Windows server: $($remote.notHere)" }
   # A request for an old version: the updater must pick it up, refuse it, and say so.
-  $statusFile = Join-Path $dataRoot 'update-status\status.json'
   Remove-Item -LiteralPath $statusFile -Force -ErrorAction SilentlyContinue
   Set-Content -LiteralPath (Join-Path $dataRoot 'update-request\request.json') -Value '{"version":"0.0.1","requestedBy":"ci@example.com"}' -Encoding ASCII
   Start-ScheduledTask -TaskName 'Tohyee updater' -TaskPath '\Tohyee\'
@@ -303,6 +337,40 @@ try {
   if ($remote.updater.state -ne 'skipped') { throw 'Tohyee could not read what the updater said.' }
   Write-Host 'The updater picked up the request, refused the old version and Tohyee read its answer.'
 
+  Write-Host '== An update that cannot stop Tohyee changes nothing (UPD10)'
+  # A file held open in the program folder (as antivirus or an open window can)
+  # stops the old program being moved aside: setup must stop before copying
+  # anything (exit code 7), put back what it had moved, and start Tohyee again.
+  Set-Content -LiteralPath $marker -Value 'old' -Encoding ASCII
+  $held = [System.IO.File]::Open((Join-Path $installDir 'pgsql\bin\psql.exe'), 'Open', 'Read', 'Read')
+  try {
+    Install-Tohyee 'held-file' -Expect 7
+  } finally {
+    $held.Dispose()
+  }
+  Assert-Services
+  Wait-Healthy
+  $heldStatus = Read-UpdaterStatus
+  if ($heldStatus.state -ne 'failed' -or $heldStatus.message -notmatch 'nothing was changed') { throw 'Expected status.json to say the update failed and nothing was changed.' }
+  Assert-NoUpdateLeftOver
+  if (-not (Test-Path -LiteralPath $marker)) { throw 'The old program was changed although setup stopped before copying.' }
+
+  Write-Host '== An update that fails before the new version starts puts the old one back (UPD11)'
+  $versionBefore = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{8C7C1E2B-5F0A-4B8E-9C1D-6A1F3E7B2D40}_is1').DisplayVersion
+  Install-Tohyee 'fails-before-start' -Extra @('/TESTFAILAT=before-start') -Expect 20
+  Assert-Services
+  Wait-Healthy
+  $undone = Read-UpdaterStatus
+  if ($undone.state -ne 'failed' -or $undone.message -notmatch 'was put back') { throw 'Expected status.json to say the old version was put back.' }
+  Assert-NoUpdateLeftOver
+  # The copy running now is the old one (it has the marker), not the new one.
+  if (-not (Test-Path -LiteralPath $marker)) { throw 'The old program was not put back (its marker file is gone).' }
+  $versionAfter = (Get-ItemProperty 'HKLM:\SOFTWARE\Microsoft\Windows\CurrentVersion\Uninstall\{8C7C1E2B-5F0A-4B8E-9C1D-6A1F3E7B2D40}_is1').DisplayVersion
+  if ($versionAfter -ne $versionBefore) { throw "Windows' list of programs says v$versionAfter, not v$versionBefore, after putting it back." }
+  $back = Invoke-RestMethod -Uri "$url/api/auth/session" -WebSession $again
+  if (-not (@($back.organisations | ForEach-Object { $_.id }) -contains 'ci')) { throw 'The organisation was not there after putting the old version back.' }
+  Write-Host 'Both failed updates left Tohyee running with its data.'
+
   $cloudflared = Join-Path $installDir 'cloudflared\cloudflared.exe'
   if (-not (Test-Path $cloudflared)) { throw 'cloudflared.exe was not installed.' }
   Write-Host (& $cloudflared --version)
@@ -312,10 +380,16 @@ try {
   for ($i = 0; $i -lt 60 -and (Test-Path (Join-Path $installDir 'unins000.exe')); $i++) { Start-Sleep -Seconds 2 }
   if (Get-Service -Name 'Tohyee', 'TohyeePostgres' -ErrorAction SilentlyContinue) { throw 'Services still exist after uninstalling.' }
   if (Get-ScheduledTask -TaskName 'Tohyee updater' -TaskPath '\Tohyee\' -ErrorAction SilentlyContinue) { throw 'The updater task still exists after uninstalling.' }
+  if (Get-ScheduledTask -TaskName 'Tohyee update recovery' -TaskPath '\Tohyee\' -ErrorAction SilentlyContinue) { throw 'The update recovery task still exists after uninstalling.' }
   if (-not (Test-Path (Join-Path $dataRoot 'pgdata\PG_VERSION'))) { throw 'Uninstalling removed the data.' }
   Write-Host 'Uninstalled; services removed, data kept.'
 } catch {
   Show-Logs
+  # For the CI artifact (it can only take files under the checkout).
+  $kept = Join-Path $out 'logs'
+  New-Item -ItemType Directory -Force -Path $kept | Out-Null
+  Copy-Item -Path (Join-Path $dataRoot 'logs\*') -Destination $kept -Recurse -Force -ErrorAction SilentlyContinue
+  Copy-Item -Path (Join-Path $dataRoot 'pgdata\log') -Destination (Join-Path $kept 'pgdata-log') -Recurse -Force -ErrorAction SilentlyContinue
   # Also as annotations, which can be read without the full job log.
   function Write-Annotation([string]$Title, [string]$Text) {
     $escaped = $Text.Replace('%', '%25').Replace("`r", '').Replace("`n", '%0A')

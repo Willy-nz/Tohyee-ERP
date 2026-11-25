@@ -27,7 +27,10 @@ if (Get-Service -Name 'TohyeePostgres' -ErrorAction SilentlyContinue) {
     & sc.exe delete TohyeePostgres | Out-Null
   }
 }
-# The updater for Update now in Tohyee.
+# The updater for Update now in Tohyee, and the update recovery at start-up (program, not data).
 Unregister-ScheduledTask -TaskName 'Tohyee updater' -TaskPath '\Tohyee\' -Confirm:$false -ErrorAction SilentlyContinue
+Unregister-ScheduledTask -TaskName 'Tohyee update recovery' -TaskPath '\Tohyee\' -Confirm:$false -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $DataRoot 'updater') -Recurse -Force -ErrorAction SilentlyContinue
+Remove-Item -LiteralPath (Join-Path $DataRoot 'update-state.json') -Force -ErrorAction SilentlyContinue
 
 exit 0

@@ -197,6 +197,27 @@ export function spreadSchedule(plan: SpreadPlan): SpreadMonth[] {
 }
 
 /**
+ * What's still to come when an item's last day moves, or what's left
+ * changes (SW29, SW30): `left` spread again over the months after
+ * `through` (the last month that can't change) up to the new last day, the
+ * way the item was spread before. By month, each month still to come takes
+ * an equal share; by days, each takes its days from the first of the month
+ * after `through`. Null when the new last day leaves no month to come.
+ */
+export function respread(plan: { method: "by_month" | "by_days"; startDate: string; endDate: string; left: string; through: string | null }): SpreadMonth[] | null {
+  if (plan.endDate < plan.startDate) return null;
+  if (plan.method === "by_month") {
+    const months = monthsBegun(plan.startDate, plan.endDate).filter((month) => plan.through === null || month > plan.through);
+    if (months.length === 0) return null;
+    // The calendar months still to come, whatever day of the month the cover started on.
+    return spreadSchedule({ amount: plan.left, method: "by_month", startDate: `${months[0]}-01`, endDate: monthEndDate(months[months.length - 1]) });
+  }
+  const from = plan.through === null ? plan.startDate : [`${addMonths(plan.through, 1)}-01`, plan.startDate].sort()[1];
+  if (plan.endDate < from) return null;
+  return spreadSchedule({ amount: plan.left, method: "by_days", startDate: from, endDate: plan.endDate });
+}
+
+/**
  * What's still to come after some months have posted (SW8): the months left
  * moved into one month, so an item can be ended early. Posted months never
  * change.

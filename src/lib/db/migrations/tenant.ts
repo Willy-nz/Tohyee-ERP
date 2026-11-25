@@ -285,6 +285,8 @@ import { migration as m0307 } from "@/lib/db/migrations/tenant/0307-weather-wind
 import { migration as m0308 } from "@/lib/db/migrations/tenant/0308-late-fees";
 import { migration as m0309 } from "@/lib/db/migrations/tenant/0309-spread-suggestion-dismissals";
 import { migration as m0311 } from "@/lib/db/migrations/tenant/0311-farm-stock-operations-and-safety-emails";
+import { migration as m0313 } from "@/lib/db/migrations/tenant/0313-tax-rate-zero-and-maori-authority";
+import { migration as m0310 } from "@/lib/db/migrations/tenant/0310-sales-platform-fixes";
 
 /**
  * Migrations applied to every organisation's own database. Each organisation
@@ -636,5 +638,7 @@ export const tenantMigrations: readonly Migration[] = [
   m0307,
   m0308,
   m0309,
+  m0310,
   m0311,
+  m0313,
 ];

@@ -120,18 +120,18 @@ export function Ir10Card({ organisationId, report, ir10, onSaved }: { organisati
         <div key={section.title}>
           <h3>{section.title}</h3>
           <div className={ui.tableWrap}>
-            <table className={ui.reportTable}>
-              <tbody>
-                {Array.from({ length: section.to - section.from + 1 }, (_, index) => section.from + index).map((number) => (
-                  <tr key={number} className={IR10_TOTALS.has(number) ? ui.reportTotal : undefined}>
-                    <td>
-                      <span className={ui.muted}>{number}</span> {ir10.labels[number]}
-                    </td>
-                    <td className={ui.num}>{number === 1 ? ir10.boxes[1] : ir10.boxes[number] === null ? <span className={ui.muted}>blank</span> : <Money value={ir10.boxes[number]} />}</td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+          <table className={ui.reportTable}>
+            <tbody>
+              {Array.from({ length: section.to - section.from + 1 }, (_, index) => section.from + index).map((number) => (
+                <tr key={number} className={IR10_TOTALS.has(number) ? ui.reportTotal : undefined}>
+                  <td>
+                    <span className={ui.muted}>{number}</span> {ir10.labels[number]}
+                  </td>
+                  <td className={ui.num}>{number === 1 ? ir10.boxes[1] : ir10.boxes[number] === null ? <span className={ui.muted}>blank</span> : <Money value={ir10.boxes[number]} />}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
           </div>
         </div>
       ))}
@@ -155,29 +155,29 @@ export function TaxReturnCard({ title, source, order, labels, result, residualBo
     <Card title={title}>
       <Notice tone="warning">From {source}, read by Claude and not yet reviewed by an accountant. Check every box before filing.</Notice>
       <div className={ui.tableWrap}>
-        <table className={ui.reportTable}>
-          <tbody>
-            {order.map((box) => (
-              <tr key={box}>
-                <td>
-                  {box === "other" || /^W\d/.test(box) ? null : <span className={ui.muted}>{box}</span>} {labels[box]}
-                  {box === residualBox ? <> ({result.residual})</> : null}
-                  {box === outcomeBox ? <> ({result.outcome === "refund" ? "refund" : "tax to pay"})</> : null}
-                </td>
-                <td className={ui.num}>
-                  <Money value={result.boxes[box]} />
-                </td>
-              </tr>
-            ))}
-            <tr>
+      <table className={ui.reportTable}>
+        <tbody>
+          {order.map((box) => (
+            <tr key={box}>
               <td>
-                <span className={ui.muted}>{provisionalBox}A, {provisionalBox}B</span>{" "}
-                {result.nextYear ? `${result.nextYear.incomeYear} provisional tax, standard option (S): RIT plus 5%` : "Next year's provisional tax: none required (RIT 5,000.00 or less)"}
+                {box === "other" || /^W\d/.test(box) ? null : <span className={ui.muted}>{box}</span>} {labels[box]}
+                {box === residualBox ? <> ({result.residual})</> : null}
+                {box === outcomeBox ? <> ({result.outcome === "refund" ? "refund" : "tax to pay"})</> : null}
               </td>
-              <td className={ui.num}>{result.nextYear ? <Money value={result.nextYear.amount} /> : null}</td>
+              <td className={ui.num}>
+                <Money value={result.boxes[box]} />
+              </td>
             </tr>
-          </tbody>
-        </table>
+          ))}
+          <tr>
+            <td>
+              <span className={ui.muted}>{provisionalBox}A, {provisionalBox}B</span>{" "}
+              {result.nextYear ? `${result.nextYear.incomeYear} provisional tax, standard option (S): RIT plus 5%` : "Next year's provisional tax: none required (RIT 5,000.00 or less)"}
+            </td>
+            <td className={ui.num}>{result.nextYear ? <Money value={result.nextYear.amount} /> : null}</td>
+          </tr>
+        </tbody>
+      </table>
       </div>
       <ul>
         {result.notes.map((note) => (
@@ -227,80 +227,83 @@ export function IcaCard({ organisationId, ica, onSaved }: { organisationId: stri
         </Notice>
       ) : null}
       <div className={ui.tableWrap}>
-        <table className={ui.reportTable}>
-          <tbody>
-            <tr>
-              <td>Balance at {formatDate(ica.start)}</td>
-              <td />
+      <table className={ui.reportTable}>
+        <tbody>
+          <tr>
+            <td>Balance at {formatDate(ica.start)}</td>
+            <td />
+            <td className={ui.num}>
+              <Money value={ica.opening} />
+            </td>
+          </tr>
+          {ica.rows.map((row, index) => (
+            <tr key={`${row.kind}-${row.id ?? index}`}>
+              <td>
+                {formatDate(row.date)} · {row.label}
+                {row.dividendAmount ? (
+                  <>
+                    {" "}
+                    on <Money value={row.dividendAmount} />
+                  </>
+                ) : null}
+                {row.description ? <span className={ui.muted}> · {row.description}</span> : null} {row.ratioDiffers ? <Badge tone="amber">Different ratio</Badge> : null}{" "}
+                {row.id !== null && row.kind !== "tax_paid" ? (
+                  <button type="button" className={ui.linkButton} onClick={() => void remove(row.id!)}>
+                    Remove
+                  </button>
+                ) : null}
+              </td>
               <td className={ui.num}>
-                <Money value={ica.opening} />
+                <Money value={row.amount} />
+              </td>
+              <td className={ui.num}>
+                <Money value={row.balance} />
               </td>
             </tr>
-            {ica.rows.map((row, index) => (
-              <tr key={`${row.kind}-${row.id ?? index}`}>
-                <td>
-                  {formatDate(row.date)} · {row.label}
-                  {row.dividendAmount ? (
-                    <>
-                      {" "}
-                      on <Money value={row.dividendAmount} />
-                    </>
-                  ) : null}
-                  {row.description ? <span className={ui.muted}> · {row.description}</span> : null} {row.ratioDiffers ? <Badge tone="amber">Different ratio</Badge> : null}{" "}
-                  {row.id !== null && row.kind !== "tax_paid" ? (
-                    <button type="button" className={ui.linkButton} onClick={() => void remove(row.id!)}>
-                      Remove
-                    </button>
-                  ) : null}
-                </td>
-                <td className={ui.num}>
-                  <Money value={row.amount} />
-                </td>
-                <td className={ui.num}>
-                  <Money value={row.balance} />
-                </td>
-              </tr>
-            ))}
-            <tr className={ui.reportTotal}>
-              <td>Balance at {formatDate(ica.end)}</td>
-              <td />
-              <td className={ui.num}>
-                <Money value={ica.closing} />
-              </td>
-            </tr>
-          </tbody>
-        </table>
+          ))}
+          <tr className={ui.reportTotal}>
+            <td>Balance at {formatDate(ica.end)}</td>
+            <td />
+            <td className={ui.num}>
+              <Money value={ica.closing} />
+            </td>
+          </tr>
+        </tbody>
+      </table>
       </div>
       <details>
         <summary>IR4 annual imputation return (page 7) boxes</summary>
         <div className={ui.tableWrap}>
-          <table className={ui.reportTable}>
-            <tbody>
-              {(
-                [
-                  ["41", "Opening balance (credit; debit negative)"],
-                  ["42A", "Income tax and provisional tax paid"],
-                  ["42B", "RWT on interest received"],
-                  ["42C", "Imputation credits on dividends received"],
-                  ["42D", "Other credits"],
-                  ["43A", "Income tax refunded"],
-                  ["43B", "Imputation credits on dividends paid"],
-                  ["43C", "Other debits"],
-                  ["44B", "Closing balance (credit; debit negative)"],
-                  ["45", "Imputation penalty tax"],
-                ] as const
-              ).map(([box, label]) => (
-                <tr key={box}>
-                  <td>
-                    <span className={ui.muted}>{box}</span> {label}
-                  </td>
-                  <td className={ui.num}>
-                    <Money value={ica.ir4[box]} />
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+        <table className={ui.reportTable}>
+          <tbody>
+            {(
+              [
+                ["41", `Opening balance (tick ${ica.ir4Sides["41"]})`],
+                ["42A", "Income tax and provisional tax paid"],
+                ["42B", "RWT on interest received"],
+                ["42C", "Imputation credits on dividends received"],
+                ["42D", "Other credits"],
+                ["42E", "Total credits"],
+                ["43A", "Income tax refunded"],
+                ["43B", "Imputation credits on dividends paid"],
+                ["43C", "Other debits"],
+                ["43D", "Total debits"],
+                ["44", `Closing balance at 31 March (tick ${ica.ir4Sides["44"]})`],
+                ["44B", "Further income tax payable (only for a debit balance; 44A not worked out)"],
+                ["45", "Imputation penalty tax"],
+              ] as Array<[keyof typeof ica.ir4, string]>
+            ).map(([box, label]) => (
+              <tr key={box}>
+                <td>
+                  <span className={ui.muted}>{box}</span> {label}
+                </td>
+                <td className={ui.num}>
+                  <Money value={ica.ir4[box]} />
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
         </div>
       </details>
       <form className={ui.inlineForm} onSubmit={add}>

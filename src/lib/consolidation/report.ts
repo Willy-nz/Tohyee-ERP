@@ -85,6 +85,12 @@ type Member = {
   accounts: Map<string, Account>;
   byCode: Map<string, Account>;
   days: DayRow[];
+  /**
+   * The same, for weighting a month's average and historical rates only:
+   * without a journal and its reversal (a void or correction) when both are
+   * in the same month, since together they're nothing (BKF9).
+   */
+  rateWeights: DayRow[];
   intercompanyAccounts: Map<string, string>;
   /** Open receivables (+) and payables (-) with each linked organisation, in the member's currency, at the report date. */
   owed: Map<string, { receivable: Decimal; payable: Decimal }>;
@@ -108,6 +114,17 @@ async function loadMember(record: OrganisationRecord, user: GroupUser, asAt: str
         `select l.account_id::text, j.posting_date::text as date, sum(l.debit_amount)::text as debit, sum(l.credit_amount)::text as credit
            from ledger_journal_lines l join ledger_journals j on j.id = l.journal_id
           where j.posting_date <= $1 group by 1, 2`,
+        [asAt],
+      );
+      const weights = await tx.query<{ account_id: string; date: string; debit: string; credit: string }>(
+        `select l.account_id::text, j.posting_date::text as date, sum(l.debit_amount)::text as debit, sum(l.credit_amount)::text as credit
+           from ledger_journal_lines l join ledger_journals j on j.id = l.journal_id
+          where j.posting_date <= $1
+            and not exists (select 1 from ledger_journals r where r.related_journal_id = j.id and r.correction_kind = 'reversal'
+                             and r.posting_date <= $1 and date_trunc('month', r.posting_date) = date_trunc('month', j.posting_date))
+            and not (j.correction_kind = 'reversal' and exists (select 1 from ledger_journals o where o.id = j.related_journal_id
+                             and date_trunc('month', o.posting_date) = date_trunc('month', j.posting_date)))
+          group by 1, 2`,
         [asAt],
       );
       const marked = await tx.query<{ account_id: string; counterpart_organisation_id: string }>("select account_id::text, counterpart_organisation_id from intercompany_accounts");
@@ -136,6 +153,7 @@ async function loadMember(record: OrganisationRecord, user: GroupUser, asAt: str
         accounts: new Map(list.map((account) => [account.id, account])),
         byCode: new Map(list.map((account) => [account.code.toLowerCase(), account])),
         days: days.rows.map((row) => ({ accountId: row.account_id, date: row.date, debit: dec(row.debit), credit: dec(row.credit) })),
+        rateWeights: weights.rows.map((row) => ({ accountId: row.account_id, date: row.date, debit: dec(row.debit), credit: dec(row.credit) })),
         intercompanyAccounts: new Map(marked.rows.map((row) => [row.account_id, row.counterpart_organisation_id])),
         owed,
         budget,
@@ -211,7 +229,7 @@ class Translator {
     const wanted = (account: Account | undefined) =>
       account !== undefined && (kind === "average" ? account.accountClass === "revenue" || account.accountClass === "expense" : account.accountClass === "equity");
     const byDay = new Map<string, Decimal>();
-    for (const row of this.member.days) {
+    for (const row of this.member.rateWeights) {
       if (monthOf(row.date) !== month || !wanted(this.member.accounts.get(row.accountId))) continue;
       byDay.set(row.date, add(byDay.get(row.date) ?? ZERO_DECIMAL, add(row.debit, row.credit)));
     }

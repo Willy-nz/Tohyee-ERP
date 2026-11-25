@@ -1,8 +1,9 @@
 import net from "node:net";
 import { Readable } from "node:stream";
-import { describe, expect, it } from "vitest";
+import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { parseConnectionSettings } from "@/lib/analytics/databases/config";
 import { loginWarning, readSourceRows, testConnection } from "@/lib/analytics/databases/connections";
+import { setOrganisationReachForTests } from "@/lib/network/organisation-reach";
 import {
   type DriverModules,
   friendlyError,
@@ -68,6 +69,10 @@ const mysqlFields: MysqlField[] = [
 ];
 
 const mysqlSettings = parseConnectionSettings({ engine: "mysql", host: "192.168.1.30", database: "shop", username: "reader", encryption: "require" });
+
+// Made-up office server names resolve to a made-up office address.
+beforeAll(() => setOrganisationReachForTests({ resolve: async () => ["192.168.1.40"], ownAddresses: () => ["127.0.0.1", "::1"] }));
+afterAll(() => setOrganisationReachForTests({ resolve: null, ownAddresses: null }));
 
 describe("MySQL (with a fake mysql2; not tried against a real server)", () => {
   it("connects read only, without local files or several statements, and reads exact text", async () => {

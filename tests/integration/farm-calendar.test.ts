@@ -41,7 +41,7 @@ import { apiRequest, createTestOrganisation, createTestUser, describeWithDatabas
  * The farm calendar from email (FC1, FC7-FC9, FC11, FC13-FC15, not yet reviewed). Gmail and Google's sign-in are canned responses; each test gets
  * its own organisation with two farms, Home farm and Runoff.
  */
-type Mail = { id: string; threadId: string; at: string; from: string; subject: string; text: string; labels?: string[] };
+type Mail = { id: string; threadId: string; at: string; from: string; subject: string; text: string; labels?: string[]; authenticationResults?: string };
 /** Gmail's labels in the fake: the Inbox, Jade's own labels, and system ones that aren't offered. */
 const LABELS = [
   { id: "INBOX", name: "INBOX", type: "system" },
@@ -105,6 +105,7 @@ describeWithDatabase("farm calendar from email", () => {
         payload: {
           mimeType: "multipart/alternative",
           headers: [
+            ...(mail.authenticationResults ? [{ name: "Authentication-Results", value: mail.authenticationResults }] : []),
             { name: "From", value: mail.from },
             { name: "Subject", value: mail.subject },
           ],
@@ -231,6 +232,35 @@ describeWithDatabase("farm calendar from email", () => {
     expect(JSON.stringify(audit.rows)).not.toContain("kowhaidairies");
     const columns = await w.as(jade, (tx) => tx.query<{ column_name: string }>("select column_name from information_schema.columns where table_name = 'farm_mail_seen' order by ordinal_position"));
     expect(columns.rows.map((row) => row.column_name)).toEqual(["account_id", "external_id", "sent_at", "folder_ids"]);
+  });
+
+  it("a cancellation matched only by its sender's address waits for a person, unless the mail service confirmed the sender", async () => {
+    const w = await setup();
+    const cartage = "Otago Cartage <bookings@otagocartage.example>";
+    inbox.push({ id: "s1", threadId: "s-t1", at: "2026-10-18T22:00:00Z", from: cartage, subject: "Truck", text: "Stock truck for the Runoff heifers on Wednesday 21 October, 7am." });
+    const mailbox = await connect(w, "2026-10-19T09:00:00Z");
+    await checkFarmMailbox(w.organisation, mailbox.id, new Date("2026-10-19T09:15:00Z"));
+    // A new conversation, "from" the carrier, with no check by the mail service: the booking stays and it goes to Needs checking.
+    inbox.push({ id: "s2", threadId: "s-t2", at: "2026-10-19T20:30:00Z", from: cartage, subject: "Truck update", text: "Sorry, the stock truck is cancelled." });
+    await checkFarmMailbox(w.organisation, mailbox.id, new Date("2026-10-19T21:00:00Z"));
+    let week = await w.as(jade, (tx) => farmCalendar(tx, { from: "2026-10-19", to: "2026-10-25" }));
+    const truck = week.items.find((item) => item.title === "Stock truck" && item.date === "2026-10-21");
+    expect(truck).toMatchObject({ state: "open" });
+    const held = await w.as(jade, (tx) => tx.query<{ check_reasons: string[] }>("select check_reasons from farm_calendar_items where external_id = 's2'"));
+    expect(held.rows[0].check_reasons.join(" ")).toContain("its sender couldn't be confirmed");
+    // The same email with the mail service's confirmation of the sender cancels it.
+    inbox.push({
+      id: "s3",
+      threadId: "s-t3",
+      at: "2026-10-19T21:30:00Z",
+      from: cartage,
+      subject: "Truck update",
+      text: "Sorry, the stock truck is cancelled.",
+      authenticationResults: "mx.google.com; dkim=pass header.i=@otagocartage.example; spf=pass smtp.mailfrom=otagocartage.example; dmarc=pass (p=REJECT) header.from=otagocartage.example",
+    });
+    await checkFarmMailbox(w.organisation, mailbox.id, new Date("2026-10-19T22:00:00Z"));
+    week = await w.as(jade, (tx) => farmCalendar(tx, { from: "2026-10-19", to: "2026-10-25" }));
+    expect(week.items.find((item) => item.title === "Stock truck" && item.date === "2026-10-21")).toMatchObject({ state: "cancelled" });
   });
 
   it("FC2, FC7-FC9 reading, a move, a cancellation, each email once, history before connecting", async () => {
@@ -521,6 +551,13 @@ describeWithDatabase("farm calendar from email", () => {
     expect(await calendarLinkFeed(w.org, secondFile)).toBeNull();
     const mereLink = await w.as(mere, (tx) => makeCalendarLink(tx, "https://tohyee.test"));
     const mereFile = mereLink.url.split("/").pop()!;
+    expect(await calendarLinkFeed(w.org, mereFile)).toContain("Pick up drench");
+    // Moved to a role that can't do farm work, the link stops; back again, it works.
+    await coreQuery("update organisation_members set role = 'report_viewer' where organisation_id = $1 and user_id = $2", [w.org, mere.id]);
+    expect(await calendarLinkFeed(w.org, mereFile)).toBeNull();
+    await coreQuery("update organisation_members set role = 'sales_rep' where organisation_id = $1 and user_id = $2", [w.org, mere.id]);
+    expect(await calendarLinkFeed(w.org, mereFile)).toBeNull();
+    await coreQuery("update organisation_members set role = 'admin' where organisation_id = $1 and user_id = $2", [w.org, mere.id]);
     expect(await calendarLinkFeed(w.org, mereFile)).toContain("Pick up drench");
     const removed = await memberRoute.DELETE(
       apiRequest(`/api/organisations/${w.org}/members/${mere.id}`, { method: "DELETE", cookie: await sessionCookieFor(jade) }),

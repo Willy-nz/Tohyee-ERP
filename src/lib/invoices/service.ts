@@ -1448,6 +1448,8 @@ export async function approveInvoice(
   tx: OrgTx,
   invoiceIdInput: unknown,
   command: { source?: unknown; idempotencyKey: unknown },
+  /** SPF2: for documents brought in from a sales platform, stock that can't be backdated moves on the earliest day allowed. */
+  options: { stockOnEarliestDate?: boolean } = {},
 ): Promise<{ created: boolean; invoice: Invoice; creditWarning?: string }> {
   const invoiceId = requireId(invoiceIdInput, "invoiceId");
   const source = optionalSource(command.source);
@@ -1546,6 +1548,7 @@ export async function approveInvoice(
     { id: invoiceId, date: current.invoiceDate, reference: invoiceNumber, contactId: current.contactId },
     resolved.resolvedLines,
     `Cost of sales, invoice ${invoiceNumber}`,
+    { stockOnEarliestDate: options.stockOnEarliestDate === true },
   );
   if (stock) journalLines.push(...stock.journalLines);
   const posted = await postJournalBody(

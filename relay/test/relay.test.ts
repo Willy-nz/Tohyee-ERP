@@ -294,6 +294,15 @@ describe("kill switch (admin)", () => {
     expect((await call("GET", "/v1/admin/addresses", { auth: ADMIN })).status).toBe(401);
   });
 
+  it("limits wrong admin passwords per network and in all, refusing even the right one once reached", async () => {
+    for (let attempt = 0; attempt < 10; attempt += 1) expect((await call("GET", "/v1/admin/addresses", { auth: `wrong-${attempt}`, ip: "198.51.100.7" })).status).toBe(401);
+    expect((await call("GET", "/v1/admin/addresses", { auth: ADMIN, ip: "198.51.100.7" })).status).toBe(429);
+    // Another network isn't held up.
+    expect((await call("GET", "/v1/admin/addresses", { auth: ADMIN, ip: "198.51.100.8" })).status).toBe(200);
+    for (let index = 0; index < 190; index += 1) await call("GET", "/v1/admin/addresses", { auth: "wrong", ip: `10.0.${Math.floor(index / 100)}.${index % 100}` });
+    expect((await call("GET", "/v1/admin/addresses", { auth: ADMIN, ip: "198.51.100.9" })).status).toBe(429);
+  });
+
   it("switches new addresses off and on without affecting existing ones", async () => {
     const existing = (await (await register()).json()) as { hostname: string };
     const off = await call("PUT", "/v1/admin/registrations", { auth: ADMIN, body: { open: false } });

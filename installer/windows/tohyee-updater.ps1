@@ -19,6 +19,8 @@
 # %ProgramData%\Tohyee\update-status\status.json (Tohyee can read it, not
 # change it). The installer stops Tohyee, replaces the program and starts it
 # again, and Tohyee upgrades each organisation's database as it starts.
+# The installer writes the last word in status.json itself (update-guard.ps1):
+# "installed", or "failed" with what it did about it (UPD7-UPD13).
 #
 #   -CheckOnly   do every check but don't download or install (for tests)
 
@@ -120,7 +122,10 @@ try {
   }
   Move-Item -LiteralPath $partial -Destination $setup -Force
 
-  # Not waited for: the installer replaces this script and sets up this task again.
+  # Not waited for: the installer replaces this script and sets up this task
+  # again (and the task's 45-minute limit could stop a long install). The
+  # installer says how it ended in status.json; the page also works it out
+  # from the version Tohyee comes back on (src/lib/updates/updater-status.ts).
   $log = Join-Path $LogDir ("update-$wanted-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
   Write-Status 'installing' $wanted "Installing. The installer's log is $([System.IO.Path]::GetFileName($log)) in Tohyee's logs."
   Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$log`"")

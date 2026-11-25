@@ -6088,10 +6088,8 @@ and **Tax** (always on), **CRM**, **Advanced reporting**, and **Not-for-profit**
 (each optional module is switched on per organisation in Settings).
 Advanced reporting is the existing
 "advanced features" switch: tracking categories and segments, custom fields,
-salespeople and their reports. The CRM follows
-[Twenty](https://github.com/twentyhq/twenty) (AGPL-3.0, the same licence as
-Tohyee): its companies, people, opportunities, tasks, notes and timeline,
-built into Tohyee rather than run alongside it.
+salespeople and their reports. The CRM has companies, people,
+opportunities, tasks, notes and a timeline, built into Tohyee.
 
 - **MOD1** A new organisation has the CRM and Advanced reporting off. Turning
   either on or off is recorded in the history. With the CRM off its menu and
@@ -6170,8 +6168,7 @@ email and phone. People are archived, never deleted.
 **Opportunities** (deals) have a name, a company, a point of contact (one of
 its people), an owner (a member of the organisation), an amount excluding
 GST, an expected close date and a **stage**: New, Screening, Meeting,
-Proposal, Won or Lost (Twenty's stages, with its "Customer" called Won, and
-Lost added; since CRMS1 these are the organisation's starting stages, which
+Proposal, Won or Lost (since CRMS1 these are the organisation's starting stages, which
 an admin can change, and "Won" means any Closed won stage). Stages change freely until an opportunity has made an invoice.
 A **won opportunity can make a draft invoice** for its company: one line with
 the opportunity's name and amount, the first active revenue account and the
@@ -6257,8 +6254,7 @@ when approved.
 ## CRM email and calendar sync
 
 The owner asked (29 Sep 2026) for email and calendar sync in the first round of
-the CRM; the details follow Twenty's connected accounts:
-each member of an organisation can connect their own **Gmail** or
+the CRM. Each member of an organisation can connect their own **Gmail** or
 **Microsoft 365** mailbox and calendar, and emails and meetings with people
 the CRM knows show on those people's and companies' timelines. Like Akahu,
 each organisation uses its own Google or Microsoft app: an admin enters its
@@ -6449,8 +6445,9 @@ The rules (our choice where Shopify and the owner are silent):
   errors. Syncs run every 15 minutes (off with
   TOHYEE_SALES_PLATFORM_SYNC_SCHEDULER=off) or on **Sync now**; each fetches
   what changed since the last one. A failed sync records its error and is
-  tried again next time; three failures in a row pause the connection until
-  an admin syncs it successfully.
+  tried again next time; three failures in a row of the store refusing the
+  login pause the connection until an admin syncs it successfully (other
+  failures keep being tried, SPF10).
 - **Disconnecting** removes the credentials, the cached access token and
   the links between Shopify and Tohyee records, and unsubscribes the
   webhooks it can. Contacts and items brought in stay, and so does the
@@ -16933,7 +16930,7 @@ cost of goods sold 400.00 (13 May) and 300.00 (9 Jun); interest 20.00
 
 ## Analytics: built-in values on the books copy (examples BM1-BM4; following common practice, not yet reviewed)
 
-Issue  asked for ready-made values on the books copy so a dashboard is a
+An issue asked for ready-made values on the books copy so a dashboard is a
 few clicks: Sales, Cost of sales, Gross profit, Gross margin %, Operating
 expenses, Net profit, Accounts receivable, Accounts payable, Cash in bank and
 Days to get paid. The owner hasn't said how each is worked out, so they follow
@@ -16989,10 +16986,9 @@ Tested in `tests/integration/analytics-books.test.ts`.
 
 ## Analytics: what a value means, and joins that don't double count (examples MD1-MD6; following common practice, not yet reviewed)
 
-Issue  asked that values say what they count and that totals, balances,
+An issue asked that values say what they count and that totals, balances,
 currencies and joins can't quietly give wrong figures. The owner hasn't answered
-how; these following common practice, as the issue names them
-, and the books copy's existing rules
+how, so these follow common practice and the books copy's existing rules
 (AB1-AB11, BM1-BM4). **following common practice, not yet reviewed.** They change no
 accounting: nothing here is posted, and the books copy is unchanged.
 
@@ -17076,10 +17072,10 @@ MD6), `tests/unit/analytics-merge-checks.test.ts` (MD4) and
 
 ## Analytics: field settings (examples FS1-FS3; following common practice, not yet reviewed)
 
-Issue  asked to sort by another column (month name by month
+An issue asked to sort by another column (month name by month
 number), with a default summary and format per field, folders and
-descriptions;  asked for month sorting in time reports.,
-following common practice' column properties. **following common practice, not yet
+descriptions; another asked for month sorting in time reports. These follow
+common practice for column properties. **following common practice, not yet
 reviewed.** Nothing is posted.
 
 Setup: sales Apr (month 1 of a 1 April year) 100.00 North, May (2) 50.00,
@@ -17101,9 +17097,9 @@ Tested in `tests/unit/analytics-field-settings.test.ts` and
 
 ## Analytics: relationships between tables (examples RL1-RL5; following common practice, not yet reviewed)
 
-Issue  asked for relationships (a simple star model) so a tile
-can use fields from two tables, asked that joins never repeat
-amounts (MD4)., following common practice' many-to-one
+An issue asked for relationships (a simple star model) so a tile
+can use fields from two tables, and another asked that joins never repeat
+amounts (MD4). These follow common practice for many-to-one
 relationships. **following common practice, not yet reviewed.** Nothing is posted.
 
 Setup: invoices INV-1 (id 1, Kererū Café, total **100.00**) and INV-2 (id
@@ -17133,8 +17129,8 @@ Tested in `tests/unit/analytics-relationships.test.ts` and
 
 ## Analytics: calculated fields on a data source (examples CF1-CF6; following common practice, not yet reviewed)
 
-Issue  asked for calculated fields on a source, BI tools
-style. Not accounting: a formula on each row of a loaded table, shared by
+An issue asked for calculated fields on a source, as reporting tools
+commonly have. Not accounting: a formula on each row of a loaded table, shared by
 reports. **following common practice, not yet reviewed.**
 
 Setup: lines on 31 Mar 2026 (Kererū Café, north, 2 × 12.50 = 25.00), 1 Apr
@@ -17171,11 +17167,12 @@ Tested in `tests/unit/analytics-calculated-fields.test.ts` (CF1-CF5) and
 
 ## Analytics: year to date and the same period last year (examples TI1-TI5; following common practice, not yet reviewed)
 
-Issue  asked for year, quarter and month to date (financial
-year aware), the same period last year and rolling 12 months;  asked
+An issue asked for year, quarter and month to date (financial
+year aware), the same period last year and rolling 12 months; another asked
 for custom NZ balance dates, partial years, leap days and month order. The
-financial year is the organisation's, as is common's reports use it (it ends on the balance date); the calculations following common practice'
-TOTALYTD and SAMEPERIODLASTYEAR. **following common practice,
+financial year is the organisation's, as its reports use it (it ends on the
+balance date); the calculations follow common practice for year to date and
+the same period last year. **following common practice,
 not yet reviewed.** Nothing is posted.
 
 Setup (31 March balance date unless said): sales of 10.00 (29 Feb 2024,
@@ -17219,10 +17216,10 @@ Tested in `tests/unit/analytics-time-intelligence.test.ts`.
 
 ## Analytics: quick calculations (examples QC1-QC8; following common practice, not yet reviewed)
 
-Issue  asked for running totals, shares, ranks, differences and
-moving averages on a value, asked that their denominators, totals,
-blanks and Top N be defined. The owner hasn't answered how; these follow Power
-BI's "Show value as" and quick measures. **following common practice, not yet reviewed.** Nothing is posted:
+An issue asked for running totals, shares, ranks, differences and
+moving averages on a value, and another asked that their denominators,
+totals, blanks and Top N be defined. The owner hasn't answered how, so these
+follow common practice for showing a value as a share, rank or running total. **following common practice, not yet reviewed.** Nothing is posted:
 they change what a chart or table shows, not the books.
 
 Setup: sales rows of 100.00 (5 Jan, North), 300.00 (20 Jan, South), 50.00
@@ -20049,8 +20046,9 @@ examples"; "Claiming Investment Boost" (news, 2025).
 
 - **ITX11 An asset's tax details.** Owners and admins give a fixed asset
   from the register its tax details: **method** (diminishing value,
-  straight line, low-value write-off, or not depreciable, e.g. land, or a
-  building at IRD's 0%), the **IRD rate** typed from IRD's rate finder
+  straight line, low-value write-off, or not depreciable, e.g. land or a
+  residential building; a commercial or industrial building is straight
+  line at IRD's 0% rate, so it can get Investment Boost, TXF2), the **IRD rate** typed from IRD's rate finder
   (Tohyee has no list of IRD rates), the **tax cost** (the book cost unless
   changed), the **business use %** (100 unless changed), the date it was
   **first available for use**, and whether it's **new** (or new to NZ) for
@@ -20416,10 +20414,14 @@ interest it charges.
   opening balance typed in the year), 42A income tax paid, 42B RWT
   deducted (IRD's box is RWT on interest; RWT on dividends belongs in 42D,
   and the screen says so), 42C credits on dividends received, 42D other
-  credits, 43A refunds, 43B credits on dividends paid, 43C other debits,
-  44B closing balance, 45 the 10% penalty on a debit closing balance.
-  Kererū's 2026 ICA (ITX26): **41 5,000.00; 42A 8,183.80; 42B 140.00; 42C
-  280.00; 43A 500.00; 43B 2,800.00; 44B 10,303.80**. The income boxes and
+  credits, 42E total credits, 43A refunds, 43B credits on dividends paid,
+  43C other debits, 43D total debits, 44 closing balance (ticked credit or
+  debit, as 41 is), 44B further income tax payable (a debit closing
+  balance; nil for a credit one), 45 the 10% penalty on a debit closing
+  balance (corrected 25 Nov 2026, TXF3).
+  Kererū's 2026 ICA (ITX26): **41 5,000.00 credit; 42A 8,183.80; 42B 140.00; 42C
+  280.00; 42E 8,603.80; 43A 500.00; 43B 2,800.00; 43D 3,300.00; 44
+  10,303.80 credit; 44B nil**. The income boxes and
   tax calculation are ITX50-ITX53. Tested in `tests/unit/ica.test.ts`.
 
 ## Income tax stage 10: the IR4's income and tax calculation (ITX50-ITX53; from IRD's IR4 form for 2026, downloaded from ird.govt.nz and read by Claude 17 Oct 2026, not yet reviewed)
@@ -22977,7 +22979,9 @@ Tested in `tests/unit/fuel-refund.test.ts` and
 - **FUEL11 In the books.** The refund includes GST on the excise. Following
   common practice, the refund received is coded back to the fuel account
   with GST at 15%, so the GST already claimed on that part of the petrol is
-  paid back. Tohyee shows this and doesn't post anything.
+  paid back. Tohyee shows this and doesn't post anything. That's only for
+  a GST-registered organisation that claimed GST on the petrol; others code
+  it with no GST (TXF5).
 - **FUEL12 What it doesn't do.**
   - The ACC levy on petrol.
   - LPG and CNG.
@@ -23438,7 +23442,7 @@ dropdown.
 - **APS10** A name that isn't a salesperson shows **0.00** everywhere,
   never the whole report.
 
-## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW28; planned with the owner 23 Nov 2026, built by Claude; the rules SW1-SW25 were summarised to the owner, who accepted them on 24 Nov 2026; SW26-SW28 are not yet reviewed)
+## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW30; planned with the owner 23 Nov 2026, built by Claude; the rules SW1-SW25 were summarised to the owner, who accepted them on 24 Nov 2026; SW26-SW30 are not yet reviewed)
 
 Income or a cost often belongs to other months than the one it was billed
 or paid in. The Spreading worksheet replaces the spreadsheet kept for that.
@@ -23670,6 +23674,36 @@ added when Spreading is turned on.
   hand. An accrual suggestion is for one month, so next month's is a new
   one. AI keys read the same suggestions (`get_spreading_suggestions`),
   add them with the ordinary tool, and can dismiss one.
+- **SW29 A new last day** (25 Nov 2026; from the plan's "Changes" step;
+  following common practice, not yet reviewed). An item spread by month or
+  by days can have its last day moved, earlier or later. Months already
+  posted never change: what's left is spread again over the months still
+  to come, the way it was spread before. A change like this is treated as
+  a change from now on, not a correction of the past. SW1's insurance,
+  1,200.00 at 100.00 a month, has July to September posted (300.00), so
+  900.00 is left:
+  - Cut short at 31 Dec 2026: October, November and December take
+    **300.00** each.
+  - Or run on to 30 Sep 2027: twelve months of **75.00**.
+  - The amount doesn't change, so the worksheet still matches the ledger.
+  - By days, each month still to come takes its days: 1,000.00 over 1 Jan
+    to 10 Apr 2027 with January's 310.00 posted and the last day moved to
+    31 Mar leaves 690.00 over February's 28 days and March's 31, **327.46**
+    and **362.54**.
+  - A last day inside the months already posted is refused ("October has
+    posted, so the last day has to be after it"): end it early instead
+    (SW8). Items with one month, your own amounts or "when it's done"
+    have nothing to respread.
+- **SW30 A new amount still to come.** On an accrual only, because an
+  accrual is an estimate. SW6's rates, 900.00 over July to September, have
+  July's 300.00 posted. The estimate rises: with **700.00** still to come,
+  August and September are **350.00** each and the item is 1,000.00 in
+  all. With the last day moved to 31 Oct as well and 750.00 to come,
+  August to October are **250.00** each. Nothing still to come is refused:
+  mark it as arrived instead. What's left of a cost paid in advance or
+  income in advance can't be changed, because it's what was paid or
+  invoiced and is already on the balance sheet. An AI key at Make and post
+  can do both (`change_spreading_item`).
 
 ## Where Shopify orders go (SHP1-SHP5; 23 Nov 2026; following common practice, not yet reviewed)
 
@@ -23741,7 +23775,8 @@ fee or interest to an overdue bill: a business can charge one only if its
 terms of trade say so (and for consumers, credit and fair trading law
 limit what's fair). So it's off until an admin turns it on, and the screen
 says to check the terms first. GST: IRD treats a flat late payment fee the
-same way as the sale it's on (GST Act s 5(25)), and interest charged on an
+same way as the sale it's on, shared in proportion when the sale was at
+more than one rate (GST Act s 5(25) and (26)), and interest charged on an
 overdue account as an exempt supply.
 
 A made-up café supplier, GST registered, turns late fees on with a $25.00
@@ -23779,7 +23814,8 @@ sale, $150.00 GST), due 31 October 2026.
   note or an overpayment used on the invoice counts from its date; one
   that's later voided or removed counts as never made from that date.
 - **LATE8 Next time.** At the next charge, on 31 December, interest runs from 1
-  December, on what's then still owing. No second fee.
+  December, on what's then still owing. No second fee. Only invoices with
+  something still owing on the charge date are charged (LATE14).
 - **LATE9 Not twice, not lost.** A late payment invoice kept as a draft
   still counts as charged. If it's deleted or voided, those days and that
   fee can be charged again.
@@ -23792,6 +23828,98 @@ sale, $150.00 GST), due 31 October 2026.
   charged (a key account, say). Invoices under the minimum, drafts, voided
   invoices and late payment invoices aren't charged.
 - **LATE12 Other currencies.** An invoice in another currency is charged in
+  that currency. The fee and the minimum are set in the organisation's own
+  currency, so they're converted at the exchange rate for the charge date
+  (the rate the late payment invoice itself uses), rounded half up to the
+  currency's smallest unit. With USD at 0.6000 (NZD per USD), the $25.00
+  fee is USD **41.67**. With JPY at 0.0105, it's JPY **2,381**, and the
+  $20.00 minimum is JPY **1,905**, so a JPY 1,500 invoice isn't charged.
+  Interest is a rate, so it's worked out on the invoice's own amounts. If
+  there's no rate for the charge date, that invoice isn't charged and the
+  screen says why; the rest are charged as usual. (Corrected 25 Nov 2026:
+  before, the fee was charged as that many units of the other currency.)
+
+## Bank and ledger fixes, and more on late fees (BKF1-BKF10, LATE13-LATE14; 25 Nov 2026; following common practice, not yet reviewed)
+
+Tested in `tests/integration/bank-ledger-fixes.test.ts`,
+`tests/integration/late-fees.test.ts`, `tests/integration/spreading.test.ts`
+(SW25) and `tests/integration/consolidation.test.ts`. A made-up business,
+NZD, uses account 1000 and the BK1 statement lines. Nothing here changes
+journals already posted: BKF10 helps a bookkeeper find past damage, which
+they put right themselves (void, remove and redo, exclude).
+
+- **BKF1 Possible duplicates wait for a person.** A card purchase of
+  -46.00 on 21 May comes in from an OFX file, then again from a CSV, so the
+  CSV's line is flagged as a possible duplicate (BK3). A bank rule codes
+  this payee. "OK all confident matches" reconciles the OFX line only (1
+  succeeded): one spend money of **46.00**, not 92.00. The flagged line
+  shows "Possible duplicate" instead of a one-click match. An AI's batch or
+  bank rule refuses it, saying it may be a duplicate. A person opens it and
+  either excludes it, or (if it really is a second purchase) reconciles it
+  by hand. A line whose look-alike is excluded isn't treated as a duplicate.
+- **BKF2 Paying an invoice that's already paid.** INV-0001 for 115.00 was
+  paid on the invoice screen. Its +115.00 statement line is then
+  reconciled by "paying" INV-0001 again. That's refused: "Invoice INV-0001
+  is already paid…", saying to match the line to the payment already
+  recorded instead. Nothing is posted. If an invoice owes 15.00 and 115.00
+  is set against it, that's refused too, saying what it owes. If the
+  customer really did pay twice, the person ticks "keep the extra as the
+  customer's credit" (allowOverpayment on the API): the second payment is
+  **115.00**, all overpayment (OP4).
+- **BKF3 Remove & redo takes the adjustment back too.** A +112.50 line is
+  matched to a 115.00 customer payment with a 2.50 bank fee adjustment
+  (BK24), which posted spend money of 2.50. Remove & redo unreconciles the
+  line and voids that spend money on 20 May; the payment stays (BK45). The
+  bank account is back to **115.00**. Redone the same way, it's **112.50**
+  again, with one 2.50 fee, not two.
+- **BKF4 Edit this journal is for manual journals.** Only a manual journal,
+  or the replacement from correcting one, can be corrected in the ledger.
+  A recode (moving INV-0001's line from 4000 to 4100), a livestock
+  valuation or rations adjustment, imported history, and every journal a
+  document or payment posted are refused, each saying where to change it.
+  The invoice line still says 4100, and the ledger agrees.
+- **BKF5 The lock date and things that post no journal.** Applying a
+  credit note dated 20 May takes the same lock on the lock date as posting
+  a journal does. If May is closed while the application is being saved,
+  the close waits for it to finish: the application is never saved into a
+  month that was already closed.
+- **BKF6 Whole yen.** A JPY customer overpays JPY 500. Applying JPY 0.50 of
+  it to another invoice is refused ("must be a whole number"); applying
+  JPY 500 is fine, leaving that invoice owing JPY **500**. The same goes for
+  refunds of overpayments and credit notes: amounts are in the currency's
+  own smallest unit.
+- **BKF7 Excluding in a locked period.** May is locked to 31 May. A 20 May
+  line can't be excluded, or included again ("2026-05-20 is in a locked
+  period…"), since that changes May's bank reconciliation. A June line can.
+- **BKF8 Undoing keeps custom fields.** Undoing a Spreading month (SW25),
+  or rolling back a depreciation run, reverses each line with its custom
+  fields as well as its tracking, and the journal's own custom fields. A
+  report filtered by one shows the month and its undo together.
+- **BKF9 Voids don't pull the average rate.** In CO3, Kowhai Pty Ltd also
+  posts AUD 50,000.00 of sales on 31 October (1.1500) and voids it the same
+  day. October's average stays **1.1200**: a journal and its reversal in the
+  same month are left out of the weighting, because together they're
+  nothing. A void in a later month counts in that month.
+- **BKF10 Worth checking.** The bank reconciliation report lists, without
+  changing anything: a possible duplicate that's reconciled as well as the
+  line it may duplicate (BKF1); and a payment into the account on an
+  invoice that already had a payment, where the later one became an
+  overpayment (BKF2), e.g. 21 May, 115.00 on INV-0001, 115.00 overpaid.
+  Lines left on the account by BKF3 already show under "In Tohyee, not yet
+  on the statement".
+- **LATE13 Turning on the monthly run.** An admin ticks "charge by itself on
+  the 1st" on 15 December. December counts as done, so nothing is charged
+  that day; the first run is on **1 January**, and the screen says so.
+  Saving the settings again while it's on doesn't move it.
+- **LATE14 Only what's still owing on the charge date.** INV-0040 is charged
+  on 30 November; Hilltop pays the last $500.00 on 20 December. On 31
+  December nothing is owing, so it isn't charged: interest for 1-19
+  December (about $3.12) is never charged. An invoice due 31 October and
+  paid on 25 November is never charged a fee or interest by the 30
+  November run either, and nor is one whose part payments take it under
+  the minimum. The screen says this plainly. Whether interest should run to
+  the day of payment instead is for the owner to decide.
+
   that currency, at the rate for the charge date, rounded to its smallest
   unit.
 
@@ -23865,3 +23993,304 @@ as JV1-JV9), and a farm with two blocks, Home and Runoff.
   even if they didn't go; the serious-injury question names infections
   caught through work, such as leptospirosis. Tohyee still never tells
   WorkSafe itself, and doesn't decide whether an event is notifiable.
+
+## Tax and payroll fixes (TXF1-TXF9; 25 Nov 2026; following common practice, not yet reviewed)
+
+Fixes from a review of the tax and payroll code. Each rule was checked
+against IRD or legislation.govt.nz on 25 Nov 2026 (through a summarising
+fetch tool, so check the pages). Made-up figures.
+
+- **TXF1 An estate's year of death, with an early balance date.** The 33%
+  rate for an estate covers the income year the person died in and the
+  three after it (IRD, "Trustee tax rates":
+  https://www.ird.govt.nz/income-tax/income-tax-for-businesses-and-organisations/trusts-and-estates/income/trustee-tax-rates).
+  The year of death is numbered the way the rest of Tohyee numbers income
+  years (SPS 24/01): with a 31 October balance date, a death on 15 May 2025
+  falls in the year to 31 October 2025, the **2026** income year. So 33%
+  runs from 2026 to **2029**. On trustee income of $50,000 in 2029 the tax
+  is **$16,500.00**, not $19,500.00 at 39%. A death on 10 December 2025 is in
+  the 2027 income year (33% to 2030). A 30 June balance date was already
+  right: May 2025 is the 2025 income year, 33% to 2028. Tested in
+  `tests/unit/trust-tax.test.ts`.
+- **TXF2 Investment Boost on a new commercial or industrial building.**
+  Inland Revenue's Investment Boost information sheet says new commercial
+  and industrial buildings are eligible even though they get no
+  depreciation, and IRD's "What you can claim with Investment Boost" lists
+  them (residential rental buildings are left out):
+  https://www.taxpolicy.ird.govt.nz/-/media/project/ir/tp/publications/2025/investment-boost-information-sheet.pdf ;
+  https://www.ird.govt.nz/income-tax/income-tax-for-businesses-and-organisations/types-of-business-expenses/new-assets---investment-boost/what--you-can-claim-with-investment-boost .
+  Such a building is set up as **straight line at IRD's 0% rate** (0% is
+  now allowed). A new packing shed costing $500,000.00, first used 1
+  September 2026: Investment Boost **$100,000.00** in the 2027 income year,
+  depreciation $0.00, adjusted tax value **$400,000.00**. "Not depreciable"
+  is for land and residential buildings: Investment Boost on it is refused,
+  and the message says to use straight line at 0% for a commercial
+  building. ITX11 is changed to match. Tested in
+  `tests/integration/tax-depreciation.test.ts`.
+- **TXF3 IR4 imputation boxes 42E to 44B.** On the 2026 IR4 (page 7) box 44
+  is the closing balance at 31 March, ticked credit or debit; 44A is
+  adjustments that reduce further income tax; 44B is further income tax
+  payable, 44 less 44A
+  (https://www.ird.govt.nz/-/media/project/ir/home/documents/forms-and-guides/ir1---ir99/ir4/ir4-2026.pdf).
+  Tohyee now shows every amount as a positive figure, as the form does, with
+  the tick for 41 and 44, plus the totals 42E and 43D. Kererū's 2026 ICA
+  (ITX49): **41 5,000.00 credit; 42E 8,603.80; 43D 3,300.00; 44 10,303.80
+  credit; 44B nil**. A closing debit of 4,500.00 gives **44 4,500.00 debit,
+  44B 4,500.00, 45 450.00**. Tohyee doesn't work out 44A and says so: take
+  any such adjustment off 44B yourself. Tested in `tests/unit/ica.test.ts`.
+- **TXF4 Leave owed at balance date (the 63-day rule).** Income Tax Act
+  2007 s EA 4(1)(b)(i) and (2): employment income that's deducted but not
+  paid by the 63rd day after balance date is income that year (s CH 3) and
+  deductible the next (s DB 51)
+  (https://legislation.govt.nz/act/public/2007/97/en/latest/parts/DLM1514266/).
+  Inland Revenue's 2016 issues paper (chapter 7) gives accrued holiday pay
+  as the example
+  (https://taxpolicy.ird.govt.nz/publications/2016/2016-ip-mts-better-business-tax/chapter-7).
+  When the employee entitlements account (Payroll › Pay items) has a
+  balance at balance date, the workpaper says so in a note and offers the
+  adjustment; **nothing is added by itself**. Pukeko Orchard's account
+  shows **$6,327.45** at 31 March 2026. $1,840.00 of it was paid out in
+  leave by 2 June 2026, so the preparer types that and adds back
+  **$4,487.45**. The 2027 workpaper then offers to deduct that $4,487.45 (s
+  DB 51). Tohyee doesn't work out the leave paid in the 63 days from pay
+  runs yet: the preparer types it. The account also holds the employer
+  KiwiSaver on the leave; whether that part is caught isn't decided here.
+  Tested in `tests/unit/leave-add-back.test.ts` and
+  `tests/integration/tax-leave-add-back.test.ts`.
+- **TXF5 Coding the fuel refund (FUEL11).** The advice to code the refund
+  with GST at 15% shows only when the organisation is registered for GST at
+  the end of the quarter, and says it's right for petrol GST was claimed
+  on. Petrol added by hand (FUEL4) usually had no GST claimed, so the
+  screen says to code that part with no GST. An organisation not
+  registered is told to code the refund with no GST. The refund includes
+  the GST on the excise (Fuel Excise Duty Refund Regulations, reg 5(1) and
+  6(a): https://www.legislation.govt.nz/act/public/2012/1/en/latest/DLM276777).
+  Tested in `tests/integration/fuel-refund.test.ts`.
+- **TXF6 KiwiSaver employer contributions by age.** Employers don't have to
+  contribute for employees under 16 or over 65 (IRD's payroll
+  specification 2026-27, section 4.5.2), and IRD's employer page puts the
+  compulsory contribution on employees "aged under 65"; 16 and 17 year olds
+  get it from 1 April 2026 (specification 2.3)
+  (https://www.ird.govt.nz/kiwisaver/kiwisaver-employers/kiwisaver-contributions-and-deductions/employer-contributions-to-kiwisaver-and-complying-funds).
+  So for a member under 16 (under 18 before 1 April 2026) or 65 or over on
+  the pay date, any employer rate is allowed, 0% included, and their own
+  deductions carry on. A 67-year-old earning $1,000.00 at 0%: employer
+  contribution **$0.00**. A 40-year-old still needs 3.5%. Without a date of
+  birth the minimum applies. Tested in `tests/unit/payroll-calculations.test.ts`.
+- **TXF7 Minor beneficiaries: Māori authority income.** IRD's "Beneficiary
+  tax" page lists income from a Māori authority as one of the cases the
+  minor beneficiary rule doesn't apply to
+  (https://www.ird.govt.nz/income-tax/income-tax-for-businesses-and-organisations/trusts-and-estates/income/distributions/beneficiary-tax).
+  A beneficiary's income for the year can be ticked "All of it comes from a
+  Māori authority distribution". Nikau (10) gets $3,000.00 that's all from
+  one: it's taxed to Nikau, not by the trustee at 39%. Tohyee can't split a
+  beneficiary's income between Māori authority and other income yet. Tested
+  in `tests/unit/trust-tax.test.ts` and `tests/integration/trust-tax.test.ts`.
+- **TXF8 Income tax rates for later years.** IRD's individual rates have
+  applied from 1 April 2025, and Tohyee has checked them up to the 2027
+  income year (1 April 2026 to 31 March 2027)
+  (https://ird.govt.nz/income-tax/income-tax-for-individuals/tax-codes-and-tax-rates-for-individuals/tax-rates-for-individuals).
+  A later year still uses them, with a note asking to check IRD's rates for
+  that year. Tested in `tests/unit/income-tax-rules.test.ts`.
+- **TXF9 An entered clock-out time.** The out time a manager enters (RS8) is
+  compared with the clock-in as a moment in time, not as text, so it works
+  whatever the database's time zone is. Clocked in at 11:00 on 3 October
+  2026: 12:00 is accepted (1.00 hour) and 10:00 is refused, with the
+  database in UTC or in New Zealand time. Tested in
+  `tests/integration/payroll-rosters.test.ts`.
+
+## Statement files from email whose sender can't be confirmed (SEC1)
+
+Dated 25 Nov 2026. Following common practice, not yet reviewed. Tested in
+`tests/integration/bank-file-feeds.test.ts` (BF7).
+
+- **SEC1** Bank account 1000 has a mailbox feed (BF7). An email in its label
+  says it's from `statements@bank.example` and has `anz-2026-06-09.csv`
+  with one line, a receipt of $500.00. The receiving mail service's check
+  of the sender (its Authentication-Results header) didn't pass, or there
+  wasn't one. The file isn't read and no statement lines are added. The
+  feed's last-check details list the file as not imported and say why, so a
+  person can download it and import it by hand if it really is from the
+  bank. An email whose sender the mail service confirmed (DMARC passed, or
+  a DKIM signature from the sender's own domain passed) is read as before.
+
+## Sales platform fixes: stock, payouts and missed orders (SPF1-SPF12; 25 Nov 2026; following common practice, not yet reviewed)
+
+Made-up store as in SWS1: GST registered, prices include GST, clearing
+account 1010, bank 1000, sales 4000, Income in advance 2350. Gift box
+(GIFTBOX) is a stock item with purchase price 20.00 unless said otherwise.
+Tested in `tests/integration/sales-platform-negative-stock-sent.test.ts`,
+`tests/integration/sales-platform-stock-later.test.ts` and the other
+`tests/integration/sales-platform-*.test.ts` files named below.
+
+- **SPF1 Sales when sent follows Allow negative stock.** Sales when sent is
+  on and Allow negative stock is on. #1001 (one gift box, 115.00) is paid on
+  1 Nov and held in 2350. Shopify marks it sent on 3 Nov with nothing on
+  hand: Dr 2350 **100.00** / Cr 4000 **100.00**, and the box goes out at its
+  purchase price (ST11), Dr cost of goods sold **20.00** / Cr inventory
+  **20.00**, leaving **-1 worth -20.00**, as an invoice would. With negative
+  stock off, the order waits, its log line says what to do (enter a bill
+  that receives the stock, add it with a stock adjustment, or turn on Allow
+  negative stock in Organisation settings), and the store's stuck-stock
+  warning lists it with the orders not yet invoiced.
+- **SPF2 Stock that can't be backdated moves on the earliest day allowed.**
+  Tohyee doesn't re-cost stock, so it never moves stock before an item's
+  latest movement. #1001 is paid on 1 Nov with no gift boxes on hand
+  (negative stock off), so it waits. On 25 Nov a bill brings in 5 boxes at
+  10.00. At the next sync #1001 is invoiced on **1 Nov** (the day it was
+  paid, so its GST is in the right period): Dr 1010 34.50 / Cr 4000 30.00 /
+  Cr GST 4.50. Its box goes out on **25 Nov**, the earliest day allowed, in
+  a journal of its own: Dr cost of goods sold **10.00** / Cr inventory
+  **10.00**, dated 25 Nov. The movement and the sync log say plainly that the
+  stock moved later because stock can't be backdated. Stock is **4 worth
+  40.00**, the same as the inventory account on every date. The same goes
+  for a restocked refund and for stock sent under Sales when sent. Stuck
+  orders are tried again oldest first (by the day they were placed), up to
+  50 a sync. Voiding such an invoice later is refused while other stock has
+  moved since, as for any invoice (ST4).
+- **SPF3 A payout whose deposit is already in the books.** Before posting a
+  payout, Tohyee looks on the bank account it's paid into for its deposit:
+  the payout's net, dated from 3 days before the payout to 10 days after.
+  Payout 70001 (net **49.38**, fees **2.52**) on 7 Oct. The store hadn't
+  given the payout scopes, so the 49.38 deposit on 8 Oct was reconciled by
+  hand with a transfer from 1010 to 1000 (SPR9). Once the scopes are given,
+  the payout **links to that transfer** and isn't posted again; only its
+  fees are: Dr 6020 **2.52** / Cr 1010 **2.52**. Bank 1000 stays **49.38**,
+  the same as the statement, and 1010 is **0.00**. If what's there isn't
+  sure (the deposit's statement line was reconciled to something else, such
+  as a receive money coded to sales, or there's more than one candidate),
+  the payout isn't posted: its log line says it needs a person, what was
+  found and what to do (record the fees by hand if the deposit is right, or
+  undo the hand entry and choose Try again on payouts). A withdrawal is
+  posted as before.
+- **SPF4 Payouts doubled before SPF3 (read-only).** A payout posted before
+  SPF3 may sit beside the same deposit entered by hand: the payout's
+  transfer isn't reconciled, and a transfer made by hand from the clearing
+  account to the same bank, for the same amount and in the same days, is.
+  The bank account is then higher than its statement by that amount. Each
+  such payout is listed in the store's status (and to the AI) and once a day
+  in the sync log, for a person to check and void the entry that's wrong.
+  Nothing is voided or changed by Tohyee.
+- **SPF5 A full read of orders reads them all.** A store first read with
+  Shopify's 60 days gives read_all_orders later (SPC48), with 210 orders
+  from August. A sync reads at most 200 orders, so the full read goes on
+  from the last order it read at the next sync, until it reaches the end.
+  All **210** are invoiced, and only then does the "orders weren't read"
+  warning go. A full read that no longer reaches back to the same day (the
+  start date moved again) starts again from the beginning.
+- **SPF7 The start date moved back reads payouts again too.** Posting starts
+  on 1 Oct; the start date is then moved back to 1 Sep. The September
+  orders are read and invoiced (SPC48), and now so are the payouts issued
+  from 1 Sep: a payout already posted is skipped, and one whose deposit is
+  already in the books by hand is linked or held for a person (SPF3). The
+  clearing account is back to **0.00** once September's payout is posted.
+- **SPF9 WooCommerce prices that include GST.** WooCommerce sends each
+  line's total before tax and its tax beside it, each rounded to the cent.
+  For a store whose prices include tax (the order says
+  `prices_include_tax`), each line and shipping now comes in as its total
+  **plus** WooCommerce's tax, and the invoice is tax inclusive. A $10.00
+  product sent as 8.70 + 1.30 is a 10.00 line: GST **1.30** (3/23 of
+  10.00), net **8.70**, the same as WooCommerce's tax, and the invoice comes
+  to the order's 10.00. Before, GST was worked out again on 8.70 (1.31) and
+  about one round price in seven was refused for not adding up. A store
+  whose prices are entered before tax is as WC (tax exclusive). Refunds
+  follow the order. If WooCommerce's tax on a line ever differs from
+  Tohyee's by a cent (WooCommerce set to round tax on the order's subtotal),
+  the invoice still comes to the order's total and the log notes both.
+- **SPF10 One bad order doesn't stop the rest.** Shopify answers #1002 with
+  an error. #1001 in the same sync is still invoiced, #1002 gets a note
+  ("couldn't be read this time; it's read again at the next sync"), and
+  the next sync reads again from #1002, so it comes in once Shopify
+  answers. An order or payout that fails in an unexpected way while posting
+  is logged and tried again, and doesn't undo the others. Only the store
+  refusing Tohyee's login pauses it after three syncs in a row (SPR15); an
+  outage fails the syncs but they keep running, and the first sync that
+  works clears the failures.
+- **SPF8 Every held order is read again in turn.** A made-to-order shop has
+  30 paid orders held under Sales when sent, none changed since. Each sync
+  reads again the 25 held orders read longest ago and notes when it read
+  them, so two syncs read all 30 (before, the same 25 oldest were read
+  every time, and a fulfilment on the others could be missed).
+- **SPF11 A 0.00 line in an MT940 or CAMT statement.** A statement with a
+  115.00 credit and a 0.00 card check: the 0.00 line moves no money, so it's
+  skipped, as OFX and QIF already do. The preview says 1 new line and the
+  import adds 115.00. In a folder or mailbox feed, a file that fails to
+  import in any unexpected way is now recorded as a failed file with a
+  plain reason, and the feed goes on to the next file (BF rules).
+- **SPF6 A restocked refund of a line held after it was invoiced.** As
+  SWS12: the pendant's stock came off with the invoice (cost of goods sold
+  **20.00**), then 130.00 was moved to Income in advance. Before anything
+  is sent, Shopify refunds the pendant (115.00) and puts it back in stock.
+  The credit note's line comes out of 2350 (**100.00**) as SWS5, and now
+  carries the item, so the pendant comes back into stock at the cost it
+  went out at (ST5): Dr inventory **20.00** / Cr cost of goods sold
+  **20.00**. Stock is back to 1, the same as Shopify's. A line held from
+  the start (its stock never left) is as SWS5, with no item. Lines held
+  after invoicing before this change don't know their item, so they're as
+  before.
+- **SPF12 Smaller fixes.** The AI's payout and deposit report runs to
+  today in New Zealand by default (at 9am on 26 Nov it includes 26 Nov, not
+  just up to 25 Nov, the date in UTC). A WooCommerce sync reads from a
+  second before the last order it read, so an order changed in that same
+  second isn't missed. The nightly Analytics load no longer waits for a load
+  that has been "running" for more than an hour (one cut off by a restart),
+  and the Analytics copy of the books reads every table from the same
+  moment.
+
+## Update now and Windows updates that fail (UPD7-UPD13; 25 Nov 2026; following common practice, not yet reviewed)
+
+Tested in `tests/unit/remote-update.test.ts` (UPD7-UPD9) and on Windows in
+`installer/windows/test-install.ps1` (UPD7, UPD10, UPD11). UPD12 and UPD13
+aren't tested by a machine yet: they need a restart, or a new version that
+fails to start. A Windows server runs v1.0.0 and v1.1.0 is out. Nothing here
+changes the books: an update never touches the data, and everything is
+backed up before Update now starts.
+
+- **UPD7 Done means done.** A server admin presses Update now to v1.1.0, and
+  it installs. When Tohyee is back on v1.1.0 the page says "Updated to
+  v1.1.0", and when v1.2.0 comes out the Update now button works again.
+  (Before, the page kept treating the finished install as still going, and
+  the button stayed greyed out for every later release.) The installer now
+  writes the last word itself ("installed"); for a server whose installer
+  didn't, the page goes by the version Tohyee is running.
+- **UPD8 An install that didn't finish.** The updater said "installing
+  v1.1.0" at 8:30, and Tohyee started again at 8:36 still on v1.0.0. The
+  page says the update didn't finish, that the data is safe, and to try
+  again (or run the installer on the server computer and read its log). The
+  same after 20 minutes of "installing" with no answer, or 45 minutes of
+  "downloading" (the updater's time limit).
+- **UPD9 One at a time, and never stuck.** While a download or install is
+  going, Update now waits and a second request is refused. Once it has
+  finished, failed, been skipped or taken too long, it can be asked for
+  again. Only one TohyeeSetup can run at a time on the computer.
+- **UPD10 Can't stop, changes nothing.** Before copying anything, setup turns
+  off Windows' "restart if it stops" for both services and stops them from
+  starting by themselves, then stops Tohyee and waits until it really has
+  stopped. Anything Tohyee left running from its folder (a tunnel, a backup
+  in progress) is stopped; PostgreSQL is only ever asked to shut down
+  cleanly, and waited for, never forced. If something can't be stopped or
+  the old program can't be moved aside (a file held open, say), setup stops
+  there with exit code 7: what it moved goes back, the services are set
+  back and started, and the page says "Tohyee couldn't be stopped for the
+  update to v1.1.0, so nothing was changed and v1.0.0 is still running".
+- **UPD11 Fails before it starts, the old version comes back.** The old
+  program isn't deleted any more: it's moved into a "previous" folder. If
+  copying the new one fails, or setting up its services fails, before
+  v1.1.0 has started, the new files are removed, v1.0.0 is moved back,
+  Windows' list of programs says v1.0.0 again, and v1.0.0 is started. The
+  page says "v1.1.0 couldn't be installed, so v1.0.0 was put back and is
+  running". Setup's exit code is 20.
+- **UPD12 The point of no return.** Once v1.1.0 has started, it may already
+  have upgraded the organisations' databases, which v1.0.0 can't open. So a
+  problem after that (it doesn't answer within 10 minutes, say) isn't
+  undone: the page says v1.1.0 was started but setup didn't finish, not to
+  put the old version back by hand, where the backups are, and to run
+  TohyeeSetup-1.1.0.exe again (kept in Tohyee's update-download folder) or
+  send setup.log to whoever helps. Setup's exit code is 21. When v1.1.0
+  answers, the previous folder is removed.
+- **UPD13 A restart in the middle.** If the computer restarts while the
+  files are being copied, neither service starts by itself. When Windows
+  starts, a scheduled task ("Tohyee update recovery", run as SYSTEM from
+  Tohyee's data folder, which only Administrators can change) sees the
+  unfinished update, puts v1.0.0 back and starts it, as in UPD11. From this
+  version on; an update from 0.45.0 doesn't have it yet.

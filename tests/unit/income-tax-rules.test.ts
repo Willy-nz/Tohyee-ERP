@@ -10,6 +10,7 @@ import {
   standardSchedule,
   suggestedIncomeYear,
   taxOn,
+  taxRatesNote,
   workpaper,
   type AllocationStatus,
   type AppliesTo,
@@ -392,5 +393,15 @@ describe("provisional tax payments and allocation (ITX6A-ITX6H, as delegated, no
     // An allocation to an instalment the schedule doesn't have (instalment 3 for a six-monthly GST filer).
     const twoInstalments = schedule({ ...onTime, instalmentCount: 2, payments: [pay("2026-10-28", "9275.70", 3)] });
     expect(twoInstalments.allocation.unmatched).toBe("9275.70");
+  });
+});
+
+describe("TXF8: rates carried forward are flagged", () => {
+  it("says nothing up to the 2027 income year and warns after it", () => {
+    expect(taxRatesNote(2026)).toBeNull();
+    expect(taxRatesNote(2027)).toBeNull();
+    expect(taxRatesNote(2028)).toContain("2028 income year uses those same rates");
+    // The tax itself is still worked out on the last checked rates.
+    expect(taxOn(dec("71000"), "individual", 2028)).toEqual(taxOn(dec("71000"), "individual", 2027));
   });
 });

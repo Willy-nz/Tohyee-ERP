@@ -35,6 +35,8 @@ Compression=lzma2/max
 SolidCompression=yes
 WizardStyle=modern
 CloseApplications=no
+; One TohyeeSetup at a time (the tray's Install and Update now could otherwise start two).
+SetupMutex=TohyeeSetupMutex,Global\TohyeeSetupMutex
 ; The only per-user setting is starting the tray icon when you sign in.
 UsedUserAreasWarning=no
 UninstallDisplayName=Tohyee
@@ -45,15 +47,15 @@ Name: "desktopicon"; Description: "Add a Tohyee shortcut to the desktop"
 Name: "starttray"; Description: "Start the Tohyee server app (the icon by the clock) when I sign in to Windows"
 
 [InstallDelete]
-; Replace the program files cleanly on updates (your data lives elsewhere).
-Type: filesandordirs; Name: "{app}\app"
-Type: filesandordirs; Name: "{app}\node"
-Type: filesandordirs; Name: "{app}\scripts"
-Type: filesandordirs; Name: "{app}\tray"
+; The old program files aren't deleted here any more: update-guard.ps1 moves
+; them into {app}\previous before anything is copied (PrepareToInstall), so a
+; failed update can put them back. The new files go into empty folders.
 ; Older versions opened the server settings in the browser.
 Type: files; Name: "{group}\Tohyee server settings.url"
 
 [Files]
+; Run from setup's own temporary folder before anything is copied (PrepareToInstall).
+Source: "{#SourceDir}\scripts\update-guard.ps1"; Flags: dontcopy
 Source: "{#SourceDir}\app\*"; DestDir: "{app}\app"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "{#SourceDir}\node\*"; DestDir: "{app}\node"; Flags: recursesubdirs createallsubdirs ignoreversion
 Source: "{#SourceDir}\pgsql\*"; DestDir: "{app}\pgsql"; Flags: recursesubdirs createallsubdirs ignoreversion
@@ -76,6 +78,7 @@ Name: "{group}\Tohyee logs"; Filename: "{commonappdata}\Tohyee\logs"
 Name: "{group}\Uninstall Tohyee"; Filename: "{uninstallexe}"
 
 [UninstallDelete]
+Type: filesandordirs; Name: "{app}\previous"
 Type: files; Name: "{group}\Open Tohyee.url"
 Type: files; Name: "{autodesktop}\Tohyee.url"
 Type: files; Name: "{group}\Tohyee server settings.url"
@@ -103,6 +106,11 @@ var
   SetupToken: String;
   TohyeeUrl: String;
   TokenEdit: TNewEdit;
+  { Update safety (update-guard.ps1, UPD10-UPD13). }
+  GuardScript: String;
+  Prepared: Boolean;
+  UpdateMessage: String;
+  CustomExitCode: Integer;
 
 function PowerShellExe(): String;
 begin
@@ -125,20 +133,53 @@ begin
     Result := TohyeeUrl;
 end;
 
+{ The first line update-guard.ps1 wrote for us, or Fallback. }
+function ReadGuardMessage(FileName: String; Fallback: String): String;
+var
+  Lines: TArrayOfString;
+begin
+  Result := Fallback;
+  if LoadStringsFromFile(FileName, Lines) and (GetArrayLength(Lines) > 0) and (Trim(Lines[0]) <> '') then
+    Result := Trim(Lines[0]);
+end;
+
+{ Runs update-guard.ps1 with these arguments and returns its exit code (-1 if it couldn't run). }
+function RunGuard(Arguments: String; ResultFile: String): Integer;
+var
+  ResultCode: Integer;
+begin
+  DeleteFile(ResultFile);
+  if Exec(PowerShellExe(), '-NoProfile -ExecutionPolicy Bypass -File "' + GuardScript + '" ' + Arguments +
+      ' -InstallDir "' + ExpandConstant('{app}') + '" -Version "{#AppVersion}" -ResultFile "' + ResultFile + '"',
+      '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    Result := ResultCode
+  else
+    Result := -1;
+end;
+
+{ Before any file is copied. update-guard.ps1 turns off the services'
+  restart-on-failure and automatic start, stops both services and waits until
+  they really are stopped (PostgreSQL only with a clean shutdown, never forced),
+  then moves the old program into the previous folder. If it can't, it puts
+  everything back and starts Tohyee again, and setup stops here (exit code 7)
+  with nothing changed. Before this, a stop that failed was ignored, Windows
+  restarted Tohyee mid-copy, and a failed update left no program at all. }
 function PrepareToInstall(var NeedsRestart: Boolean): String;
 var
   ResultCode: Integer;
 begin
-  { Stop the services and the tray icon so their files can be replaced on an update. }
-  Exec(PowerShellExe(), '-NoProfile -Command "Stop-Service -Name Tohyee -Force -ErrorAction SilentlyContinue; Stop-Service -Name TohyeePostgres -Force -ErrorAction SilentlyContinue"',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM TohyeeTray.exe /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
-  { A Tohyee node process left running (one that didn't stop with the service) keeps the analytics files locked
-    after an update (The owner's issue 3, Nov 2026): stop any node.exe started from this install's own node folder,
-    and nothing else, then give Windows a moment to let go of the files. }
-  Exec(PowerShellExe(), '-NoProfile -Command "$own = Join-Path ''' + ExpandConstant('{app}') + ''' ''node\node.exe''; Get-Process -Name node -ErrorAction SilentlyContinue | Where-Object { $_.Path -eq $own } | Stop-Process -Force -ErrorAction SilentlyContinue; Start-Sleep -Seconds 2"',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
   Result := '';
+  Exec(ExpandConstant('{sys}\taskkill.exe'), '/IM TohyeeTray.exe /F', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  ExtractTemporaryFile('update-guard.ps1');
+  GuardScript := ExpandConstant('{tmp}\update-guard.ps1');
+  if RunGuard('-Mode Prepare', ExpandConstant('{tmp}\update-guard-result.txt')) <> 0 then
+  begin
+    Result := ReadGuardMessage(ExpandConstant('{tmp}\update-guard-result.txt'),
+      'Tohyee couldn''t be stopped for the update, so nothing was changed. Try again; if it happens again, restart the computer first.');
+    Log('Update guard: ' + Result);
+    exit;
+  end;
+  Prepared := True;
 end;
 
 procedure InitializeWizard();
@@ -149,36 +190,92 @@ begin
   TokenEdit.Visible := False;
 end;
 
+{ The update stopped before the new version started: put the old one back.
+  Does nothing once the new version has started (it may have upgraded the
+  databases) or when there's nothing to put back. }
+procedure RestorePrevious();
+var
+  Code: Integer;
+begin
+  if not Prepared then
+    exit;
+  Prepared := False;
+  Code := RunGuard('-Mode Restore', ExpandConstant('{tmp}\update-guard-restore.txt'));
+  Log('Update guard restore: exit code ' + IntToStr(Code));
+  if Code = 0 then
+  begin
+    UpdateMessage := ReadGuardMessage(ExpandConstant('{tmp}\update-guard-restore.txt'), 'The update didn''t work, so the previous version was put back.');
+    CustomExitCode := 20;
+  end
+  else if Code = 1 then
+  begin
+    UpdateMessage := ReadGuardMessage(ExpandConstant('{tmp}\update-guard-restore.txt'), 'The update didn''t work, and the previous version couldn''t be put back.');
+    CustomExitCode := 22;
+  end
+  else
+    CustomExitCode := 21;
+end;
+
 procedure CurStepChanged(CurStep: TSetupStep);
 var
   ResultCode: Integer;
   ResultFile: String;
+  ConfigureArgs: String;
   Lines: TArrayOfString;
 begin
   if CurStep <> ssPostInstall then
     exit;
 
   WizardForm.StatusLabel.Caption := 'Installing the Microsoft Visual C++ runtime...';
-  Exec(ExpandConstant('{tmp}\vc_redist.x64.exe'), '/install /quiet /norestart', '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  if Exec(ExpandConstant('{tmp}\vc_redist.x64.exe'), '/install /quiet /norestart', '', SW_HIDE, ewWaitUntilTerminated, ResultCode) then
+    { 0 installed, 1638 a newer one is already there, 3010 installed but wants a restart. }
+    Log('Visual C++ runtime: exit code ' + IntToStr(ResultCode))
+  else
+    Log('Visual C++ runtime: could not be started');
 
-  WizardForm.StatusLabel.Caption := 'Setting up the database and starting Tohyee (this can take a minute)...';
+  WizardForm.StatusLabel.Caption := 'Setting up the database and starting Tohyee (this can take a few minutes)...';
   ResultFile := ExpandConstant('{tmp}\tohyee-setup-result.txt');
-  Exec(PowerShellExe(),
-    '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\configure-tohyee.ps1') +
-    '" -InstallDir "' + ExpandConstant('{app}') + '" -ResultFile "' + ResultFile + '"',
-    '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
+  ConfigureArgs := '-NoProfile -ExecutionPolicy Bypass -File "' + ExpandConstant('{app}\scripts\configure-tohyee.ps1') +
+    '" -InstallDir "' + ExpandConstant('{app}') + '" -ResultFile "' + ResultFile + '" -Version "{#AppVersion}"';
+  { Tests only (test-install.ps1): /TESTFAILAT=before-start makes the update fail on purpose there. }
+  if ExpandConstant('{param:TESTFAILAT|}') <> '' then
+    ConfigureArgs := ConfigureArgs + ' -TestFailAt "' + ExpandConstant('{param:TESTFAILAT|}') + '"';
+  Exec(PowerShellExe(), ConfigureArgs, '', SW_HIDE, ewWaitUntilTerminated, ResultCode);
 
   SetupOk := (ResultCode = 0) and LoadStringsFromFile(ResultFile, Lines) and (GetArrayLength(Lines) >= 3);
   if SetupOk then
   begin
+    Prepared := False;
     FirstInstall := Lines[0] = 'first-install';
     SetupToken := Lines[1];
     TohyeeUrl := Lines[2];
   end
   else
-    SuppressibleMsgBox('Tohyee was copied to this computer, but setting up its database and services failed.' + #13#10#13#10 +
+  begin
+    RestorePrevious();
+    if CustomExitCode = 0 then
+      CustomExitCode := 21;
+    if UpdateMessage = '' then
+      UpdateMessage := 'Tohyee was copied to this computer, but setting up its database and services failed.';
+    SuppressibleMsgBox(UpdateMessage + #13#10#13#10 +
       'The details are in ' + ExpandConstant('{commonappdata}\Tohyee\logs\setup.log') + '.' + #13#10 +
       'Run TohyeeSetup again to retry, or send that file to whoever is helping you.', mbError, MB_OK, IDOK);
+  end;
+end;
+
+{ 0 when Tohyee is running the new version. 20: it failed and the previous
+  version was put back and is running. 21: copied, but not running (see
+  setup.log). 22: failed, and putting the previous version back failed too. }
+function GetCustomSetupExitCode(): Integer;
+begin
+  Result := CustomExitCode;
+end;
+
+{ Setup is ending. If it stopped after the old program was moved aside (the
+  copy failed, or it was cancelled), put the old program back now. }
+procedure DeinitializeSetup();
+begin
+  RestorePrevious();
 end;
 
 procedure CurPageChanged(CurPageID: Integer);
@@ -187,7 +284,7 @@ begin
     exit;
   if not SetupOk then
   begin
-    WizardForm.FinishedLabel.Caption := 'Tohyee was installed, but it isn''t running yet. See ' +
+    WizardForm.FinishedLabel.Caption := UpdateMessage + ' See ' +
       ExpandConstant('{commonappdata}\Tohyee\logs\setup.log') + ' for what went wrong.';
     exit;
   end;

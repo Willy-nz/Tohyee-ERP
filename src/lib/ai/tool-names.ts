@@ -355,6 +355,7 @@ export const AI_TOOL_PLAIN_WORDS: readonly { name: string; level: AiAccessLevel;
   { name: "update_custom_field_option", level: "full", words: "Rename or switch off a list choice (owners and admins), after confirming" },
   { name: "add_spreading_item", level: "post", words: "Add something to the Spreading worksheet, or do Spread this on a bill, invoice or bank line" },
   { name: "update_spreading_item_tags", level: "post", words: "Change a Spreading item's tracking and custom fields" },
+  { name: "change_spreading_item", level: "post", words: "Move a Spreading item's last day, or change what's still to come on an accrual" },
   { name: "dismiss_spreading_suggestion", level: "post", words: "Dismiss a Spreading suggestion so it doesn't come back" },
   { name: "post_spreading_month", level: "post", words: "Post a Spreading month as one journal" },
   { name: "end_spreading_item_early", level: "post", words: "End a Spreading item early" },

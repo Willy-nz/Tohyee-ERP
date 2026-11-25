@@ -126,7 +126,7 @@ export async function createUser(
       entityId: id,
       details: { email, isServerAdmin },
     });
-    const link = withLink ? await createSetupLink(client, id, actor) : null;
+    const link = withLink ? await createSetupLink(client, id, actor, { byServerAdmin: true }) : null;
     const row = await client.query<UserRow>(`${USER_SELECT} where u.id = $1`, [id]);
     return { user: toSummary(row.rows[0]), link };
   });
@@ -241,7 +241,7 @@ export async function resetUserTwoStep(actor: AdminActor, userIdInput: string): 
     const found = await client.query<UserRow>(`${USER_SELECT} where u.id = $1 for update of u`, [userId]);
     if (!found.rows[0]) throw new NotFoundError("User not found.");
     await resetTwoStep(client, userId, { userId: actor.id, email: actor.email }, "admin");
-    const setup = twoStepRequired() && found.rows[0].is_active ? await createSetupLink(client, userId, actor) : null;
+    const setup = twoStepRequired() && found.rows[0].is_active ? await createSetupLink(client, userId, actor, { byServerAdmin: true }) : null;
     const after = await client.query<UserRow>(`${USER_SELECT} where u.id = $1`, [userId]);
     return { summary: toSummary(after.rows[0]), link: setup };
   });

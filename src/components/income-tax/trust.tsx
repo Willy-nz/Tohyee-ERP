@@ -46,41 +46,41 @@ export function BeneficiariesCard({ organisationId }: { organisationId: string }
       {list.length === 0 && loaded.data ? <Empty>No beneficiaries yet.</Empty> : null}
       {list.length ? (
         <div className={ui.tableWrap}>
-          <table className={ui.table}>
-            <thead>
-              <tr>
-                <th>Name</th>
-                <th>Details</th>
-                <th />
-              </tr>
-            </thead>
-            <tbody>
-              {list.map((beneficiary) => (
-                <tr key={beneficiary.id}>
-                  <td>
-                    {beneficiary.name} {beneficiary.archived ? <Badge>Archived</Badge> : null}
-                  </td>
-                  <td>{describe(beneficiary)}</td>
-                  <td className={ui.num}>
-                    <div className={ui.actions}>
-                      <Button variant="secondary" size="small" onClick={() => setEditing(beneficiary)}>
-                        Edit
+        <table className={ui.table}>
+          <thead>
+            <tr>
+              <th>Name</th>
+              <th>Details</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {list.map((beneficiary) => (
+              <tr key={beneficiary.id}>
+                <td>
+                  {beneficiary.name} {beneficiary.archived ? <Badge>Archived</Badge> : null}
+                </td>
+                <td>{describe(beneficiary)}</td>
+                <td className={ui.num}>
+                  <div className={ui.actions}>
+                    <Button variant="secondary" size="small" onClick={() => setEditing(beneficiary)}>
+                      Edit
+                    </Button>
+                    {beneficiary.hasIncome ? (
+                      <Button variant="secondary" size="small" onClick={() => void archive(beneficiary, !beneficiary.archived)}>
+                        {beneficiary.archived ? "Restore" : "Archive"}
                       </Button>
-                      {beneficiary.hasIncome ? (
-                        <Button variant="secondary" size="small" onClick={() => void archive(beneficiary, !beneficiary.archived)}>
-                          {beneficiary.archived ? "Restore" : "Archive"}
-                        </Button>
-                      ) : (
-                        <Button variant="secondary" size="small" onClick={() => void remove(beneficiary)}>
-                          Delete
-                        </Button>
-                      )}
-                    </div>
-                  </td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+                    ) : (
+                      <Button variant="secondary" size="small" onClick={() => void remove(beneficiary)}>
+                        Delete
+                      </Button>
+                    )}
+                  </div>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
         </div>
       ) : null}
       {editing ? (
@@ -296,72 +296,75 @@ function IncomeForm({
       ) : (
         <form onSubmit={save}>
           <div className={ui.tableWrap}>
-            <table className={ui.table}>
-              <thead>
-                <tr>
-                  <th>Beneficiary</th>
-                  <th className={ui.num}>Beneficiary income</th>
-                  <th>Taxed</th>
-                </tr>
-              </thead>
-              <tbody>
-                {shown.map((beneficiary) => {
-                  const line = treatment.get(beneficiary.id);
-                  const row = rows[beneficiary.id];
-                  const statement = statements.get(beneficiary.id);
-                  return (
-                    <tr key={beneficiary.id}>
-                      <td>
-                        {beneficiary.name}
-                        <details className={ui.fieldSection}>
-                          <summary>Distributions and tax</summary>
-                          <div className={ui.stack}>
-                            {trustClass !== "complying" ? (
-                              <Field label="Taxable distribution" hint="Beyond beneficiary income: accumulated trustee income or capital gains, not corpus.">
-                                <input inputMode="decimal" value={row.taxableDistribution} onChange={(event) => set(beneficiary.id, { taxableDistribution: event.target.value })} />
-                              </Field>
-                            ) : null}
-                            <Field label="Distribution that isn't taxable" hint="Corpus, capital, or assets given or lent below market value.">
-                              <input inputMode="decimal" value={row.nonTaxableDistribution} onChange={(event) => set(beneficiary.id, { nonTaxableDistribution: event.target.value })} />
+          <table className={ui.table}>
+            <thead>
+              <tr>
+                <th>Beneficiary</th>
+                <th className={ui.num}>Beneficiary income</th>
+                <th>Taxed</th>
+              </tr>
+            </thead>
+            <tbody>
+              {shown.map((beneficiary) => {
+                const line = treatment.get(beneficiary.id);
+                const row = rows[beneficiary.id];
+                const statement = statements.get(beneficiary.id);
+                return (
+                  <tr key={beneficiary.id}>
+                    <td>
+                      {beneficiary.name}
+                      <details className={ui.fieldSection}>
+                        <summary>Distributions and tax</summary>
+                        <div className={ui.stack}>
+                          {trustClass !== "complying" ? (
+                            <Field label="Taxable distribution" hint="Beyond beneficiary income: accumulated trustee income or capital gains, not corpus.">
+                              <input inputMode="decimal" value={row.taxableDistribution} onChange={(event) => set(beneficiary.id, { taxableDistribution: event.target.value })} />
                             </Field>
-                            <Field label="Taken out of their current account" hint="A minus is money paid back.">
-                              <input inputMode="decimal" value={row.withdrawn} onChange={(event) => set(beneficiary.id, { withdrawn: event.target.value })} />
+                          ) : null}
+                          <Field label="Distribution that isn't taxable" hint="Corpus, capital, or assets given or lent below market value.">
+                            <input inputMode="decimal" value={row.nonTaxableDistribution} onChange={(event) => set(beneficiary.id, { nonTaxableDistribution: event.target.value })} />
+                          </Field>
+                          <Field label="Taken out of their current account" hint="A minus is money paid back.">
+                            <input inputMode="decimal" value={row.withdrawn} onChange={(event) => set(beneficiary.id, { withdrawn: event.target.value })} />
+                          </Field>
+                          <Field label="Opening balance owed to them" hint="Blank: last year's closing balance.">
+                            <input inputMode="decimal" value={row.openingBalance} onChange={(event) => set(beneficiary.id, { openingBalance: event.target.value })} />
+                          </Field>
+                          <label className={ui.checkbox}>
+                            <input type="checkbox" checked={row.fromMaoriAuthority} onChange={(event) => set(beneficiary.id, { fromMaoriAuthority: event.target.checked })} /> All of it comes from a Māori authority distribution
+                          </label>
+                          <label className={ui.checkbox}>
+                            <input type="checkbox" checked={row.trusteePaysTax} onChange={(event) => set(beneficiary.id, { trusteePaysTax: event.target.checked })} /> The trust pays their tax on it
+                          </label>
+                          {row.trusteePaysTax ? (
+                            <Field label="Their other taxable income" hint="To work out their tax on the trust income.">
+                              <input inputMode="decimal" value={row.otherIncome} onChange={(event) => set(beneficiary.id, { otherIncome: event.target.value })} />
                             </Field>
-                            <Field label="Opening balance owed to them" hint="Blank: last year's closing balance.">
-                              <input inputMode="decimal" value={row.openingBalance} onChange={(event) => set(beneficiary.id, { openingBalance: event.target.value })} />
-                            </Field>
-                            <label className={ui.checkbox}>
-                              <input type="checkbox" checked={row.trusteePaysTax} onChange={(event) => set(beneficiary.id, { trusteePaysTax: event.target.checked })} /> The trust pays their tax on it
-                            </label>
-                            {row.trusteePaysTax ? (
-                              <Field label="Their other taxable income" hint="To work out their tax on the trust income.">
-                                <input inputMode="decimal" value={row.otherIncome} onChange={(event) => set(beneficiary.id, { otherIncome: event.target.value })} />
-                              </Field>
-                            ) : null}
-                          </div>
-                        </details>
-                      </td>
-                      <td className={ui.num}>
-                        <input
-                          aria-label={`${beneficiary.name}'s beneficiary income`}
-                          inputMode="decimal"
-                          value={row.amount}
-                          onChange={(event) => set(beneficiary.id, { amount: event.target.value })}
-                        />
-                      </td>
-                      <td>
-                        {line ? <>{line.taxedByTrustee ? <Badge tone="amber">By the trustee, 39%</Badge> : null} {line.reason}</> : <span className={ui.muted}>No beneficiary income this year</span>}
-                        {statement && statement.taxPayable !== "0.00" ? (
-                          <div>
-                            The trust pays <Money value={statement.taxPayable} /> of tax for them.
-                          </div>
-                        ) : null}
-                      </td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+                          ) : null}
+                        </div>
+                      </details>
+                    </td>
+                    <td className={ui.num}>
+                      <input
+                        aria-label={`${beneficiary.name}'s beneficiary income`}
+                        inputMode="decimal"
+                        value={row.amount}
+                        onChange={(event) => set(beneficiary.id, { amount: event.target.value })}
+                      />
+                    </td>
+                    <td>
+                      {line ? <>{line.taxedByTrustee ? <Badge tone="amber">By the trustee, 39%</Badge> : null} {line.reason}</> : <span className={ui.muted}>No beneficiary income this year</span>}
+                      {statement && statement.taxPayable !== "0.00" ? (
+                        <div>
+                          The trust pays <Money value={statement.taxPayable} /> of tax for them.
+                        </div>
+                      ) : null}
+                    </td>
+                  </tr>
+                );
+              })}
+            </tbody>
+          </table>
           </div>
           <div className={ui.actions}>
             <Button type="submit">Save</Button>
@@ -375,79 +378,80 @@ function IncomeForm({
         </Notice>
       ))}
       <div className={ui.tableWrap}>
-        <table className={ui.table}>
-          <tbody>
+      <table className={ui.table}>
+        <tbody>
+          <tr>
+            <td>Net income</td>
+            <td className={ui.num}>
+              <Money value={trust.netIncome} />
+            </td>
+          </tr>
+          <tr>
+            <td>Beneficiary income taxed to the beneficiaries</td>
+            <td className={ui.num}>
+              <Money value={trust.ordinaryBeneficiaryIncome} />
+            </td>
+          </tr>
+          <tr>
+            <td>Minor and corporate beneficiary income, taxed by the trustee at 39%</td>
+            <td className={ui.num}>
+              <Money value={trust.minorCorporateIncome} />
+            </td>
+          </tr>
+          <tr>
+            <td>Trustee net income</td>
+            <td className={ui.num}>
+              <Money value={trust.trusteeNetIncome} />
+            </td>
+          </tr>
+          {trust.lossesUsed !== "0.00" ? (
             <tr>
-              <td>Net income</td>
+              <td>Losses brought forward used</td>
               <td className={ui.num}>
-                <Money value={trust.netIncome} />
+                <Money value={trust.lossesUsed} />
               </td>
             </tr>
-            <tr>
-              <td>Beneficiary income taxed to the beneficiaries</td>
-              <td className={ui.num}>
-                <Money value={trust.ordinaryBeneficiaryIncome} />
-              </td>
-            </tr>
-            <tr>
-              <td>Minor and corporate beneficiary income, taxed by the trustee at 39%</td>
-              <td className={ui.num}>
-                <Money value={trust.minorCorporateIncome} />
-              </td>
-            </tr>
-            <tr>
-              <td>Trustee net income</td>
-              <td className={ui.num}>
-                <Money value={trust.trusteeNetIncome} />
-              </td>
-            </tr>
-            {trust.lossesUsed !== "0.00" ? (
-              <tr>
-                <td>Losses brought forward used</td>
-                <td className={ui.num}>
-                  <Money value={trust.lossesUsed} />
-                </td>
-              </tr>
-            ) : null}
-            <tr>
-              <td>Trustee income</td>
-              <td className={ui.num}>
-                <Money value={trust.trusteeIncome} />
-              </td>
-            </tr>
-            <tr>
-              <td>Tax on trustee income ({trust.trusteeRateReason})</td>
-              <td className={ui.num}>
-                <Money value={trust.trusteeTax} />
-              </td>
-            </tr>
-            <tr>
-              <td>Tax on minor and corporate beneficiary income</td>
-              <td className={ui.num}>
-                <Money value={trust.minorCorporateTax} />
-              </td>
-            </tr>
-            <tr>
-              <th>The trust&apos;s tax, before credits</th>
-              <th className={ui.num}>
-                <Money value={trust.tax} />
-              </th>
-            </tr>
-          </tbody>
-        </table>
+          ) : null}
+          <tr>
+            <td>Trustee income</td>
+            <td className={ui.num}>
+              <Money value={trust.trusteeIncome} />
+            </td>
+          </tr>
+          <tr>
+            <td>Tax on trustee income ({trust.trusteeRateReason})</td>
+            <td className={ui.num}>
+              <Money value={trust.trusteeTax} />
+            </td>
+          </tr>
+          <tr>
+            <td>Tax on minor and corporate beneficiary income</td>
+            <td className={ui.num}>
+              <Money value={trust.minorCorporateTax} />
+            </td>
+          </tr>
+          <tr>
+            <th>The trust&apos;s tax, before credits</th>
+            <th className={ui.num}>
+              <Money value={trust.tax} />
+            </th>
+          </tr>
+        </tbody>
+      </table>
       </div>
       {ret ? <CreditsTable ret={ret} /> : null}
     </Card>
   );
 }
 
-type Draft = { amount: string; trusteePaysTax: boolean; otherIncome: string; taxableDistribution: string; nonTaxableDistribution: string; withdrawn: string; openingBalance: string };
+type Draft = { amount: string; trusteePaysTax: boolean; fromMaoriAuthority: boolean; otherIncome: string; taxableDistribution: string; nonTaxableDistribution: string; withdrawn: string; openingBalance: string };
 
 function toDraft(line: BeneficiaryIncome | undefined): Draft {
   const blank = (value: string | null | undefined) => (value === null || value === undefined || value === "0.00" ? "" : value);
   return {
     amount: blank(line?.amount),
     trusteePaysTax: line?.trusteePaysTax ?? false,
+    fromMaoriAuthority: line?.fromMaoriAuthority ?? false,
     otherIncome: blank(line?.otherIncome),
     taxableDistribution: blank(line?.taxableDistribution),
     nonTaxableDistribution: blank(line?.nonTaxableDistribution),
@@ -466,32 +470,32 @@ function CreditsTable({ ret }: { ret: TrustReturn }) {
   if (rows.every(([, key]) => ret.totalCredits[key] === "0.00")) return null;
   return (
     <div className={ui.tableWrap}>
-      <table className={ui.table}>
-        <thead>
-          <tr>
-            <th>Credits</th>
-            <th className={ui.num}>The trust&apos;s</th>
-            <th className={ui.num}>Passed to beneficiaries</th>
-            <th className={ui.num}>The trustee&apos;s</th>
+    <table className={ui.table}>
+      <thead>
+        <tr>
+          <th>Credits</th>
+          <th className={ui.num}>The trust&apos;s</th>
+          <th className={ui.num}>Passed to beneficiaries</th>
+          <th className={ui.num}>The trustee&apos;s</th>
+        </tr>
+      </thead>
+      <tbody>
+        {rows.map(([label, key]) => (
+          <tr key={key}>
+            <td>{label}</td>
+            <td className={ui.num}>
+              <Money value={ret.totalCredits[key]} />
+            </td>
+            <td className={ui.num}>
+              <Money value={ret.passedOn[key]} />
+            </td>
+            <td className={ui.num}>
+              <Money value={ret.trusteeCredits[key]} />
+            </td>
           </tr>
-        </thead>
-        <tbody>
-          {rows.map(([label, key]) => (
-            <tr key={key}>
-              <td>{label}</td>
-              <td className={ui.num}>
-                <Money value={ret.totalCredits[key]} />
-              </td>
-              <td className={ui.num}>
-                <Money value={ret.passedOn[key]} />
-              </td>
-              <td className={ui.num}>
-                <Money value={ret.trusteeCredits[key]} />
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+        ))}
+      </tbody>
+    </table>
     </div>
   );
 }
@@ -526,20 +530,20 @@ export function Ir6Card({ incomeYear, ir6 }: { incomeYear: number; ir6: Ir6Figur
 function BoxTable({ boxes }: { boxes: Ir6Box[] }) {
   return (
     <div className={ui.tableWrap}>
-      <table className={ui.table}>
-        <tbody>
-          {boxes.map((box) => (
-            <tr key={box.box}>
-              <td>
-                {box.box} {box.label}
-              </td>
-              <td className={ui.num}>
-                <Money value={box.amount} /> {box.side === "credit" ? "Credit" : null}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+    <table className={ui.table}>
+      <tbody>
+        {boxes.map((box) => (
+          <tr key={box.box}>
+            <td>
+              {box.box} {box.label}
+            </td>
+            <td className={ui.num}>
+              <Money value={box.amount} /> {box.side === "credit" ? "Credit" : null}
+            </td>
+          </tr>
+        ))}
+      </tbody>
+    </table>
     </div>
   );
 }

@@ -25,9 +25,10 @@ function toControls(row: ControlsRow): PeriodControls {
   return { lockDate: row.lock_date, updatedAt: row.updated_at };
 }
 
-export async function getPeriodControls(tx: OrgTx, options: { forUpdate?: boolean } = {}): Promise<PeriodControls> {
+export async function getPeriodControls(tx: OrgTx, options: { forUpdate?: boolean; forShare?: boolean } = {}): Promise<PeriodControls> {
+  const lock = options.forUpdate ? " for update" : options.forShare ? " for share" : "";
   const result = await tx.query<ControlsRow>(
-    `select lock_date::text as lock_date, updated_at from accounting_period_controls where id = true${options.forUpdate ? " for update" : ""}`,
+    `select lock_date::text as lock_date, updated_at from accounting_period_controls where id = true${lock}`,
   );
   return toControls(result.rows[0]);
 }
@@ -37,7 +38,13 @@ export async function getPeriodControls(tx: OrgTx, options: { forUpdate?: boolea
  * as YYYY-MM-DD strings, which sort the same way as the dates themselves.
  */
 export async function assertPostingDateAllowed(tx: OrgTx, postingDate: string): Promise<void> {
-  const controls = await getPeriodControls(tx);
+  // BKF5: read "for share", as the database does for journals, so a period
+  // close waits for this transaction (and this waits for a close in
+  // progress). That covers what posts no journal: credit and overpayment
+  // applications, matching. A read-only transaction can't change anything,
+  // so it needn't (and can't) take the lock.
+  const readOnly = (await tx.query<{ value: string }>("select current_setting('transaction_read_only') as value")).rows[0]?.value === "on";
+  const controls = await getPeriodControls(tx, { forShare: !readOnly });
   if (!controls.lockDate || postingDate > controls.lockDate) {
     return;
   }

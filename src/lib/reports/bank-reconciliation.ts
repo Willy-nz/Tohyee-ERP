@@ -73,6 +73,19 @@ export type TohyeeNotInBankItem = {
  */
 export type InBankAlreadyItem = TohyeeNotInBankItem & { why: "before_lines" | "after_last_line" };
 
+/**
+ * Worth checking (BKF10): things on the account that are reconciled but may
+ * be wrong, from before Tohyee refused them. Read only; nothing changes.
+ * - a statement line flagged as a possible duplicate that was reconciled
+ *   as well as the line it may duplicate (BKF1);
+ * - a payment into the account on an invoice that already had a payment,
+ *   where the later one became an overpayment (BKF2).
+ */
+export type WorthChecking = {
+  duplicates: Array<{ lineId: string; date: string; description: string; amount: string; duplicateOfLineId: string }>;
+  paidAgain: Array<{ invoiceId: string; invoiceNumber: string | null; paymentId: string; date: string; amount: string; overpayment: string }>;
+};
+
 export type BankReconciliationReport = {
   account: { id: string; code: string; name: string; accountType: "bank" | "credit_card" };
   asAt: string;
@@ -94,7 +107,37 @@ export type BankReconciliationReport = {
   /** Statement balance - expected; null when the statement balance isn't known. */
   notExplained: string | null;
   explained: boolean;
+  worthChecking: WorthChecking;
 };
+
+async function worthChecking(tx: OrgTx, accountId: string, asAt: string): Promise<WorthChecking> {
+  const duplicates = await tx.query<{ id: string; line_date: string; description: string; amount: string; other: string }>(
+    `select b.id::text, b.line_date::text, b.description, b.amount::text, d.id::text as other
+       from bank_statement_lines b join bank_statement_lines d on d.id = b.possible_duplicate_of
+      where b.account_id = $1 and b.status = 'reconciled' and d.status = 'reconciled' and b.line_date <= $2
+      order by b.line_date, b.id`,
+    [accountId, asAt],
+  );
+  const paidAgain = await tx.query<{ invoice_id: string; invoice_number: string | null; id: string; payment_date: string; amount: string; overpayment_amount: string }>(
+    `select p.invoice_id::text, i.invoice_number, p.id::text, p.payment_date::text, p.amount::text, p.overpayment_amount::text
+       from customer_payments p join sales_invoices i on i.id = p.invoice_id
+      where p.bank_account_id = $1 and p.status = 'active' and p.overpayment_amount > 0 and p.payment_date <= $2
+        and exists (select 1 from customer_payments e where e.invoice_id = p.invoice_id and e.status = 'active' and e.id < p.id)
+      order by p.payment_date, p.id`,
+    [accountId, asAt],
+  );
+  return {
+    duplicates: duplicates.rows.map((row) => ({ lineId: row.id, date: row.line_date, description: row.description, amount: money(row.amount), duplicateOfLineId: row.other })),
+    paidAgain: paidAgain.rows.map((row) => ({
+      invoiceId: row.invoice_id,
+      invoiceNumber: row.invoice_number,
+      paymentId: row.id,
+      date: row.payment_date,
+      amount: money(row.amount),
+      overpayment: money(row.overpayment_amount),
+    })),
+  };
+}
 
 const money = (value: string) => toFixedString(dec(value), 2);
 const total = (amounts: string[]) => money(toFixedString(amounts.reduce((sum, amount) => add(sum, dec(amount)), ZERO_DECIMAL), 2));
@@ -319,5 +362,6 @@ export async function bankReconciliationReport(
     expectedStatementBalance: expected,
     notExplained,
     explained: notExplained !== null && isZero(dec(notExplained)),
+    worthChecking: await worthChecking(tx, account.id, asAt),
   };
 }

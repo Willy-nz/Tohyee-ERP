@@ -19,10 +19,17 @@ describe("WooCommerce connector (WC1, WC3, WC9)", () => {
   });
 
   it("reads an order's amounts before tax, with the coupon in the line and shipping on its own (WC3)", () => {
-    const order = wooOrderFrom(wooOrderNode(order2002()));
+    const order = wooOrderFrom(wooOrderNode({ ...order2002(), pricesIncludeTax: false }));
     expect(order).toMatchObject({ name: "#2002", taxesIncluded: false, total: "28.90", financialStatus: "PAID", paymentMethod: { id: "stripe" } });
     expect(order.lines[0]).toMatchObject({ sku: "MELT-VAN", variantId: "MELT-VAN", originalTotal: "23.48", discount: "4.35", taxLines: [{ rate: "0.15", amount: "2.87" }] });
     expect(order.shipping[0]).toMatchObject({ title: "NZ Post standard", amount: "6.00", taxLines: [{ amount: "0.90" }] });
+  });
+
+  it("SPF9: a store whose prices include tax: the amounts come in including WooCommerce's tax", () => {
+    const order = wooOrderFrom(wooOrderNode(order2002()));
+    expect(order).toMatchObject({ taxesIncluded: true, total: "28.90" });
+    expect(order.lines[0]).toMatchObject({ originalTotal: "26.35", discount: "4.35", taxLines: [{ rate: "0.15", amount: "2.87" }] });
+    expect(order.shipping[0]).toMatchObject({ amount: "6.90", taxLines: [{ amount: "0.90" }] });
   });
 
   it("checks a delivery's signature and store, and answers a ping without one (WC9)", () => {

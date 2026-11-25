@@ -84,6 +84,12 @@ export async function bump(db: D1Database, name: string, now: Date): Promise<num
   return row?.count ?? 1;
 }
 
+/** Today's count for a counter, without adding to it. */
+export async function peek(db: D1Database, name: string, now: Date): Promise<number> {
+  const row = await db.prepare("SELECT count FROM counters WHERE name = ? AND day = ?").bind(name, isoDay(now)).first<{ count: number }>();
+  return row?.count ?? 0;
+}
+
 export async function registrationsOpen(db: D1Database): Promise<boolean> {
   const row = await db.prepare("SELECT value FROM settings WHERE key = 'registrations_open'").first<{ value: string }>();
   return row?.value !== "0";

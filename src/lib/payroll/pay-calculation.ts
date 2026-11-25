@@ -97,6 +97,8 @@ export type EmployeePayInput = {
   kiwiSaverEmployeeRate: string;
   kiwiSaverEmployerRate: string;
   esctRate: string | null;
+  /** For the KiwiSaver employer minimum's age rules (TXF6). */
+  dateOfBirth?: string | null;
   /** A KiwiSaver temporary rate reduction approved by IRD, with its dates (PR13b). */
   kiwiSaverReduction?: { from: string; to: string } | null;
   lines: readonly PayLineInput[];
@@ -205,7 +207,7 @@ export function calculateEmployeePay(input: EmployeePayInput): EmployeePayResult
       payrollRatesOn(input.payDate).kiwiSaver.temporaryRateReduction !== null;
     const contribution = { gross: money(kiwiSaverEarnings), payDate: input.payDate, temporaryRateReduction };
     kiwiSaverEmployee = kiwiSaverEmployeeContribution({ ...contribution, rate: input.kiwiSaverEmployeeRate });
-    kiwiSaverEmployer = kiwiSaverEmployerContribution({ ...contribution, rate: input.kiwiSaverEmployerRate });
+    kiwiSaverEmployer = kiwiSaverEmployerContribution({ ...contribution, rate: input.kiwiSaverEmployerRate, dateOfBirth: input.dateOfBirth });
     if (cmp(dec(kiwiSaverEmployer), ZERO_DECIMAL) > 0) {
       if (!input.esctRate) {
         throw new ValidationError(`${input.name} has employer KiwiSaver contributions but no ESCT rate. Set it under Employees.`);

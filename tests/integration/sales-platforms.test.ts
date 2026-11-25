@@ -678,7 +678,7 @@ describeWithDatabase("Sales platform connections (Shopify)", () => {
     expect((await w.as((tx) => listConnections(tx))).map((c) => c.status)).toEqual(["active", "disconnected"]);
   });
 
-  it("SPC9: a failing store records its error and pauses after three failures", async () => {
+  it("SPC9, SPF10: a failing store records its error; a store error doesn't pause it (only a refused login does)", async () => {
     const w = await setup();
     const state = shop();
     const connection = await connect(w);
@@ -686,9 +686,9 @@ describeWithDatabase("Sales platform connections (Shopify)", () => {
     for (let attempt = 0; attempt < 3; attempt += 1) {
       await expect(syncConnection(w.record, connection.id)).rejects.toThrow("500");
     }
-    const [paused] = await w.as((tx) => listConnections(tx));
-    expect(paused).toMatchObject({ status: "paused", failures: 3 });
-    expect(paused.lastError).toContain("500");
+    const [failing] = await w.as((tx) => listConnections(tx));
+    expect(failing).toMatchObject({ status: "active", failures: 3 });
+    expect(failing.lastError).toContain("500");
     state.fail = false;
     await syncConnection(w.record, connection.id);
     expect((await w.as((tx) => listConnections(tx)))[0]).toMatchObject({ status: "active", failures: 0, lastError: null });

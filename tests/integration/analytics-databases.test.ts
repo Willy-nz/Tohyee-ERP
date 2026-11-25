@@ -18,6 +18,7 @@ import { closeAnalytics, queryAnalytics } from "@/lib/analytics/engine";
 import { runDueLoads } from "@/lib/analytics/scheduler";
 import type { SessionUser } from "@/lib/auth/sessions";
 import { coreQuery } from "@/lib/db/transactions";
+import { saveOrganisationNetwork } from "@/lib/network/organisation-reach";
 import {
   apiRequest,
   createTestOrganisation,
@@ -116,6 +117,8 @@ describeWithDatabase("analytics database sources (PostgreSQL)", () => {
     );
 
     server = await startTestServer();
+    // The test's shop database runs on this computer, which a server admin has to allow for organisations.
+    await saveOrganisationNetwork({ id: null, email: "test-server-admin@example.com" }, { thisComputer: true });
     owner = await createTestUser("owner@example.com", { serverAdmin: true });
     await createTestOrganisation(owner, ORG);
     viewer = await createTestUser("viewer@example.com");
@@ -149,6 +152,19 @@ describeWithDatabase("analytics database sources (PostgreSQL)", () => {
       noContext,
     );
     expect(tested.status).toBe(403);
+  });
+
+  it("refuses a database on this computer until a server admin allows it", async () => {
+    await saveOrganisationNetwork({ id: null, email: "test-server-admin@example.com" }, { thisComputer: false });
+    try {
+      const refused = await body(
+        await testRoute.POST(apiRequest("/api/analytics/connections/test", { method: "POST", cookie: ownerCookie, body: { organisationId: ORG, ...details, password: readerPassword } }), noContext),
+      );
+      expect(refused.status).toBe(400);
+      expect(refused.data.error).toMatch(/this Tohyee server itself/);
+    } finally {
+      await saveOrganisationNetwork({ id: null, email: "test-server-admin@example.com" }, { thisComputer: true });
+    }
   });
 
   it("tests a connection before saving it, with plain messages when it fails", async () => {

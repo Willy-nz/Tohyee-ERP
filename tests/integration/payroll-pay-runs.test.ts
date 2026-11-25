@@ -709,7 +709,7 @@ describeWithDatabase("payroll pay items and pay runs (PRUN1-PRUN11)", () => {
       expect((await approve(jade, april.id)).status).toBe(400);
       await asUser(jade, (tx) => updateEmployee(tx, hemi, { kiwiSaverEmployeeRate: "3.5" }));
       expect(pay(await asUser(ben, (tx) => getPayRun(tx, april.id)), hemi).problem).toBe(
-        "The compulsory KiwiSaver employer contribution on 2026-04-01 is at least 3.5%.",
+        "The compulsory KiwiSaver employer contribution on 2026-04-01 is at least 3.5%. None is needed for an employee under 16 or 65 or over: give their date of birth.",
       );
       await asUser(jade, (tx) => updateEmployee(tx, hemi, { kiwiSaverEmployeeRate: "3" }));
       await call(payRunRoute.DELETE, ben, `/api/payroll/pay-runs/${april.id}`, { method: "DELETE", context: params({ payRunId: april.id }) });

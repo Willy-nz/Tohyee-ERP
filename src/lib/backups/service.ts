@@ -7,6 +7,7 @@ import packageJson from "../../../package.json";
 import { type AdminActor, type ServerAdminAuth, writeAdminAuditEvent } from "@/lib/audit";
 import { normaliseEmail } from "@/lib/auth/service";
 import { BACKUP_EXTENSION, type BackupHeader, materialFromText, openBackupKeys, type RecoveryMaterial, readBackupHeader, readDecrypted, writeEncrypted } from "@/lib/backups/format";
+import { withPrivateCopy } from "@/lib/backups/private-copy";
 import { describeSecretColumn, reEncryptStoredSecrets, type SecretsReport } from "@/lib/backups/rewrap";
 import { currentRecoveryKey, type RecoveryKey } from "@/lib/backups/recovery-key";
 import { diskSpace, explainBackupError, formatBytes, notEnoughSpace } from "@/lib/backups/destination";
@@ -670,10 +671,15 @@ async function countIn(client: { query: (sql: string) => Promise<{ rows: { n: st
  * restart) is cleaned up when the server starts again.
  */
 export async function restoreBackup(actor: AdminActor, input: RestoreInput): Promise<{ organisation: OrganisationRecord; report: RestoreReport }> {
+  // Checked and restored from one private copy, so the file can't be changed in between.
+  return withPrivateCopy(input.file, (file) => restoreFromCopy(actor, input, file));
+}
+
+async function restoreFromCopy(actor: AdminActor, input: RestoreInput, file: string): Promise<{ organisation: OrganisationRecord; report: RestoreReport }> {
   // The recovery code of the server that made it, when that isn't this one.
   const material = input.material ?? materialFromText(input.key);
   if (!secretsAvailable()) throw new UnavailableError("Restoring needs this server's TOHYEE_SECRET_KEY (stored secrets are re-encrypted with it). Set it and restart Tohyee.");
-  const { header } = await readBackupHeader(input.file);
+  const { header } = await readBackupHeader(file);
   if (header.kind !== "organisation" || !header.organisationId) {
     throw new ValidationError("That's a backup of the server's own database (people and settings), not of an organisation. Use Recover people from a server backup instead.");
   }
@@ -681,8 +687,8 @@ export async function restoreBackup(actor: AdminActor, input: RestoreInput): Pro
     throw new ValidationError(`That backup was made by a newer version of Tohyee (${header.tohyeeVersion}). Update this server first.`);
   }
   // Proves the key is right and the file is whole before anything is created.
-  await checkBackup(input.file, material);
-  const { sourceLiveKey } = await openBackupKeys(input.file, material);
+  await checkBackup(file, material);
+  const { sourceLiveKey } = await openBackupKeys(file, material);
 
   const made = localParts(new Date(header.createdAt));
   const id = parseOrganisationId(input.id == null || input.id === "" ? await suggestedRestoreId(header) : input.id);
@@ -754,7 +760,7 @@ export async function restoreBackup(actor: AdminActor, input: RestoreInput): Pro
     created = true;
     const restore = startPgTool("pg_restore", ["--no-owner", "--no-privileges", "--exit-on-error", `--dbname=${databaseName}`], databaseName);
     restore.child.stdout?.resume();
-    const [fed, restored] = await Promise.allSettled([readDecrypted(input.file, restore.child.stdin!, material), restore.done]);
+    const [fed, restored] = await Promise.allSettled([readDecrypted(file, restore.child.stdin!, material), restore.done]);
     // If pg_restore stopped, its own message says why (feeding it then fails with a broken pipe).
     if (restored.status === "rejected") throw restored.reason;
     if (fed.status === "rejected") throw fed.reason;
@@ -884,7 +890,10 @@ export async function resumeOrganisationJobs(auth: ServerAdminAuth, organisation
 /** Decrypts a backup to a plain pg_dump file, for a database administrator (e.g. restoring the server's own database). */
 export async function decryptBackupTo(file: string, outFile: string, recoveryCode?: string): Promise<BackupHeader> {
   const material = materialFromText(recoveryCode);
-  await checkBackup(file, material);
-  const out = createWriteStream(outFile, { mode: 0o600, flags: "wx" });
-  return readDecrypted(file, out, material);
+  // Checked and decrypted from one private copy, as for a restore.
+  return withPrivateCopy(file, async (copy) => {
+    await checkBackup(copy, material);
+    const out = createWriteStream(outFile, { mode: 0o600, flags: "wx" });
+    return readDecrypted(copy, out, material);
+  });
 }

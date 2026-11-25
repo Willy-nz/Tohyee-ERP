@@ -40,6 +40,8 @@ export type BeneficiaryYear = {
   withdrawn: Decimal;
   /** Owed to them at the start of the year (TRU24). */
   openingBalance: Decimal;
+  /** All of it comes from a Māori authority distribution (TXF7). */
+  fromMaoriAuthority?: boolean;
 };
 
 /** One beneficiary's IR6B (TRU25), by meaning; boxes() gives the numbers. */

@@ -478,12 +478,23 @@ function PaymentsForm({
   const difference =
     total !== null && entered.length > 0 && unsignedCents !== null ? (moneyIn ? unsignedCents - total : total - unsignedCents) : null;
   const needsAdjustment = difference !== null && difference !== BigInt(0);
+  // BKF2: paying an invoice more than it owes makes an overpayment only when the person ticks it.
+  const [keepExtra, setKeepExtra] = useState(false);
+  const overOwed =
+    moneyIn &&
+    entered.some(([id, amount]) => {
+      const owed = documents.find((document) => document.id === id)?.amountDue;
+      const paying = toCents(amount);
+      const owedCents = owed === undefined ? null : toCents(owed);
+      return paying !== null && owedCents !== null && paying > owedCents;
+    });
 
   function submitChosen(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     void submit({
       kind: "payments",
       allocations: entered.map(([id, amount]) => allocation(id, amount.trim())),
+      ...(overOwed && keepExtra ? { allowOverpayment: true } : {}),
       adjustment: adjustmentCommand(difference, adjustment),
       ...(foreign ? { exchangeRate: rate.trim() } : {}),
     });
@@ -591,6 +602,12 @@ function PaymentsForm({
             </table>
           </div>
           <TotalCheck total={total} target={unsigned} />
+          {overOwed ? (
+            <label className={ui.checkbox}>
+              <input type="checkbox" checked={keepExtra} onChange={(event) => setKeepExtra(event.target.checked)} /> This is more than the invoice
+              owes. Keep the extra as the customer&apos;s credit (an overpayment) to use on another invoice or refund.
+            </label>
+          ) : null}
           {needsAdjustment ? (
             <AdjustmentFields
               difference={difference}

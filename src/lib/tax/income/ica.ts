@@ -3,7 +3,7 @@ import { parseIsoDate } from "@/lib/dates";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { assertSameRequest, requestHash } from "@/lib/idempotency";
-import { add, cmp, dec, type Decimal, divide, isNegative, mul, neg, parseDecimalInput, roundHalfUp, ZERO_DECIMAL } from "@/lib/money/decimal";
+import { abs, add, cmp, dec, type Decimal, divide, isNegative, mul, neg, parseDecimalInput, roundHalfUp, ZERO_DECIMAL } from "@/lib/money/decimal";
 import { PAYMENT_REVERSED_SQL } from "@/lib/tax/income/allocations";
 import { incomeYearDates, money, type OnTimeBy, onTimeBy } from "@/lib/tax/income/rules";
 import { ICA_KIND_LABELS, ICA_KINDS, type IcaKind } from "@/lib/tax/income/ica-kinds";
@@ -54,11 +54,14 @@ export type Ica = {
   /** When the closing balance is a debit: further income tax and the 10% penalty, due 20 June. */
   debitBalance: { furtherIncomeTax: string; penalty: string; dueDate: string; onTimeBy: OnTimeBy } | null;
   /**
-   * The IR4's annual imputation return boxes (ITX49, IR4 guide 2026, page 7):
-   * credits and debits positive, the opening and closing balances credit
-   * positive (debit negative).
+   * The IR4's annual imputation return boxes (ITX49, TXF3; IR4 form 2026,
+   * page 7): every amount positive, as the form prints it. Boxes 41 and 44
+   * are ticked credit or debit (`ir4Sides`). 44B is further income tax
+   * payable: the debit closing balance, nil for a credit one.
    */
-  ir4: Record<"41" | "42A" | "42B" | "42C" | "42D" | "43A" | "43B" | "43C" | "44B" | "45", string>;
+  ir4: Record<"41" | "42A" | "42B" | "42C" | "42D" | "42E" | "43A" | "43B" | "43C" | "43D" | "44" | "44B" | "45", string>;
+  /** Whether boxes 41 and 44 are ticked credit or debit. */
+  ir4Sides: Record<"41" | "44", "credit" | "debit">;
   notes: string[];
 };
 
@@ -99,18 +102,27 @@ export function icaLedger(movements: Movement[], icaYear: number): Ica {
     });
   }
   const sumOf = (kinds: Array<IcaKind | "tax_paid">) => rows.filter((row) => kinds.includes(row.kind)).reduce((sum, row) => add(sum, dec(row.amount)), ZERO_DECIMAL);
-  const ir4 = {
-    "41": money(add(opening, sumOf(["opening"]))),
-    "42A": money(sumOf(["tax_paid"])),
-    "42B": money(sumOf(["rwt_deducted"])),
-    "42C": money(sumOf(["dividend_received"])),
-    "42D": money(sumOf(["other_credit"])),
-    "43A": money(neg(sumOf(["refund"]))),
-    "43B": money(neg(sumOf(["dividend_paid"]))),
-    "43C": money(neg(sumOf(["other_debit"]))),
-    "44B": money(balance),
+  const openingBox = add(opening, sumOf(["opening"]));
+  const credits = [sumOf(["tax_paid"]), sumOf(["rwt_deducted"]), sumOf(["dividend_received"]), sumOf(["other_credit"])];
+  const debits = [neg(sumOf(["refund"])), neg(sumOf(["dividend_paid"])), neg(sumOf(["other_debit"]))];
+  const side = (amount: Decimal): "credit" | "debit" => (isNegative(amount) ? "debit" : "credit");
+  const ir4: Ica["ir4"] = {
+    "41": money(abs(openingBox)),
+    "42A": money(credits[0]),
+    "42B": money(credits[1]),
+    "42C": money(credits[2]),
+    "42D": money(credits[3]),
+    "42E": money(credits.reduce(add, ZERO_DECIMAL)),
+    "43A": money(debits[0]),
+    "43B": money(debits[1]),
+    "43C": money(debits[2]),
+    "43D": money(debits.reduce(add, ZERO_DECIMAL)),
+    "44": money(abs(balance)),
+    // Further income tax payable: only a debit balance has any. Tohyee doesn't work out 44A's adjustments.
+    "44B": isNegative(balance) ? money(neg(balance)) : "0.00",
     "45": isNegative(balance) ? money(roundHalfUp(mul(neg(balance), IMPUTATION_PENALTY_RATE), 2)) : "0.00",
   };
+  const ir4Sides: Ica["ir4Sides"] = { "41": side(openingBox), "44": side(balance) };
   let debitBalance: Ica["debitBalance"] = null;
   const notes: string[] = [];
   if (isNegative(balance)) {
@@ -118,13 +130,14 @@ export function icaLedger(movements: Movement[], icaYear: number): Ica {
     const tax = neg(balance);
     debitBalance = { furtherIncomeTax: money(tax), penalty: money(roundHalfUp(mul(tax, IMPUTATION_PENALTY_RATE), 2)), dueDate: due, onTimeBy: onTimeBy(due) };
     notes.push("A debit balance at 31 March means further income tax to clear it, plus 10% imputation penalty tax, due 20 June (IR274). Pay it before 31 March to avoid both.");
+    notes.push("IR4 box 44B is the debit balance in full: Tohyee doesn't work out box 44A (adjustments that reduce further income tax). If any apply, take them off 44B and work out the penalty in box 45 again (see IRD's IR4 guide).");
   }
   if (rows.some((row) => row.ratioDiffers)) {
     notes.push("A dividend this year carries a different ratio of credits from the year's first dividend. IR274 says that needs an IR407 ratio change declaration before it's paid, or an allocation debit arises; Tohyee doesn't work that debit out.");
   }
   notes.push("A change of more than 34% in who owns the shares can wipe out credits (a shareholder continuity debit); Tohyee doesn't check this, so type it as an other debit.");
   notes.push("IR4 boxes: RWT deducted goes in 42B (RWT on interest); put RWT on dividends in 42D instead if that's what it was.");
-  return { icaYear, start, end, opening: money(opening), rows, closing: money(balance), debitBalance, ir4, notes };
+  return { icaYear, start, end, opening: money(opening), rows, closing: money(balance), debitBalance, ir4, ir4Sides, notes };
 }
 
 async function movements(tx: OrgTx): Promise<Movement[]> {

@@ -303,6 +303,39 @@ describeWithDatabase("Sign in with Google for invited people (Google is a fake t
     expect(limited.headers.get("location")).toBe(`${ORIGIN}/login?google=busy`);
   });
 
+  it("server admins can't link Google, and a Google account already on a server admin doesn't sign them in", async () => {
+    const boss = await createTestUser("boss-admin@example.com", { serverAdmin: true, displayName: "Boss" });
+    const bossCookie = await sessionCookieFor(boss);
+    const refused = await start({ purpose: "link", password: TEST_PASSWORD }, bossCookie);
+    expect(refused.response.status).toBe(403);
+    expect((await body(refused.response)).error).toMatch(/password and two-step/);
+    // Linked before they became a server admin (made directly here).
+    await coreQuery("insert into user_google_identities (user_id, google_sub, email) values ($1, 'sub-boss', 'boss-admin@example.com')", [boss.id]);
+    const signIn = await viaGoogle({ purpose: "sign_in" }, { sub: "sub-boss", email: "boss-admin@example.com" });
+    expect(signIn.location).toBe(`${ORIGIN}/login?google=server_admin_sign_in`);
+    expect(signIn.session).toBe("");
+  });
+
+  it("a Google sign-in with the login's own address confirms it, and a waiting invitation joins", async () => {
+    const tia = await createTestUser("tia@example.com", { displayName: "Tia" });
+    await createTestOrganisation(admin, "google-waiting-org");
+    await coreQuery("update users set email_confirmed_at = null where id = $1", [tia.id]);
+    await coreQuery(
+      "insert into organisation_waiting_members (organisation_id, user_id, role, invited_by_user_id, invited_by_email) values ('google-waiting-org', $1, 'viewer', $2, $3)",
+      [tia.id, admin.id, admin.email],
+    );
+    // Google says a different address: nothing is confirmed.
+    await coreQuery("insert into user_google_identities (user_id, google_sub, email) values ($1, 'sub-tia', 'tia.other@example.com')", [tia.id]);
+    expect((await viaGoogle({ purpose: "sign_in" }, { sub: "sub-tia", email: "tia.other@example.com" })).session).not.toBe("");
+    const memberOf = async () => (await coreQuery("select 1 from organisation_members where organisation_id = 'google-waiting-org' and user_id = $1", [tia.id])).rowCount;
+    expect(await memberOf()).toBe(0);
+    // Google says it's her own address: confirmed, and she joins.
+    expect((await viaGoogle({ purpose: "sign_in" }, { sub: "sub-tia", email: "tia@example.com" })).session).not.toBe("");
+    expect(await memberOf()).toBe(1);
+    expect((await coreQuery("select 1 from users where id = $1 and email_confirmed_at is not null", [tia.id])).rowCount).toBe(1);
+    expect((await coreQuery("select 1 from organisation_waiting_members where user_id = $1", [tia.id])).rowCount).toBe(0);
+  });
+
   it("turning it off stops Google sign-ins straight away", async () => {
     const started = await start({ purpose: "sign_in" });
     expect((await saveSettings({ enabled: false })).status).toBe(200);

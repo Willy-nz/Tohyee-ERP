@@ -12,6 +12,7 @@ import type { IncomeTaxSettings,ReportAccount } from "@/lib/tax/income/service";
 import { TRUST_CLASS_LABELS, TRUST_CLASSES, type TrustClass } from "@/lib/tax/income/trust-return";
 import { TRUST_KIND_LABELS, TRUST_KINDS, type TrustKind } from "@/lib/tax/income/trusts";
 import { Status,Supported,negated } from "@/components/income-tax/shared";
+import { LeaveAddBackPanel } from "@/components/income-tax/leave-add-back";
 
 export function Settings({ organisationId, settings, onSaved }: { organisationId: string; settings: IncomeTaxSettings; onSaved: () => void }) {
   const [type, setType] = useState<TaxpayerType | "">(settings.taxpayerType ?? "");
@@ -230,114 +231,115 @@ export function Workpaper({ organisationId, report, onSaved }: { organisationId:
         </div>
       )}
       <div className={ui.tableWrap}>
-        <table className={ui.reportTable}>
-          <tbody>
-            <tr className={ui.reportTotal}>
-              <td>Net profit</td>
-              <td className={ui.num}>
-                <Money value={paper.netProfit} />
-              </td>
-            </tr>
-            {paper.adjustments.map((entry, index) => {
-              const typedId = entry.accountId === null ? typedIds.get(entry.description + "|" + entry.amount) : undefined;
-              return (
-                <tr key={`${entry.description}-${index}`}>
-                  <td>
-                    {entry.description}{" "}
-                    {typedId ? (
-                      <>
-                        <Badge>Typed</Badge>{" "}
-                        <button type="button" className={ui.linkButton} onClick={() => void remove(typedId)}>
-                          Remove
-                        </button>
-                      </>
-                    ) : null}
-                  </td>
-                  <td className={ui.num}>
-                    <Money value={entry.amount} />
-                  </td>
-                </tr>
-              );
-            })}
-            {report.settings.taxpayerType === "individual" ? (
-              <tr>
-                <td>Other income (typed)</td>
+      <table className={ui.reportTable}>
+        <tbody>
+          <tr className={ui.reportTotal}>
+            <td>Net profit</td>
+            <td className={ui.num}>
+              <Money value={paper.netProfit} />
+            </td>
+          </tr>
+          {paper.adjustments.map((entry, index) => {
+            const typedId = entry.accountId === null ? typedIds.get(entry.description + "|" + entry.amount) : undefined;
+            return (
+              <tr key={`${entry.description}-${index}`}>
+                <td>
+                  {entry.description}{" "}
+                  {typedId ? (
+                    <>
+                      <Badge>Typed</Badge>{" "}
+                      <button type="button" className={ui.linkButton} onClick={() => void remove(typedId)}>
+                        Remove
+                      </button>
+                    </>
+                  ) : null}
+                </td>
                 <td className={ui.num}>
-                  <Money value={paper.otherIncome} />
+                  <Money value={entry.amount} />
                 </td>
               </tr>
-            ) : null}
-            <tr className={ui.reportTotal}>
-              <td>Taxable income before losses</td>
-              <td className={ui.num}>
-                <Money value={paper.beforeLosses} />
-              </td>
-            </tr>
+            );
+          })}
+          {report.settings.taxpayerType === "individual" ? (
             <tr>
-              <td>
-                Losses brought forward used (of <Money value={paper.lossesBroughtForward} />)
-              </td>
+              <td>Other income (typed)</td>
               <td className={ui.num}>
-                <Money value={negated(paper.lossesUsed)} />
+                <Money value={paper.otherIncome} />
               </td>
             </tr>
-            <tr className={ui.reportTotal}>
-              <td>Taxable income</td>
-              <td className={ui.num}>
-                <Money value={paper.taxableIncome} />
-              </td>
-            </tr>
+          ) : null}
+          <tr className={ui.reportTotal}>
+            <td>Taxable income before losses</td>
+            <td className={ui.num}>
+              <Money value={paper.beforeLosses} />
+            </td>
+          </tr>
+          <tr>
+            <td>
+              Losses brought forward used (of <Money value={paper.lossesBroughtForward} />)
+            </td>
+            <td className={ui.num}>
+              <Money value={negated(paper.lossesUsed)} />
+            </td>
+          </tr>
+          <tr className={ui.reportTotal}>
+            <td>Taxable income</td>
+            <td className={ui.num}>
+              <Money value={paper.taxableIncome} />
+            </td>
+          </tr>
+          <tr>
+            <td>Tax</td>
+            <td className={ui.num}>
+              <Money value={paper.tax} />
+            </td>
+          </tr>
+          {paper.overseasTaxPaid !== "0.00" ? (
             <tr>
-              <td>Tax</td>
+              <td>Overseas tax paid (typed; not below nil)</td>
               <td className={ui.num}>
-                <Money value={paper.tax} />
+                <Money value={negated(paper.overseasTaxPaid)} />
               </td>
             </tr>
-            {paper.overseasTaxPaid !== "0.00" ? (
-              <tr>
-                <td>Overseas tax paid (typed; not below nil)</td>
-                <td className={ui.num}>
-                  <Money value={negated(paper.overseasTaxPaid)} />
-                </td>
-              </tr>
-            ) : null}
-            {paper.imputationCredits !== "0.00" ? (
-              <tr>
-                <td>Imputation credits received (typed; not below nil)</td>
-                <td className={ui.num}>
-                  <Money value={negated(paper.imputationCredits)} />
-                </td>
-              </tr>
-            ) : null}
+          ) : null}
+          {paper.imputationCredits !== "0.00" ? (
             <tr>
-              <td>Tax credits: RWT, PAYE and others (typed)</td>
+              <td>Imputation credits received (typed; not below nil)</td>
               <td className={ui.num}>
-                <Money value={negated(paper.taxCredits)} />
+                <Money value={negated(paper.imputationCredits)} />
               </td>
             </tr>
-            <tr className={ui.reportTotal}>
-              <td>Residual income tax (RIT)</td>
-              <td className={ui.num}>
-                <Money value={paper.rit} />
-              </td>
-            </tr>
+          ) : null}
+          <tr>
+            <td>Tax credits: RWT, PAYE and others (typed)</td>
+            <td className={ui.num}>
+              <Money value={negated(paper.taxCredits)} />
+            </td>
+          </tr>
+          <tr className={ui.reportTotal}>
+            <td>Residual income tax (RIT)</td>
+            <td className={ui.num}>
+              <Money value={paper.rit} />
+            </td>
+          </tr>
+          <tr>
+            <td>Loss carried forward{paper.imputationLoss !== "0.00" ? ` (including ${formatMoney(paper.imputationLoss)} from excess imputation credits)` : ""}</td>
+            <td className={ui.num}>
+              <Money value={paper.lossCarriedForward} />
+            </td>
+          </tr>
+          {paper.excessImputationCredits !== "0.00" && paper.imputationLoss === "0.00" ? (
             <tr>
-              <td>Loss carried forward{paper.imputationLoss !== "0.00" ? ` (including ${formatMoney(paper.imputationLoss)} from excess imputation credits)` : ""}</td>
+              <td>Excess imputation credits carried forward</td>
               <td className={ui.num}>
-                <Money value={paper.lossCarriedForward} />
+                <Money value={paper.excessImputationCredits} />
               </td>
             </tr>
-            {paper.excessImputationCredits !== "0.00" && paper.imputationLoss === "0.00" ? (
-              <tr>
-                <td>Excess imputation credits carried forward</td>
-                <td className={ui.num}>
-                  <Money value={paper.excessImputationCredits} />
-                </td>
-              </tr>
-            ) : null}
-          </tbody>
-        </table>
+          ) : null}
+        </tbody>
+      </table>
       </div>
+      <LeaveAddBackPanel organisationId={organisationId} report={report} onSaved={onSaved} />
       <form className={ui.inlineForm} onSubmit={add}>
         <Field label="Other adjustment" hint="For example, holiday pay not paid within 63 days. Positive adds to taxable income; negative takes off.">
           <input value={description} onChange={(event) => setDescription(event.target.value)} maxLength={200} required />
