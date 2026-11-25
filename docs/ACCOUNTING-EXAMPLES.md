@@ -23865,3 +23865,16 @@ Tested in `tests/integration/sales-platform-negative-stock-sent.test.ts`,
   from 1 Sep: a payout already posted is skipped, and one whose deposit is
   already in the books by hand is linked or held for a person (SPF3). The
   clearing account is back to **0.00** once September's payout is posted.
+- **SPF9 WooCommerce prices that include GST.** WooCommerce sends each
+  line's total before tax and its tax beside it, each rounded to the cent.
+  For a store whose prices include tax (the order says
+  `prices_include_tax`), each line and shipping now comes in as its total
+  **plus** WooCommerce's tax, and the invoice is tax inclusive. A $10.00
+  product sent as 8.70 + 1.30 is a 10.00 line: GST **1.30** (3/23 of
+  10.00), net **8.70**, the same as WooCommerce's tax, and the invoice comes
+  to the order's 10.00. Before, GST was worked out again on 8.70 (1.31) and
+  about one round price in seven was refused for not adding up. A store
+  whose prices are entered before tax is as WC (tax exclusive). Refunds
+  follow the order. If WooCommerce's tax on a line ever differs from
+  Tohyee's by a cent (WooCommerce set to round tax on the order's subtotal),
+  the invoice still comes to the order's total and the log notes both.

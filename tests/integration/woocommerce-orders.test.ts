@@ -168,7 +168,7 @@ describeWithDatabase("WooCommerce orders into the accounts (WC1-WC10)", () => {
     // WC2.
     const first = (await doc(w, "order", "2001"))!;
     const invoice = await w.as((tx) => getInvoice(tx, first.invoice_id));
-    expect(invoice).toMatchObject({ invoiceDate: "2026-10-02", total: "46.00", taxTotal: "6.00", amountDue: "0.00", amountsMode: "exclusive" });
+    expect(invoice).toMatchObject({ invoiceDate: "2026-10-02", total: "46.00", taxTotal: "6.00", amountDue: "0.00", amountsMode: "inclusive" });
     expect(await journal(w, "sales_invoices", "approval_journal_id", first.invoice_id)).toEqual({ "1100": "46.00", "2100": "-6.00", "4000": "-40.00" });
     expect(await journal(w, "customer_payments", "journal_id", first.customer_payment_id)).toEqual({ "1050": "46.00", "1100": "-46.00" });
     // WC3: the coupon is in the line's total; shipping its own line.
