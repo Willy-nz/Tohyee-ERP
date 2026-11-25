@@ -35,15 +35,32 @@ export function RequireOrganisation({ children }: { children: (organisationId: s
         <Empty>
           {user.isServerAdmin ? (
             <>
-              You aren&apos;t a member of any organisation. Create one in the server settings, on the server
-              computer: click the Tohyee icon by the clock, or open Tohyee server settings from the Start menu
-              {serverSettingsUrl ? (
-                <>
-                  {" "}
-                  or go to <code>{serverSettingsUrl}</code> there
-                </>
-              ) : null}
-              .
+              <p>
+                You aren&apos;t a member of any organisation. Create one in the server settings, on the server
+                computer.
+              </p>
+              <p>
+                On a Windows server installed with TohyeeSetup: click the Tohyee icon by the clock, or open Tohyee
+                server settings from the Start menu
+                {serverSettingsUrl ? (
+                  <>
+                    {" "}
+                    or go to <code>{serverSettingsUrl}</code> there
+                  </>
+                ) : null}
+                .
+              </p>
+              <p>
+                With Docker (there&apos;s no icon by the clock), run this on the server, in the folder with
+                Tohyee&apos;s docker-compose.yml, with your own details:
+              </p>
+              <pre style={{ whiteSpace: "pre-wrap", overflowWrap: "anywhere" }}>
+                <code>docker compose exec tohyee node tohyee-admin.cjs organisations create --id my-club --name &quot;My Club&quot; --owner {user.email}</code>
+              </pre>
+              <p>
+                On Docker Desktop for Windows, add <code>--env-file &quot;%LOCALAPPDATA%\Tohyee\tohyee.env&quot;</code>{" "}
+                after <code>docker compose</code>.
+              </p>
             </>
           ) : (
             <>You aren&apos;t a member of any organisation yet. Ask a server admin to add you.</>

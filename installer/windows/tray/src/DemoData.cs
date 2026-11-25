@@ -296,7 +296,7 @@ namespace Tohyee.Tray
             }
             if (path.StartsWith("/api/admin/email"))
             {
-                return Parse("{'email':{'configured':true,'host':'smtp.gmail.com','port':465,'username':'tohyee.alerts@gmail.com','hasPassword':true,'fromAddress':'tohyee.alerts@gmail.com','fromName':'Tohyee','secretsAvailable':true,'updatedAt':'" + Ago(24 * 30) + "'}}");
+                return Parse("{'email':{'configured':true,'host':'smtp.gmail.com','port':465,'username':'alerts@example.com','hasPassword':true,'fromAddress':'alerts@example.com','fromName':'Tohyee','secretsAvailable':true,'updatedAt':'" + Ago(24 * 30) + "'}}");
             }
             if (path == "/api/admin/analytics-folders")
             {

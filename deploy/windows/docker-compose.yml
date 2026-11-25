@@ -37,9 +37,11 @@ services:
     volumes:
       # Backups (encrypted with the server's recovery key; save its recovery kit). They go in
       # a normal Windows folder, not inside Docker Desktop's own disk, so
-      # resetting or removing Docker Desktop doesn't take them with your data:
-      # by default the backups folder next to this file. To have them in
-      # OneDrive, set TOHYEE_BACKUP_FOLDER in tohyee.env to a folder such as
+      # resetting or removing Docker Desktop doesn't take them with your data.
+      # Install-Tohyee.cmd sets TOHYEE_BACKUP_FOLDER in tohyee.env to a full
+      # path the first time (%LOCALAPPDATA%\Tohyee\backups) and keeps it, so
+      # it stays put when a new release is extracted to a new folder. To have
+      # them in OneDrive, set it to a folder such as
       # C:\Users\you\OneDrive\Tohyee backups and run Install-Tohyee.cmd again.
       - ${TOHYEE_BACKUP_FOLDER:-./backups}:/backups
     ports:

@@ -5,6 +5,11 @@
 # downloads Tohyee and PostgreSQL, starts them and opens first-time setup.
 # Later runs (e.g. from a newer release's folder): keep your passwords and
 # data, switch to this release's version and restart.
+#
+# Backups go to the folder in TOHYEE_BACKUP_FOLDER (tohyee.env), written as a
+# full path the first time and kept after that. Each release's zip has its own
+# folder (tohyee-v<version>-windows-docker), so a folder "next to these files"
+# would move with every update, leaving the old backups behind.
 
 $ErrorActionPreference = 'Stop'
 $TohyeeVersion = '__TOHYEE_VERSION__'
@@ -54,6 +59,23 @@ function Write-EnvFile([string]$Path, $Values) {
   [System.IO.File]::WriteAllLines($Path, [string[]]$lines)
 }
 
+# Where the running Tohyee container keeps its backups, as a Windows path, or $null.
+# For installs from before TOHYEE_BACKUP_FOLDER was always set: they used the
+# backups folder next to the release they were installed from.
+function Get-CurrentBackupFolder {
+  $id = (& docker compose --file $ComposeFile --env-file $EnvFile ps --all --quiet tohyee 2>$null | Select-Object -First 1)
+  if ($LASTEXITCODE -ne 0 -or -not $id) { return $null }
+  $source = (& docker inspect $id --format '{{range .Mounts}}{{if eq .Destination "/backups"}}{{.Source}}{{end}}{{end}}' 2>$null)
+  if ($LASTEXITCODE -ne 0 -or -not $source) { return $null }
+  $source = "$source".Trim()
+  # Docker Desktop shows a Windows folder as /run/desktop/mnt/host/c/... (or /host_mnt/c/...).
+  if ($source -match '^/(?:run/desktop/mnt/host|host_mnt|mnt)/([a-zA-Z])/(.*)$') {
+    return "$($Matches[1].ToUpperInvariant()):\$($Matches[2] -replace '/', '\')"
+  }
+  if ($source -match '^[a-zA-Z]:\\') { return $source }
+  return $null
+}
+
 function Invoke-Compose([string[]]$Arguments) {
   & docker compose --file $ComposeFile --env-file $EnvFile @Arguments
   if ($LASTEXITCODE -ne 0) {
@@ -100,6 +122,15 @@ if ($firstInstall) {
 }
 # Encrypts bank feed tokens. Added on upgrade too; changing it later makes saved tokens unreadable.
 if (-not $settings.Contains('TOHYEE_SECRET_KEY')) { $settings['TOHYEE_SECRET_KEY'] = New-Secret 48 }
+# The backup folder, as a full path that doesn't change with each release's folder.
+if (-not $settings.Contains('TOHYEE_BACKUP_FOLDER') -or -not $settings['TOHYEE_BACKUP_FOLDER']) {
+  $backupFolder = $null
+  if (-not $firstInstall) { $backupFolder = Get-CurrentBackupFolder }
+  if (-not $backupFolder) { $backupFolder = Join-Path $SettingsDir 'backups' }
+  $settings['TOHYEE_BACKUP_FOLDER'] = $backupFolder
+}
+New-Item -ItemType Directory -Force -Path $settings['TOHYEE_BACKUP_FOLDER'] | Out-Null
+Write-Host "Backups go to $($settings['TOHYEE_BACKUP_FOLDER'])"
 Write-EnvFile $EnvFile $settings
 $port = if ($settings.Contains('TOHYEE_PORT')) { $settings['TOHYEE_PORT'] } else { '3000' }
 
