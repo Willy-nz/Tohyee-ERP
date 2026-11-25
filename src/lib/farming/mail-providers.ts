@@ -1,4 +1,5 @@
 import { type MailProvider, parseAddressList, type Participant, ProviderError, providerFetch } from "@/lib/crm/mail/providers";import { UnavailableError } from "@/lib/errors";
+import { type SenderCheck, senderCheck } from "@/lib/email/sender-check";
 
 /*
  * Reading a farm mailbox (FC1, FC9): Gmail's API or
@@ -20,6 +21,8 @@ export type FarmMail = {
   /** The plain text, at most 20,000 characters. */
   text: string;
   webLink: string | null;
+  /** Whether the receiving mail service found the sender to be who the From line says (src/lib/email/sender-check.ts). */
+  senderCheck?: SenderCheck;
 };
 
 const TIMEOUT_MS = 30_000;
@@ -290,6 +293,10 @@ export async function fetchFarmMail(provider: MailProvider, token: string, id: s
       subject: header("Subject")?.slice(0, 500) ?? null,
       text: gmailText(message.payload),
       webLink: `https://mail.google.com/mail/?authuser=${encodeURIComponent(mailbox)}#all/${encodeURIComponent(message.id)}`,
+      senderCheck: senderCheck(
+        (message.payload?.headers ?? []).filter((entry) => entry.name.toLowerCase() === "authentication-results").map((entry) => entry.value),
+        from.email,
+      ),
     };
   }
   type GraphMessage = {
@@ -301,8 +308,9 @@ export async function fetchFarmMail(provider: MailProvider, token: string, id: s
     receivedDateTime?: string | null;
     webLink?: string | null;
     body?: { contentType?: string; content?: string } | null;
+    internetMessageHeaders?: Array<{ name?: string; value?: string }> | null;
   };
-  const params = new URLSearchParams({ $select: "id,conversationId,subject,from,sentDateTime,receivedDateTime,webLink,body" });
+  const params = new URLSearchParams({ $select: "id,conversationId,subject,from,sentDateTime,receivedDateTime,webLink,body,internetMessageHeaders" });
   const message = await getJson<GraphMessage>(`https://graph.microsoft.com/v1.0/me/messages/${encodeURIComponent(id)}?${params}`, token, { Prefer: 'outlook.body-content-type="text"' });
   const address = message.from?.emailAddress?.address;
   if (!address) return null;
@@ -315,5 +323,9 @@ export async function fetchFarmMail(provider: MailProvider, token: string, id: s
     subject: message.subject?.slice(0, 500) ?? null,
     text: (message.body?.contentType?.toLowerCase() === "html" ? htmlToText(content) : content).slice(0, MAX_TEXT),
     webLink: message.webLink ?? null,
+    senderCheck: senderCheck(
+      (message.internetMessageHeaders ?? []).filter((entry) => entry.name?.toLowerCase() === "authentication-results").map((entry) => entry.value ?? ""),
+      address,
+    ),
   };
 }

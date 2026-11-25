@@ -10,7 +10,7 @@ import * as filesRoute from "@/app/api/bank-accounts/[accountId]/file-feeds/[fee
 import * as foldersRoute from "@/app/api/admin/bank-file-folders/route";
 import type { SessionUser } from "@/lib/auth/sessions";
 import { listBankAccounts, listStatementLines } from "@/lib/bank/accounts";
-import { checkDueFileFeeds, checkFileFeed, createFolderFeed, createMailboxFeed, deleteFileFeed, listFileFeeds } from "@/lib/bank/file-feeds";
+import { checkDueFileFeeds, checkFileFeed, createFolderFeed, createMailboxFeed, deleteFileFeed, feedFiles, listFileFeeds } from "@/lib/bank/file-feeds";
 import { setBankFilesFolder } from "@/lib/bank/file-folders";
 import { deleteImport, importStatementFile, listImports } from "@/lib/bank/imports";
 import { setMailHostResolverForTests } from "@/lib/analytics/mail-host";
@@ -242,27 +242,41 @@ describeWithDatabase("automatic statement files (BF1-BF10)", () => {
     const csv = `${HEADING}\n06/06/2026,-230.00,KAURI SUPPLIES,,,\n`;
     const pdf = { name: "statement.pdf", size: 4, read: vi.fn(async () => Buffer.from("%PDF")) };
     const attachment = (name: string, text: string) => ({ name, size: Buffer.byteLength(text), read: vi.fn(async () => Buffer.from(text)) });
-    mocks.messages = [{ id: "m1", receivedAt: "2026-06-06T08:00:00Z", attachments: [attachment("anz-2026-06-06.csv", csv), pdf] }];
+    mocks.messages = [{ id: "m1", senderCheck: "pass" as const, from: "Bank <statements@bank.example>", receivedAt: "2026-06-06T08:00:00Z", attachments: [attachment("anz-2026-06-06.csv", csv), pdf] }];
     expect(await check(mailbox.id, mailOrg)).toMatchObject({ status: "ok", filesRead: 1, linesAdded: 1 });
     expect(pdf.read).not.toHaveBeenCalled();
     const imports = (await asUser(viewer, (tx) => listImports(tx, mailBank), mailOrg));
     expect(imports[0]).toMatchObject({ fileName: "anz-2026-06-06.csv", fileFeed: "mailbox", lineCount: 1 });
     const again = attachment("anz-2026-06-06.csv", csv);
-    mocks.messages = [{ id: "m1", receivedAt: "2026-06-06T08:00:00Z", attachments: [again] }];
+    mocks.messages = [{ id: "m1", senderCheck: "pass" as const, from: "Bank <statements@bank.example>", receivedAt: "2026-06-06T08:00:00Z", attachments: [again] }];
     expect(await check(mailbox.id, mailOrg)).toMatchObject({ filesRead: 0, linesAdded: 0 });
     expect(again.read).not.toHaveBeenCalled();
-    mocks.messages = [{ id: "m2-forwarded", receivedAt: "2026-06-07T08:00:00Z", attachments: [attachment("anz-2026-06-06.csv", csv)] }];
+    mocks.messages = [{ id: "m2-forwarded", senderCheck: "pass" as const, from: "Bank <statements@bank.example>", receivedAt: "2026-06-07T08:00:00Z", attachments: [attachment("anz-2026-06-06.csv", csv)] }];
     expect(await check(mailbox.id, mailOrg)).toMatchObject({ filesRead: 1, linesAdded: 0 });
     expect(await juneLines(mailBank, mailOrg)).toHaveLength(1);
 
     // BF8 for a mailbox: an expired sign-in adds nothing and the message waits.
     mocks.failToken = true;
-    mocks.messages = [{ id: "m3", receivedAt: "2026-06-08T08:00:00Z", attachments: [attachment("anz-2026-06-08.csv", `${HEADING}\n08/06/2026,-9.00,PARKING,,,\n`)] }];
+    mocks.messages = [{ id: "m3", senderCheck: "pass" as const, from: "Bank <statements@bank.example>", receivedAt: "2026-06-08T08:00:00Z", attachments: [attachment("anz-2026-06-08.csv", `${HEADING}\n08/06/2026,-9.00,PARKING,,,\n`)] }];
     const failed = await check(mailbox.id, mailOrg);
     expect(failed).toMatchObject({ status: "failed", filesRead: 0 });
     expect(failed.error).toContain("sign-in has expired");
     mocks.failToken = false;
     expect(await check(mailbox.id, mailOrg)).toMatchObject({ status: "ok", filesRead: 1, linesAdded: 1 });
+
+    // An email whose sender the mail service couldn't confirm is held for a person: nothing is read or added.
+    const spoofed = attachment("anz-2026-06-09.csv", `${HEADING}\n09/06/2026,500.00,PAYMENT RECEIVED,,,\n`);
+    const unchecked = attachment("anz-2026-06-10.csv", `${HEADING}\n10/06/2026,700.00,PAYMENT RECEIVED,,,\n`);
+    mocks.messages = [
+      { id: "m4", senderCheck: "fail" as const, from: "Bank <statements@bank.example>", receivedAt: "2026-06-09T08:00:00Z", attachments: [spoofed] },
+      { id: "m5", receivedAt: "2026-06-10T08:00:00Z", attachments: [unchecked] },
+    ];
+    expect(await check(mailbox.id, mailOrg)).toMatchObject({ status: "ok", filesRead: 0, linesAdded: 0 });
+    expect(spoofed.read).not.toHaveBeenCalled();
+    expect(unchecked.read).not.toHaveBeenCalled();
+    const details = await asUser(viewer, (tx) => feedFiles(tx, mailbox.id), mailOrg);
+    expect(details.find((file) => file.name === "anz-2026-06-09.csv")).toMatchObject({ result: "failed", reason: expect.stringContaining("couldn't confirm this email really came from its sender") });
+    expect(details.find((file) => file.name === "anz-2026-06-10.csv")).toMatchObject({ result: "failed", reason: expect.stringContaining("gave no check of who sent this email") });
 
     // An IMAP feed keeps its app password encrypted and never returns it.
     const imap = await asUser(owner, (tx) =>
