@@ -398,7 +398,7 @@ Server-wide:
   (`src/lib/server-admin/`). `/api/admin/*` and the `/server` pages refuse
   anything without it, so they can't be reached over the network or through
   the Cloudflare Tunnel even with a server admin's session. The one exception
-  is Update now (`/api/server-update`, UPD1-UPD6), which a server admin can
+  is Update now (`/api/server-update`, UPD1-UPD13), which a server admin can
   use from anywhere: it only backs up and leaves a version number for the
   Windows updater (a SYSTEM scheduled task, `installer/windows/tohyee-updater.ps1`),
   which installs nothing but GitHub's latest release, checked against its

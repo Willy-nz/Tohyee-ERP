@@ -57,6 +57,16 @@ export function SuggestionBox({
   if (!confidence) return null;
   const refused = error ? <Notice tone="error">{error}</Notice> : null;
   if (!confidence.suggestion) {
+    if (confidence.possibleDuplicate) {
+      return (
+        <>
+          <div className={ui.muted}>
+            <Badge tone="amber">Possible duplicate</Badge> Open it to check. If it is one, exclude it.
+          </div>
+          {refused}
+        </>
+      );
+    }
     if (confidence.competing) {
       return (
         <>

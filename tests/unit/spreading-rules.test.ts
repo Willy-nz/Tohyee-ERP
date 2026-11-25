@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { addMonths, catchUp, daysByMonth, endEarly, monthEndDate, monthsBegun, spreadPosting, spreadSchedule, splitAt } from "@/lib/spreading/rules";
+import { addMonths, catchUp, daysByMonth, endEarly, monthEndDate, monthsBegun, respread, spreadPosting, spreadSchedule, splitAt } from "@/lib/spreading/rules";
 
 const amounts = (rows: Array<{ amount: string }>) => rows.map((row) => row.amount);
 const total = (rows: Array<{ amount: string }>) => rows.reduce((sum, row) => sum + Math.round(Number(row.amount) * 100), 0) / 100;
@@ -118,5 +118,39 @@ describe("spreading: changes and directions", () => {
     expect(addMonths("2027-01", -1)).toBe("2026-12");
     expect(monthEndDate("2027-02")).toBe("2027-02-28");
     expect(monthEndDate("2028-02")).toBe("2028-02-29");
+  });
+});
+
+describe("spreading: a new last day, or a new amount still to come (SW29, SW30)", () => {
+  const amounts = (rows: Array<{ month: string; amount: string }> | null) => rows?.map((row) => [row.month, row.amount]) ?? null;
+
+  it("by month: what's left is shared evenly over the months still to come", () => {
+    // 1,200.00 over a year, three months posted: 900.00 left.
+    const plan = { method: "by_month" as const, startDate: "2026-07-01", left: "900.00", through: "2026-09" };
+    expect(amounts(respread({ ...plan, endDate: "2026-12-31" }))).toEqual([["2026-10", "300.00"], ["2026-11", "300.00"], ["2026-12", "300.00"]]);
+    expect(respread({ ...plan, endDate: "2027-09-30" })?.map((row) => row.amount)).toEqual(Array.from({ length: 12 }, () => "75.00"));
+    // The cents that won't share out go in the last month.
+    expect(amounts(respread({ ...plan, left: "100.00", endDate: "2026-12-31" }))).toEqual([["2026-10", "33.33"], ["2026-11", "33.33"], ["2026-12", "33.34"]]);
+    // Nothing posted yet: the whole thing, from its first month.
+    expect(amounts(respread({ ...plan, through: null, left: "1200.00", endDate: "2026-08-31" }))).toEqual([["2026-07", "600.00"], ["2026-08", "600.00"]]);
+    // A last day inside the months already posted leaves nothing to come.
+    expect(respread({ ...plan, endDate: "2026-09-30" })).toBeNull();
+    expect(respread({ ...plan, endDate: "2026-06-30" })).toBeNull();
+  });
+
+  it("by month: a cover that starts mid-month still counts its months from the first day", () => {
+    // 12 Nov to 11 Feb is three months (Nov, Dec, Jan); moved out to 11 Mar it's four.
+    const plan = { method: "by_month" as const, startDate: "2026-11-12", left: "800.00", through: "2026-11" };
+    expect(amounts(respread({ ...plan, endDate: "2027-03-11" }))).toEqual([["2026-12", "266.66"], ["2027-01", "266.66"], ["2027-02", "266.68"]]);
+  });
+
+  it("by days: each month still to come takes its days", () => {
+    // 1,000.00 over 1 Jan to 10 Apr 2027; January's 310.00 has posted, 690.00 is left.
+    const plan = { method: "by_days" as const, startDate: "2027-01-01", left: "690.00", through: "2027-01" };
+    // To 31 Mar: February 28 days and March 31, 59 in all.
+    expect(amounts(respread({ ...plan, endDate: "2027-03-31" }))).toEqual([["2027-02", "327.46"], ["2027-03", "362.54"]]);
+    // Nothing posted: from its own first day.
+    expect(amounts(respread({ ...plan, through: null, left: "590.00", startDate: "2027-01-01", endDate: "2027-02-28" }))).toEqual([["2027-01", "310.00"], ["2027-02", "280.00"]]);
+    expect(respread({ ...plan, endDate: "2027-01-31" })).toBeNull();
   });
 });

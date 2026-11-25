@@ -67,7 +67,7 @@ export function parseMonth(input: unknown, fieldName = "month"): string {
   return input;
 }
 
-function parseDate(input: unknown, what: string): string {
+export function parseDate(input: unknown, what: string): string {
   if (typeof input !== "string" || !ISO_DATE.test(input) || Number.isNaN(Date.parse(`${input}T00:00:00Z`))) throw new ValidationError(`Give ${what}.`);
   return input;
 }
@@ -341,7 +341,7 @@ export async function latestPostedMonth(tx: OrgTx, kind: SpreadKind): Promise<st
   return result.rows[0]?.month ?? null;
 }
 
-async function writeMonths(tx: OrgTx, itemId: string, rows: SpreadMonth[], lineKind: "share" | "difference" = "share"): Promise<void> {
+export async function writeMonths(tx: OrgTx, itemId: string, rows: SpreadMonth[], lineKind: "share" | "difference" = "share"): Promise<void> {
   for (const row of rows) {
     await tx.query("insert into spread_item_months (item_id, month, line_kind, amount) values ($1, $2, $3, $4::numeric)", [itemId, `${row.month}-01`, lineKind, row.amount]);
   }
@@ -483,7 +483,7 @@ export async function createSpreadItem(tx: OrgTx, bodyInput: unknown): Promise<{
   return { created: true, item: await getSpreadItem(tx, id), caughtUp };
 }
 
-function postedThrough(item: SpreadItem): string | null {
+export function postedThrough(item: SpreadItem): string | null {
   const posted = item.months.filter((row) => row.runId !== null && row.lineKind === "share").map((row) => row.month);
   return posted.length ? posted[posted.length - 1] : null;
 }

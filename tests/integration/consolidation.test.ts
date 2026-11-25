@@ -15,6 +15,7 @@ import { applyEcbRates, ecbCrossRate, parseEcbXml, refreshEcbRates, setEcbFetchF
 import { addExchangeRates, listedRates } from "@/lib/fx/rates";
 import { approveInvoice, createInvoice } from "@/lib/invoices/service";
 import { postJournal } from "@/lib/ledger/journals";
+import { planVoidJournals, voidJournals } from "@/lib/ledger/void-journals";
 import { getOrganisation } from "@/lib/organisations/registry";
 import { updateOrganisationSettings } from "@/lib/organisations/settings";
 import { createTestOrganisation, createTestUser, describeWithDatabase, inOrganisation, key, startTestServer, type TestServer } from "../helpers/test-server";
@@ -248,6 +249,21 @@ describeWithDatabase("consolidation (CO1-CO11, FX1)", () => {
     expect(await stock()).toEqual(["4000.00", "41450.00", "41450.00"]);
     const sheet = await consolidatedBalanceSheet(w.user, made.id, { asAt: "2026-10-31" });
     expect(sheet.sections[2].lines.find((line) => line.name === "Current year earnings")!.consolidated).toBe("8040.00");
+  });
+
+  it("BKF9: a sale posted and voided in the same month doesn't pull the average rate", async () => {
+    const w = await setup();
+    const made = await group(w);
+    // AUD 50,000.00 of sales on 31 Oct (1.1500), voided the same day.
+    const big = await w.journal(w.ids.pty, "2026-10-31", [{ accountCode: "1000", debitAmount: "50000.00" }, { accountCode: "4000", creditAmount: "50000.00" }]);
+    const journalId = (big as { journal: { id: string } }).journal.id;
+    await w.as(w.ids.pty, async (tx) => {
+      const plan = await planVoidJournals(tx, { journalIds: [journalId], voidDate: "2026-10-31" });
+      await voidJournals(tx, { journalIds: [journalId], voidDate: "2026-10-31", previewHash: plan.hash, idempotencyKey: key("void") });
+    });
+    const rates = await consolidationRates(w.user, made.id, { from: "2026-10-01", to: "2026-10-31" });
+    // Still (5,000.00 x 1.12 + 3,000.00 x 1.12) / 8,000.00 (CO3); before BKF9 it was pulled to about 1.149.
+    expect(rates.map((row) => [row.month, row.average])).toEqual([["2026-10-01", "1.120000"]]);
   });
 
   it("CO3: with no AUD rate for a date, the report is refused", async () => {

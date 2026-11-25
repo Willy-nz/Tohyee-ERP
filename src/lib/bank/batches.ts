@@ -2,6 +2,8 @@ import { assertAiGstTreatment } from "@/lib/ai/gst-evidence";
 import { getStatementLine, type StatementLine } from "@/lib/bank/accounts";
 import { reviewWork } from "@/lib/bank/mixed-use";
 import { lineErrorText } from "@/lib/bank/bulk";
+import { reconciliationAdjustment } from "@/lib/bank/adjustments";
+import { assertNotPossibleDuplicate } from "@/lib/bank/duplicates";
 import { approvalWork } from "@/lib/bank/coding-proposals";
 import { reconcileStatementLine, suggestionsForLine, unreconcileStatementLine } from "@/lib/bank/reconcile";
 import { type BankRule, getBankRule, ruleAmountsMode, ruleContact, ruleLinesFor, ruleMatches } from "@/lib/bank/rules";
@@ -155,6 +157,7 @@ export async function transferAndMatch(tx: OrgTx, args: Record<string, unknown>,
 /** A rule's spend or receive money for a line, as OKing its suggestion does (BK10, BK18). */
 export async function applyRule(tx: OrgTx, lineId: string, ruleIdInput: unknown, source: string, key: string): Promise<Reconciled> {
   const line = await getStatementLine(tx, lineId);
+  await assertNotPossibleDuplicate(tx, lineId);
   if (line.status !== "unreconciled") {
     // A retry of the same call finds the line reconciled with this key: the same answer as before.
     const replay = await tx.query("select 1 from bank_reconciliations where command_source = $1 and idempotency_key = $2 and statement_line_id = $3", [
@@ -228,6 +231,7 @@ function reconcileWork(source: string): ActionWork {
   return async (tx, action) => {
     const fields: Record<string, unknown> = { ...action.payload, lineId: action.targetId };
     const kind = action.action as ReconcileAction;
+    await assertNotPossibleDuplicate(tx, action.targetId);
     let done: Reconciled & { otherSide?: OtherSide };
     if (kind === "match") done = await matchLine(tx, fields, source, action.idempotencyKey);
     else if (kind === "create_and_match") done = await createAndMatch(tx, fields, source, action.idempotencyKey);
@@ -514,9 +518,9 @@ export async function planBatchUndo(tx: OrgTx, batchIdInput: unknown): Promise<P
  * What Remove & redo will do (BK45): each chosen reconciled
  * line is unreconciled (with its split, and the other side of a transfer it
  * made), and what the line itself created (spend or receive money, a
- * transfer) is voided on the line's date. A match to something already
- * posted is only unreconciled; payments the line recorded are voided only
- * with `removePayments`. Locked periods are refused as BK13.
+ * transfer, or the adjustment for a difference, BKF3) is voided on the
+ * line's date. A match to something already posted is only unreconciled;
+ * payments the line recorded are voided only with `removePayments`. Locked periods are refused as BK13.
  */
 export async function planRemoveAndRedo(tx: OrgTx, lineIdsInput: unknown, options: { removePayments?: unknown } = {}): Promise<Plan> {
   const removePayments = options.removePayments === true;
@@ -572,6 +576,13 @@ export async function planRemoveAndRedo(tx: OrgTx, lineIdsInput: unknown, option
       }
     } else {
       item.notes.push("It was matched to something already posted, so that stays; the line is only unreconciled.");
+    }
+    // BKF3: the adjustment the line posted itself (BK24, BK25) is voided too, so a redo doesn't post it twice.
+    const adjustment = item.reconciliationKind === "match" || item.reconciliationKind === "payments" ? await reconciliationAdjustment(tx, item.reconciliationId) : null;
+    if (adjustment?.status === "posted") {
+      const label = `Spend or receive money #${adjustment.id}${adjustment.reference ? ` (${adjustment.reference})` : ""}`;
+      item.voids = { kind: "bank_transaction", id: adjustment.id, date: item.date, label };
+      item.notes.push(`${label}, the adjustment this line posted for the difference, is voided on ${formatDate(item.date)}.`);
     }
     item.blocked = unreconcile.blocked ?? lockedReason([item.date, ...item.alsoLines.map((other) => other.date)], base.lockDate);
     items.push(item);
