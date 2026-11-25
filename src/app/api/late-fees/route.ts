@@ -6,7 +6,7 @@ export const GET = route(async (request) => {
   const params = searchParams(request);
   const result = await withOrganisation(request, params.get("organisationId"), "viewer", async (tx) => {
     const worked = await lateFeesDue(tx, { asOf: params.get("asOf") ?? undefined });
-    return { ...worked, totals: dueTotals(worked.due), exclusions: await listLateFeeExclusions(tx) };
+    return { ...worked, baseCurrency: tx.baseCurrency, totals: dueTotals(worked.due), exclusions: await listLateFeeExclusions(tx) };
   });
   return json(result);
 });

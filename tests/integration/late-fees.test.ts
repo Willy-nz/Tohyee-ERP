@@ -5,6 +5,8 @@ import type { OrgTx } from "@/lib/db/org-transaction";
 import { recordPayment, voidPayment } from "@/lib/invoices/payments";
 import { chargeLateFees, getLateFeeSettings, lateFeesDue, runMonthlyLateFees, saveLateFeeSettings, setLateFeeExclusion } from "@/lib/invoices/late-fees";
 import { updateOrganisationSettings } from "@/lib/organisations/settings";
+import { addExchangeRates } from "@/lib/fx/rates";
+import { setRateSource } from "@/lib/fx/sources";
 import { approveInvoice, createInvoice, deleteInvoice, getInvoice, voidInvoice } from "@/lib/invoices/service";
 import { createTestOrganisation, createTestUser, describeWithDatabase, inOrganisation, key, startTestServer, type TestServer } from "../helpers/test-server";
 
@@ -143,12 +145,94 @@ describeWithDatabase("late payment fees and interest", () => {
     ]);
   });
 
+  /** An approved invoice to a customer in another currency, dated 1 Oct and due 31 Oct, zero-rated (an export). */
+  async function foreignInvoice(w: Awaited<ReturnType<typeof setup>>, currencyCode: string, amount: string, exchangeRate?: string) {
+    const contact = (await w.as((tx) => createContact(tx, { idempotencyKey: key("c"), name: `${currencyCode} Traders ${amount}`, isCustomer: true, currencyCode }))).contact;
+    const draft = (
+      await w.as((tx) =>
+        createInvoice(
+          tx,
+          {
+            idempotencyKey: key("i"),
+            contactId: contact.id,
+            invoiceDate: "2026-10-01",
+            dueDate: "2026-10-31",
+            amountsMode: "exclusive",
+            ...(exchangeRate ? { exchangeRate } : {}),
+            lines: [{ description: "Export beans", quantity: "1", unitPrice: amount, accountCode: "4000", taxCode: "ZERO" }],
+          },
+          { foreignCurrency: true },
+        ),
+      )
+    ).invoice;
+    return (await w.as((tx) => approveInvoice(tx, draft.id, { idempotencyKey: key("a") }))).invoice;
+  }
+
+  it("LATE12: the fee and the minimum are converted into the invoice's currency at the charge date's rate", async () => {
+    const w = await setup();
+    // NZD per 1 unit.
+    await w.as((tx) =>
+      addExchangeRates(tx, {
+        idempotencyKey: key("rates"),
+        rates: [
+          { currencyCode: "USD", effectiveDate: "2026-10-01", rate: "0.6" },
+          { currencyCode: "JPY", effectiveDate: "2026-10-01", rate: "0.0105" },
+        ],
+      }),
+    );
+    const usd = await foreignInvoice(w, "USD", "1000.00");
+    const yen = await foreignInvoice(w, "JPY", "3000");
+    // JPY 1,500 is about NZ$15.75: under the $20.00 minimum (JPY 1,905).
+    const small = await foreignInvoice(w, "JPY", "1500");
+    await w.turnOn({ interestRate: "" });
+    const worked = await w.as((tx) => lateFeesDue(tx, { asOf: "2026-11-30" }));
+    expect(worked.cannotCharge).toEqual([]);
+    const byId = new Map(worked.due.map((item) => [item.invoiceId, item]));
+    expect(byId.has(small.id)).toBe(false);
+    // NZ$25.00 / 0.6 = USD 41.67; / 0.0105 = JPY 2,381 (whole yen).
+    expect(byId.get(usd.id)).toMatchObject({ currencyCode: "USD", exchangeRate: "0.6", feeTotal: "41.67", lines: [expect.objectContaining({ amount: "41.67", taxCode: "ZERO" })] });
+    expect(byId.get(yen.id)).toMatchObject({ currencyCode: "JPY", feeTotal: "2381" });
+    const made = await w.as((tx) => chargeLateFees(tx, { asOf: "2026-11-30" }));
+    expect(made.failed).toEqual([]);
+    const charge = await w.as((tx) => getInvoice(tx, made.charged.find((item) => item.invoiceId === usd.id)!.chargeInvoiceId));
+    expect(charge).toMatchObject({ currencyCode: "USD", total: "41.67" });
+  });
+
+  it("LATE12: with no rate for the charge date, that invoice isn't charged and says why; the rest are", async () => {
+    const w = await setup();
+    const local = await w.invoice();
+    const euro = await foreignInvoice(w, "EUR", "500.00", "1.8");
+    // Only uploaded rate sets count from now on, and none covers 30 November.
+    await w.as((tx) => setRateSource(tx, { source: "uploaded", reason: "Test" }, "2026-11-01"));
+    await w.turnOn();
+    const worked = await w.as((tx) => lateFeesDue(tx, { asOf: "2026-11-30" }));
+    expect(worked.due.map((item) => item.invoiceId)).toEqual([local.id]);
+    expect(worked.cannotCharge).toEqual([expect.objectContaining({ invoiceId: euro.id, currencyCode: "EUR" })]);
+    expect(worked.cannotCharge[0].reason).toContain("There's no EUR exchange rate for 30 Nov 2026");
+    const made = await w.as((tx) => chargeLateFees(tx, { asOf: "2026-11-30" }));
+    expect(made.charged.map((item) => item.invoiceId)).toEqual([local.id]);
+    expect(made.failed).toEqual([expect.objectContaining({ invoiceId: euro.id })]);
+  });
+
+  it("LATE13: turning the monthly run on part way through a month waits for the 1st", async () => {
+    const w = await setup();
+    await w.invoice();
+    await w.as((tx) => saveLateFeeSettings(tx, { enabled: true, feeAmount: "25.00", interestRate: "12", graceDays: 7, minimumOverdue: "20.00", monthly: true }, "2026-12-15"));
+    expect((await w.as((tx) => getLateFeeSettings(tx))).lastMonthlyRun).toBe("2026-12-01");
+    // The hourly check on 15 December charges nothing.
+    expect(await w.as((tx) => runMonthlyLateFees(tx, "2026-12-15"))).toBeNull();
+    // Saving again (still on) doesn't move it; the first run is 1 January.
+    await w.as((tx) => saveLateFeeSettings(tx, { enabled: true, feeAmount: "25.00", interestRate: "12", graceDays: 7, minimumOverdue: "20.00", monthly: true }, "2026-12-20"));
+    expect((await w.as((tx) => runMonthlyLateFees(tx, "2027-01-01")))?.charged).toHaveLength(1);
+  });
+
   it("LATE10: the monthly run, once a month", async () => {
     const w = await setup();
     await w.invoice();
     await w.turnOn();
     expect(await w.as((tx) => runMonthlyLateFees(tx, "2026-12-01"))).toBeNull();
-    await w.turnOn({ monthly: true });
+    // Turned on in November (LATE13: November counts as done), so the first run is 1 December.
+    await w.as((tx) => saveLateFeeSettings(tx, { enabled: true, feeAmount: "25.00", interestRate: "12", graceDays: 7, minimumOverdue: "20.00", monthly: true }, "2026-11-20"));
     const run = await w.as((tx) => runMonthlyLateFees(tx, "2026-12-01"));
     expect(run?.charged).toHaveLength(1);
     expect(await w.as((tx) => runMonthlyLateFees(tx, "2026-12-15"))).toBeNull();
