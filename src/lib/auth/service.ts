@@ -253,13 +253,17 @@ export async function changeOwnPassword(
     [userId],
   );
   const row = found.rows[0];
-  if (!row || !(await verifyPassword(current, row.password_hash))) {
+  if (!row) throw new ValidationError("Your current password isn't right.");
+  // Counted towards the lockout, as every other password check is, so a session left open can't be used to guess it.
+  await claimPasswordTry(userId);
+  if (!(await verifyPassword(current, row.password_hash))) {
+    await lockIfTooManyFailures(userId);
     throw new ValidationError("Your current password isn't right.");
   }
   const passwordHash = await hashPassword(next);
   await withCoreTransaction(async (client) => {
     await client.query(
-      `update users set password_hash = $2, password_changed_at = now(), updated_at = now()
+      `update users set password_hash = $2, password_changed_at = now(), updated_at = now(), failed_login_count = 0
         where id = $1`,
       [userId, passwordHash],
     );
