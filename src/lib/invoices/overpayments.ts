@@ -11,7 +11,7 @@ import { clearedBase, foreignRefund, foreignRefundFields, openBase, parseRateInp
 import { getJournal, parseJournalBody, postJournalBody, sameForeign } from "@/lib/ledger/journals";
 import { assertPostingDateAllowed } from "@/lib/ledger/period-controls";
 import { currencyMinorUnits } from "@/lib/money/currency";
-import { add, cmp, dec, isZero, parseDecimalInput, sub, toFixedString, toPlainString, ZERO_DECIMAL } from "@/lib/money/decimal";
+import { add, cmp, dec, isZero, parseDecimalInput, significantScale, sub, toFixedString, toPlainString, ZERO_DECIMAL } from "@/lib/money/decimal";
 
 import {
   asRecord,
@@ -363,8 +363,7 @@ export async function applyOverpayment(
   const source = optionalSource(command.source);
   const idempotencyKey = requireIdempotencyKey(command.idempotencyKey);
   const applicationDate = parseIsoDate(command.applicationDate, "applicationDate");
-  // Foreign-currency overpayments (MC15) have the same minor units here (USD, EUR, ...).
-  const scale = currencyMinorUnits(tx.baseCurrency);
+  // Checked against the overpayment's own currency once it's loaded (BKF6).
   const rawApplications = requireArray(command.applications, "applications", MAX_APPLICATIONS);
   if (rawApplications.length === 0) {
     throw new ValidationError("Apply the overpayment to at least one invoice.");
@@ -378,7 +377,7 @@ export async function applyOverpayment(
       throw new ValidationError(`${label} is for invoice #${invoiceId} again. Apply credit to each invoice once.`);
     }
     seen.add(invoiceId);
-    const amount = dec(parseDecimalInput(entry.amount, `${label} amount`, { maxScale: scale }));
+    const amount = dec(parseDecimalInput(entry.amount, `${label} amount`, { maxScale: 4 }));
     return { label, invoiceId, amount };
   });
   const hash = requestHash("overpayment_application", {
@@ -416,6 +415,13 @@ export async function applyOverpayment(
     return committedMeanwhile;
   }
   assertUsable(payment, "applied");
+  // BKF6: in the overpayment's own currency's smallest unit (whole yen for JPY), not the base currency's.
+  const scale = currencyMinorUnits(payment.currencyCode);
+  for (const entry of wanted) {
+    if (significantScale(entry.amount) > scale) {
+      throw new ValidationError(scale === 0 ? `${entry.label} amount must be a whole number.` : `${entry.label} amount can have at most ${scale} decimal places.`);
+    }
+  }
   if (applicationDate < payment.paymentDate) {
     throw new ValidationError(`The application date can't be before the payment date (${payment.paymentDate}).`);
   }
@@ -805,8 +811,7 @@ export async function refundOverpayment(
   const source = optionalSource(command.source);
   const idempotencyKey = requireIdempotencyKey(command.idempotencyKey);
   const refundDate = parseIsoDate(command.refundDate, "refundDate");
-  const scale = currencyMinorUnits(tx.baseCurrency);
-  const amount = dec(parseDecimalInput(command.amount, "amount", { maxScale: scale }));
+  const amount = dec(parseDecimalInput(command.amount, "amount", { maxScale: 4 }));
   const bankAccountCode = parseAccountCodeInput(command.bankAccountCode, "bankAccountCode");
   const reference = optionalString(command.reference, "reference", { maxLength: 100 });
   const typedRate = parseRateInput(command.exchangeRate);
@@ -838,6 +843,11 @@ export async function refundOverpayment(
     return committedMeanwhile;
   }
   assertUsable(payment, "refunded");
+  // BKF6: in the payment's own currency's smallest unit (whole yen for JPY), not the base currency's.
+  const scale = currencyMinorUnits(payment.currencyCode);
+  if (significantScale(amount) > scale) {
+    throw new ValidationError(scale === 0 ? "amount must be a whole number." : `amount can have at most ${scale} decimal places.`);
+  }
   if (refundDate < payment.paymentDate) {
     throw new ValidationError(`The refund date can't be before the payment date (${payment.paymentDate}).`);
   }

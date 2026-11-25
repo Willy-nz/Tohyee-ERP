@@ -46,6 +46,7 @@ import { ROLE_LABELS } from "@/lib/auth/roles";
 import { handleFormKeys } from "@/lib/form-keys";
 import { cancelReminders } from "@/lib/native/notifications";
 import { NativeAppSupport } from "@/components/native-app";
+import { SOURCE_CODE_REPOSITORY } from "@/lib/source-code";
 import styles from "./app-shell.module.css";
 import {
   useWorkspace,
@@ -369,6 +370,9 @@ function UserMenu({ onSignOut }: { onSignOut: () => void }) {
           <Link href="/get-tohyee" className={styles.dropdownLink} onClick={close}>
             Get Tohyee on this device
           </Link>
+          <a href={SOURCE_CODE_REPOSITORY} className={styles.dropdownLink} target="_blank" rel="noreferrer" onClick={close}>
+            Source code
+          </a>
           {current?.role === "owner" ? (
             // An Owner's private copy of their own mail.
             <Link href="/operations/my-mail" className={styles.dropdownLink} onClick={close}>
@@ -600,6 +604,9 @@ function PhoneMenu({ app, modules, menus, chatUnread, onSignOut }: { app: AppKey
             <Link href="/get-tohyee" onClick={close}>
               Get Tohyee on this device
             </Link>
+            <a href={SOURCE_CODE_REPOSITORY} target="_blank" rel="noreferrer" onClick={close}>
+              Source code
+            </a>
             {current?.role === "owner" ? (
               <Link href="/operations/my-mail" onClick={close}>
                 My mail

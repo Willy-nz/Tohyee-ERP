@@ -9,6 +9,7 @@ import {
   parsePassword,
   sameDestination,
 } from "@/lib/analytics/databases/config";
+import { assertOrganisationMayReach } from "@/lib/network/organisation-reach";
 import { type DriverModules, type ExternalObject, type ExternalSession, friendlyError, openSession, realDrivers } from "@/lib/analytics/databases/drivers";
 import { checkReadOnlyQuery } from "@/lib/analytics/databases/guard";
 import { type ExternalColumn, outerSelect, quoteObject, snakeName, suggestColumn, valueText } from "@/lib/analytics/databases/types";
@@ -187,6 +188,7 @@ async function withSession<T>(
   work: (session: ExternalSession) => Promise<T>,
   drivers: DriverModules,
 ): Promise<T> {
+  await assertOrganisationMayReach(settings.host, "a database source");
   const session = await openSession(settings, password, sessionOptions(timeoutMs), drivers);
   try {
     return await work(session);
@@ -464,6 +466,7 @@ export async function readSourceRows(input: {
   const { settings, password, spec, columns, rowLimit } = input;
   const timeoutMs = input.timeoutMs ?? databaseLoadTimeoutMs();
   await refuseTohyeeDatabase(settings);
+  await assertOrganisationMayReach(settings.host, "a database source");
   const session = await openSession(settings, password, sessionOptions(timeoutMs), input.drivers ?? realDrivers);
   let external: ExternalColumn[];
   let inner: string;

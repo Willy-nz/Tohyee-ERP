@@ -200,7 +200,10 @@ describeWithDatabase("inviting people from People and roles", () => {
   it("Cancel keeps the login when another organisation has them too, and then the link only goes by email", async () => {
     await invite(admin, { email: "shared@example.com", displayName: "Lani Shared", role: "viewer" });
     const login = await loginFor("shared@example.com");
-    // Another organisation adds the same address: it's an existing login there, so it's added as before.
+    // Lani uses the emailed link (choosing a password confirms her address, though two-step isn't set up yet).
+    const chosen = await setupAccountRoute.POST(apiRequest("/api/auth/setup-account", { method: "POST", body: { token: tokenIn(sent[0].text), password: "lanis-own-password-1" } }), undefined as never);
+    expect(chosen.status).toBe(200);
+    // Another organisation adds the same address: it's an existing, confirmed login there, so it's added as before.
     const there = await json(await invite(owner, { email: "shared@example.com", displayName: "Lani", role: "viewer" }, OTHER));
     expect(there).toMatchObject({ invited: false, invitation: null });
     // With email down, Resend no longer shows the link: someone else's organisation uses this login now.

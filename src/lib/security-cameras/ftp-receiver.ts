@@ -307,6 +307,15 @@ export async function startCameraReceiver<U>(options: ReceiverOptions<U>): Promi
           if (!secureContext) return say("502 FTPS isn't set up on this server.");
           if (secured) return say("503 Already secured.");
           if (!/^(TLS|TLS-C|SSL)$/i.test(argument)) return say("504 Use AUTH TLS.");
+          // Anything sent after AUTH before the secure connection starts came in the clear, possibly from someone
+          // in between: it's never run once the connection is secure. The connection ends instead.
+          if (queue.length || buffer) {
+            queue.length = 0;
+            buffer = "";
+            reply("503 Send nothing after AUTH TLS until the secure connection has started.");
+            socket.end();
+            return true;
+          }
           reply("234 Go ahead with TLS.");
           raw.removeAllListeners("data");
           raw.setTimeout(0);

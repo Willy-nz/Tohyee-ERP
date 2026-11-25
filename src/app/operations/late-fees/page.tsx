@@ -10,13 +10,15 @@ import { useWorkspace } from "@/components/workspace";
 import type { Account } from "@/lib/accounts/service";
 import { api, errorMessage } from "@/lib/client/api";
 import type { Contact } from "@/lib/contacts/service";
-import { formatDate } from "@/lib/format";
-import type { LateFeeDue, LateFeeExclusion, LateFeeResult, LateFeeSettings } from "@/lib/invoices/late-fees";
+import { formatDate, todayInBrowser } from "@/lib/format";
+import type { LateFeeCannot, LateFeeDue, LateFeeExclusion, LateFeeResult, LateFeeSettings } from "@/lib/invoices/late-fees";
 
 type LateFeesView = {
   asOf: string;
   settings: LateFeeSettings;
   due: LateFeeDue[];
+  cannotCharge: LateFeeCannot[];
+  baseCurrency: string;
   totals: Array<{ currencyCode: string; total: string }>;
   exclusions: LateFeeExclusion[];
 };
@@ -84,6 +86,12 @@ function DueNow({ organisationId, view, canCharge, onDone }: { organisationId: s
           {result.failed.map((failed) => ` ${failed.invoiceNumber ?? failed.invoiceId}: ${failed.reason}`).join("")}
         </Notice>
       ) : null}
+      {view.cannotCharge.length > 0 ? (
+        <Notice tone="warning">
+          {view.cannotCharge.length === 1 ? "1 overdue invoice can't be charged:" : `${view.cannotCharge.length} overdue invoices can't be charged:`}
+          {view.cannotCharge.map((item) => ` ${item.invoiceNumber ?? item.invoiceId} (${item.contactName}): ${item.reason}`).join("")}
+        </Notice>
+      ) : null}
       {view.due.length === 0 ? (
         <Empty>Nothing to charge today.</Empty>
       ) : (
@@ -112,7 +120,12 @@ function DueNow({ organisationId, view, canCharge, onDone }: { organisationId: s
                       <Money value={item.amountDue} /> {item.currencyCode}
                     </td>
                     <td data-label="Charge">
-                      {item.feeTotal ? <div>Fee <Money value={item.feeTotal} /> + GST if any</div> : null}
+                      {item.feeTotal ? (
+                        <div>
+                          Fee <Money value={item.feeTotal} />
+                          {item.exchangeRate ? ` ${item.currencyCode} (${view.settings.feeAmount} ${view.baseCurrency} at ${item.exchangeRate})` : ""} + GST if any
+                        </div>
+                      ) : null}
                       {item.interest ? (
                         <div className={ui.muted}>
                           Interest {item.interest.days} {item.interest.days === 1 ? "day" : "days"} from {formatDate(item.interest.from)}
@@ -129,7 +142,9 @@ function DueNow({ organisationId, view, canCharge, onDone }: { organisationId: s
           </div>
           <p className={ui.muted}>
             Totals before GST: {view.totals.map((total) => `${total.total} ${total.currencyCode}`).join(", ")}. Each overdue invoice gets its own late
-            payment invoice; the overdue invoice isn&apos;t changed.
+            payment invoice; the overdue invoice isn&apos;t changed. Interest is only charged on invoices that still have something owing when
+            the charges are made: if one is paid in full between charges, the interest for the days since the last charge isn&apos;t charged, and an
+            invoice paid late before it was ever charged isn&apos;t charged at all.
           </p>
           {canCharge ? (
             <Button disabled={busy} onClick={charge}>
@@ -176,7 +191,7 @@ function SettingsCard({ organisationId, settings, canEdit, onSaved }: { organisa
         <Field label="Days of grace" hint="How many days late before anything's charged.">
           <input inputMode="numeric" value={form.graceDays} onChange={(event) => set({ graceDays: event.target.value })} />
         </Field>
-        <Field label="Only when at least this is owing">
+        <Field label="Only when at least this is owing" hint="The fee and this amount are in your own currency. For an invoice in another currency, both are converted at the exchange rate for the charge date.">
           <input inputMode="decimal" value={form.minimumOverdue} onChange={(event) => set({ minimumOverdue: event.target.value })} />
         </Field>
         {accounts.data ? (
@@ -202,6 +217,11 @@ function SettingsCard({ organisationId, settings, canEdit, onSaved }: { organisa
           <input type="checkbox" checked={form.monthly} onChange={(event) => set({ monthly: event.target.checked })} /> Charge by itself on the 1st of each
           month
         </label>
+        <p className={ui.muted}>
+          {settings.enabled && settings.monthly
+            ? `Next monthly run: ${formatDate(nextMonthlyRun(settings.lastMonthlyRun))}.`
+            : "Turned on part way through a month, the first run is on the 1st of next month, not straight away."}
+        </p>
       </fieldset>
       {canEdit ? (
         <div style={{ display: "flex", gap: 8, flexWrap: "wrap", marginTop: 12 }}>
@@ -219,6 +239,14 @@ function SettingsCard({ organisationId, settings, canEdit, onSaved }: { organisa
       )}
     </Card>
   );
+}
+
+/** LATE10, LATE13: the 1st of the month after the last month done (this month's 1st, so soon, when none is recorded). */
+function nextMonthlyRun(lastMonthlyRun: string | null): string {
+  if (!lastMonthlyRun) return `${todayInBrowser().slice(0, 7)}-01`;
+  const year = Number(lastMonthlyRun.slice(0, 4));
+  const month = Number(lastMonthlyRun.slice(5, 7));
+  return month === 12 ? `${year + 1}-01-01` : `${year}-${String(month + 1).padStart(2, "0")}-01`;
 }
 
 function formOf(settings: LateFeeSettings) {

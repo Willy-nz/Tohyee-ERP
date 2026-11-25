@@ -18,7 +18,7 @@ import { getOrganisation } from "@/lib/organisations/registry";
 import { sendOrganisationSearchEmails } from "@/lib/saved-searches/emails";
 import { updateOrganisationSettings } from "@/lib/organisations/settings";
 import { loadRecordTypes } from "@/lib/saved-searches/org-catalogue";
-import { type HomeSearch, runSearch, type SavedSearch, type SearchResult } from "@/lib/saved-searches/service";
+import { type HomeSearch, runSearch, type SavedSearch, saveSavedSearch, type SearchResult } from "@/lib/saved-searches/service";
 import { createTrackingValue, getTrackingSetup } from "@/lib/tracking/service";
 import { apiRequest, createTestOrganisation, createTestUser, describeWithDatabase, inOrganisation, key, sessionCookieFor, startTestServer, type TestServer } from "../helpers/test-server";
 
@@ -168,6 +168,18 @@ describeWithDatabase("saved searches", () => {
     expect((await remove("viewer", mine.id)).status).toBe(200);
     expect((await remove("owner", shared.id)).status).toBe(200);
     expect(await list("owner")).toEqual([]);
+  });
+
+  it("a person whose role isn't known gets the least: they can't share a search with everyone or change someone else's", async () => {
+    const roleless = <T>(work: (tx: OrgTx) => Promise<T>) => inOrganisation(org, { userId: viewer.id, email: viewer.email }, work);
+    await expect(roleless((tx) => saveSavedSearch(tx, { recordType: "invoice", name: "Everyone's", shared: true, definition: {} }))).rejects.toThrow(/bookkeepers and above/);
+    const theirs = await inOrganisation(org, { userId: aroha.id, email: aroha.email, role: "bookkeeper" }, (tx) =>
+      saveSavedSearch(tx, { recordType: "bill", name: "Shared by a bookkeeper", shared: true, definition: {} }),
+    );
+    await expect(roleless((tx) => saveSavedSearch(tx, { id: theirs.id, name: "Taken over", definition: {} }))).rejects.toThrow(/Only the person who made/);
+    // With the real role (here an admin) it's allowed, as on the screens.
+    await inOrganisation(org, { userId: owner.id, email: owner.email, role: "owner" }, (tx) => saveSavedSearch(tx, { id: theirs.id, name: "Tidied", shared: true, definition: {} }));
+    await inOrganisation(org, { userId: owner.id, email: owner.email, role: "owner" }, (tx) => tx.query("delete from saved_searches where id = $1", [theirs.id]));
   });
 
   it("searches contacts, items and money spent, and by this organisation's own tracking and custom fields", async () => {

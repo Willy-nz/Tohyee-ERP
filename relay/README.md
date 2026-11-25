@@ -145,12 +145,16 @@ npm run db:setup
 
 ### 7. The admin password
 
-Make up a long random password (at least 20 characters; a password manager can
-make one) and store it:
+Generate a long random password (at least 20 characters; for example
+`openssl rand -base64 32`, or let a password manager make one) and store it:
 
 ```sh
 npx wrangler secret put ADMIN_TOKEN
 ```
+
+After 10 wrong admin passwords in a day from one network (or 200 from
+everyone together), the admin API refuses even the right one until the next
+day (UTC). Addresses keep working meanwhile.
 
 You'll need it to switch addresses off. Keep it in your password manager.
 

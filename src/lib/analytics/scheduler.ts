@@ -29,6 +29,8 @@ import { getOrganisation } from "@/lib/organisations/registry";
  */
 export const LOAD_TIME = "04:00";
 const RETRY_AFTER_MS = 60 * 60 * 1000;
+/** How long a load can be running before it's taken to have been cut off. */
+const RUNNING_LIMIT_MS = 60 * 60 * 1000;
 
 export const SCHEDULE_ACTOR: Actor = { userId: null, email: "analytics-loader@tohyee" };
 
@@ -42,7 +44,9 @@ export function loadDue(now: Date, runs: Recent[], loadTime = LOAD_TIME): boolea
     const at = localParts(run.startedAt);
     return at.date === today.date && at.time >= loadTime;
   });
-  if (sinceLoadTime.some((run) => run.status === "ok" || run.status === "running")) return false;
+  // A load still "running" after an hour was cut off (a restart, say): it no longer holds back the day's load (SPF12).
+  const stillRunning = (run: Recent) => run.status === "running" && now.getTime() - run.startedAt.getTime() < RUNNING_LIMIT_MS;
+  if (sinceLoadTime.some((run) => run.status === "ok" || stillRunning(run))) return false;
   const lastTry = sinceLoadTime
     .filter((run) => run.trigger === "schedule")
     .sort((a, b) => b.startedAt.getTime() - a.startedAt.getTime())[0];

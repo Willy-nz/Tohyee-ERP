@@ -106,8 +106,8 @@ function Members({ organisationId }: { organisationId: string }) {
     }
   }
 
-  function showInvitation(action: "invite" | "resend", to: string, toRole: Role | null, invitation: InvitationOutcome | null) {
-    setStatus(invitationMessage(action, to, toRole, invitation));
+  function showInvitation(action: "invite" | "resend", to: string, toRole: Role | null, invitation: InvitationOutcome | null, waiting: { emailed: boolean } | null = null) {
+    setStatus(invitationMessage(action, to, toRole, invitation, waiting));
     setShownLink(invitation?.url ? { email: to, url: invitation.url, expiresAt: invitation.expiresAt, localOnly: invitation.localOnly } : null);
     members.reload();
   }
@@ -116,11 +116,11 @@ function Members({ organisationId }: { organisationId: string }) {
     event.preventDefault();
     const to = email.trim();
     try {
-      const result = await api<{ invitation: InvitationOutcome | null }>(`/api/organisations/${organisationId}/members`, {
+      const result = await api<{ invitation: InvitationOutcome | null; waiting: { emailed: boolean } | null }>(`/api/organisations/${organisationId}/members`, {
         method: "POST",
         body: { email: to, displayName: name, role, ...(limitInvite ? accessBody(inviteAccess) : {}) },
       });
-      showInvitation("invite", to, role, result.invitation);
+      showInvitation("invite", to, role, result.invitation, result.waiting ?? null);
       setEmail("");
       setName("");
       setInviteAccess(NO_ACCESS_LIMIT);

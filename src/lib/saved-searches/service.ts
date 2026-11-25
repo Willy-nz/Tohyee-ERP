@@ -60,8 +60,15 @@ function isMine(tx: OrgTx, row: Row): boolean {
 }
 
 function isAdmin(tx: OrgTx): boolean {
-  // Work with no role on it (a test, Tohyee itself) is trusted as the routes' own role checks have passed.
-  return tx.actor.role === undefined || roleAtLeast(tx.actor.role, "admin");
+  // Tohyee's own work has no person. A person whose role isn't known here gets the least: not an admin.
+  if (!tx.actor.userId) return true;
+  return tx.actor.role !== undefined && roleAtLeast(tx.actor.role, "admin");
+}
+
+/** Sharing with everyone: bookkeepers and above (a person whose role isn't known here can't). */
+function maySharePublicly(tx: OrgTx): boolean {
+  if (!tx.actor.userId) return true;
+  return tx.actor.role !== undefined && roleAtLeast(tx.actor.role, "bookkeeper");
 }
 
 function requireType(types: readonly RecordType[], key: unknown): RecordType {
@@ -132,7 +139,7 @@ export async function saveSavedSearch(tx: OrgTx, bodyInput: unknown): Promise<Sa
   const name = requireString(body.name, "A name", { maxLength: 80 });
   const shared = body.shared === true;
   const onHome = body.onHome === true;
-  if (shared && tx.actor.role !== undefined && !roleAtLeast(tx.actor.role, "bookkeeper")) throw new ForbiddenError("Sharing a search with everyone is for bookkeepers and above.");
+  if (shared && !maySharePublicly(tx)) throw new ForbiddenError("Sharing a search with everyone is for bookkeepers and above.");
   if (id) {
     const row = await loadRow(tx, id, true);
     if (!(isMine(tx, row) || isAdmin(tx))) throw new ForbiddenError("Only the person who made a shared search, or an admin, can change it. Save your own copy instead.");

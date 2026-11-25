@@ -1,7 +1,7 @@
 import { randomBytes } from "node:crypto";
 import { ValidationError } from "@/lib/errors";
 import { localHostName } from "@/lib/net/local-names";
-import { dec, divide, sub, toFixedString, toPlainString } from "@/lib/money/decimal";
+import { add, dec, divide, sub, toFixedString, toPlainString } from "@/lib/money/decimal";
 import {
   type AccessToken,
   type ConnectInput,
@@ -188,10 +188,14 @@ export function wooOrderFrom(raw: unknown, refundsRaw: unknown[] = []): Platform
   if (!createdAt) throw new ValidationError(`WooCommerce sent ${name} without a date.`);
   const paidAt = gmt(order.date_paid_gmt);
   const updatedAt = gmt(order.date_modified_gmt);
+  // SPF9: with prices entered including GST, the amounts go in including WooCommerce's tax, so
+  // the invoice's GST is worked out from the price the customer paid and comes to the order's total.
+  const inclusive = order.prices_include_tax === true;
+  const withTax = (amount: unknown, tax: unknown): string => (inclusive ? toFixedString(add(dec(money(amount)), dec(money(tax))), 2) : money(amount));
   const lines: PlatformOrderLine[] = list(order.line_items).map((rawLine) => {
     const line = record(rawLine);
-    const subtotal = money(line.subtotal);
-    const total = money(line.total);
+    const subtotal = withTax(line.subtotal, line.subtotal_tax);
+    const total = withTax(line.total, line.total_tax);
     return {
       externalId: text(line.id) ?? "",
       // Lines are matched to items by SKU, so the SKU stands in for the variant.
@@ -207,7 +211,7 @@ export function wooOrderFrom(raw: unknown, refundsRaw: unknown[] = []): Platform
   });
   const shipping: PlatformShippingLine[] = list(order.shipping_lines).map((rawLine) => {
     const line = record(rawLine);
-    return { externalId: text(line.id) ?? "", title: text(line.method_title) ?? "Shipping", amount: money(line.total), taxLines: taxLinesOf(line.taxes, rates), removed: false };
+    return { externalId: text(line.id) ?? "", title: text(line.method_title) ?? "Shipping", amount: withTax(line.total, line.total_tax), taxLines: taxLinesOf(line.taxes, rates), removed: false };
   });
   const paid = paidAt !== null && ["processing", "completed", "refunded"].includes(status);
   const method = text(order.payment_method);
@@ -228,13 +232,13 @@ export function wooOrderFrom(raw: unknown, refundsRaw: unknown[] = []): Platform
         lineItemId: match ? (text(match.id) ?? "") : `missing-${text(line.id) ?? "?"}`,
         quantity: absolute(text(line.quantity) ?? "0"),
         restocked: false,
-        subtotal: absolute(money(line.total)),
+        subtotal: absolute(withTax(line.total, line.total_tax)),
         tax: absolute(money(line.total_tax)),
       });
     }
     const refundShipping = list(refund.shipping_lines).map((rawLine) => {
       const line = record(rawLine);
-      return { shippingLineId: refundedItemId(line), subtotal: absolute(money(line.total)), tax: absolute(money(line.total_tax)) };
+      return { shippingLineId: refundedItemId(line), subtotal: absolute(withTax(line.total, line.total_tax)), tax: absolute(money(line.total_tax)) };
     });
     return {
       externalId: text(refund.id) ?? "",
@@ -257,8 +261,8 @@ export function wooOrderFrom(raw: unknown, refundsRaw: unknown[] = []): Platform
     updatedAt,
     cancelledAt: status === "cancelled" || status === "failed" ? (updatedAt ?? createdAt) : null,
     test: false,
-    // The amounts given are before tax (WooCommerce's line totals), whatever the store's prices.
-    taxesIncluded: false,
+    // WooCommerce's line totals are before tax; with prices including tax they're given with their tax added (SPF9).
+    taxesIncluded: inclusive,
     currency: text(order.currency)?.toUpperCase() ?? "",
     presentmentCurrency: null,
     financialStatus: paid ? "PAID" : status.toUpperCase().replace(/-/g, "_"),
@@ -343,11 +347,17 @@ export const woocommerceConnector: SalesPlatformConnector = {
   },
 
   async fetchOrders(context, token, request) {
-    const since = request.updatedSince && Date.parse(request.updatedSince) > Date.parse(request.processedFrom) ? request.updatedSince : request.processedFrom;
+    // modified_after is strictly after: a second earlier, so an order changed in the same second as the last one read
+    // (left for the next page when a sync stopped at its limit) isn't missed. Posting is idempotent (SPF12).
+    const since =
+      request.updatedSince && Date.parse(request.updatedSince) > Date.parse(request.processedFrom)
+        ? new Date(Date.parse(request.updatedSince) - 1000).toISOString()
+        : request.processedFrom;
     const orders: PlatformOrder[] = [];
     const notes: string[] = [];
     const seen = new Set<string>();
     let until: string | null = null;
+    let complete = true;
     for (let page = 1; page <= MAX_ORDER_PAGES; page += 1) {
       const query = new URLSearchParams({
         modified_after: since.replace(/\.\d+Z$/, "").replace(/Z$/, ""),
@@ -372,14 +382,17 @@ export const woocommerceConnector: SalesPlatformConnector = {
       }
       const pages = Number(headers.get("x-wp-totalpages") ?? "1");
       if (!Number.isFinite(pages) || page >= pages) break;
-      if (page === MAX_ORDER_PAGES) notes.push("More orders changed than one sync reads; the rest come in at the next sync.");
+      if (page === MAX_ORDER_PAGES) {
+        complete = false;
+        notes.push("More orders changed than one sync reads; the rest come in at the next sync.");
+      }
     }
     for (const id of request.retryIds) {
       if (seen.has(id)) continue;
       const order = await woocommerceConnector.fetchOrder(context, token, id);
       if (order) orders.push(order);
     }
-    return { orders, until, notes };
+    return { orders, until, notes, complete };
   },
 
   async fetchOrder(context, token, orderId) {

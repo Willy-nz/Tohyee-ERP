@@ -2,7 +2,7 @@ import { afterAll, afterEach, beforeAll, beforeEach, expect, it } from "vitest";
 import * as pauseRoute from "@/app/api/admin/remote-access/pause/route";
 import * as loginRoute from "@/app/api/auth/login/route";
 import { assertRemoteAllowed } from "@/lib/auth/remote";
-import { forgetRemotePauseCache, noteRemoteFailure, PAUSE_AFTER_FAILURES, remotePausedUntil, remotePauseStatus, resumeRemoteAccess } from "@/lib/auth/remote-pause";
+import { failureSource, forgetRemotePauseCache, noteRemoteFailure, PAUSE_AFTER_FAILURES, PAUSE_MIN_SOURCES, remotePausedUntil, remotePauseStatus, resumeRemoteAccess } from "@/lib/auth/remote-pause";
 import type { SessionUser } from "@/lib/auth/sessions";
 import { logSignIn } from "@/lib/auth/sign-in-log";
 import { coreQuery } from "@/lib/db/transactions";
@@ -54,7 +54,32 @@ describeWithDatabase("pausing remote access when someone is guessing", () => {
     }
   };
 
-  it(`${PAUSE_AFTER_FAILURES} failed sign-ins through remote access, from any logins and addresses, pause it for an hour and email the server admins`, async () => {
+  it("one address, or one IPv6 network, can't pause it for everyone however often it fails", async () => {
+    for (let index = 0; index < PAUSE_AFTER_FAILURES * 3; index += 1) {
+      await logSignIn(remote("203.0.113.9"), { email: `guess${index}@example.com`, step: "password", outcome: "failed" });
+    }
+    expect((await remotePauseStatus()).paused).toBe(false);
+    for (let index = 0; index < PAUSE_AFTER_FAILURES; index += 1) {
+      await logSignIn(remote(`2001:db8:5:7:${index.toString(16)}::1`), { email: `v6guess${index}@example.com`, step: "password", outcome: "failed" });
+    }
+    expect((await remotePauseStatus()).paused).toBe(false);
+    // Failures from enough different sources still pause it.
+    for (let index = 0; index < PAUSE_MIN_SOURCES; index += 1) {
+      await logSignIn(remote(`198.51.100.${index + 1}`), { email: "spread@example.com", step: "password", outcome: "failed" });
+    }
+    expect((await remotePauseStatus()).paused).toBe(true);
+  });
+
+  it("counts an IPv6 address by its /64 and an IPv4 address on its own", () => {
+    expect(failureSource("2001:db8:5:7:a::1")).toBe("2001:db8:5:7::/64");
+    expect(failureSource("2001:0db8:0005:0007:ffff:1:2:3")).toBe("2001:db8:5:7::/64");
+    expect(failureSource("2001:db8::1")).toBe("2001:db8:0:0::/64");
+    expect(failureSource("::ffff:203.0.113.4")).toBe("203.0.113.4");
+    expect(failureSource("203.0.113.4")).toBe("203.0.113.4");
+    expect(failureSource(null)).toBe("unknown");
+  });
+
+  it(`${PAUSE_AFTER_FAILURES} failed sign-ins through remote access, from any logins and several addresses, pause it for an hour and email the server admins`, async () => {
     await fail(PAUSE_AFTER_FAILURES - 1);
     expect((await remotePauseStatus()).paused).toBe(false);
     await expect(assertRemoteAllowed(remote().headers)).resolves.toBeUndefined();

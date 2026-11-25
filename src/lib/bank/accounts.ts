@@ -7,6 +7,7 @@ import { parseIsoDate } from "@/lib/dates";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { convertAtRate, foreignAccountState, type ForeignOpeningBalance, defaultRates, lastRateOnOrBefore, type RateUsed } from "@/lib/ledger/foreign";
+import { assertPostingDateAllowed } from "@/lib/ledger/period-controls";
 import { currencyMinorUnits } from "@/lib/money/currency";
 import { add, dec, mulDiv, toFixedString, ZERO_DECIMAL } from "@/lib/money/decimal";
 import { optionalString, requireId, requireOneOf } from "@/lib/validation";
@@ -666,7 +667,8 @@ export async function lockStatementLine(tx: OrgTx, lineId: string): Promise<Stat
 
 /**
  * Excludes an unreconciled line (e.g. a duplicate) or brings an excluded one
- * back (example BK12). Reconciled lines can't be excluded.
+ * back (example BK12). Reconciled lines can't be excluded, nor lines dated
+ * in a locked period (BKF7).
  */
 export async function setStatementLineExcluded(tx: OrgTx, lineIdInput: unknown, excluded: boolean): Promise<StatementLine> {
   const lineId = requireId(lineIdInput, "lineId");
@@ -677,6 +679,8 @@ export async function setStatementLineExcluded(tx: OrgTx, lineIdInput: unknown, 
   if (line.status === "deleted") throw new ValidationError("This line's import was deleted.");
   const next = excluded ? "excluded" : "unreconciled";
   if (line.status !== next) {
+    // BKF7: excluding or including a line changes that month's bank reconciliation, so a locked period is refused (as BK13).
+    await assertPostingDateAllowed(tx, line.date);
     await tx.query("update bank_statement_lines set status = $2, updated_at = now() where id = $1", [lineId, next]);
     await writeAuditEvent(tx, {
       eventType: excluded ? "statement_line.excluded" : "statement_line.included",

@@ -323,6 +323,19 @@ export function sameForeign(line: { foreign: ForeignAmount | null }): { foreign?
   return line.foreign ? { foreign: line.foreign } : {};
 }
 
+/**
+ * A reversal built by Tohyee keeps the original's custom fields, on the
+ * journal and on each line (lines in the same order), so a report filtered
+ * by one shows the undo beside what it undoes (BKF8).
+ */
+export function withOriginalCustomFields(body: JournalBody, original: Pick<JournalWithLines, "customFields" | "lines">): JournalBody {
+  return {
+    ...body,
+    customFields: original.customFields,
+    lines: body.lines.map((line, index) => ({ ...line, customFields: original.lines[index]?.customFields ?? {} })),
+  };
+}
+
 type PostOptions = {
   origin: JournalOrigin;
   relatedJournalId?: string | null;
@@ -849,37 +862,32 @@ export async function getJournalDetails(tx: OrgTx, journalIdInput: unknown) {
     journal,
     parentJournal: parent,
     correctionJournals,
-    canCorrect: canBeCorrected(journal, reversedBy !== null),
+    canCorrect: reversedBy === null && (await correctableAsManual(tx, journal)),
   };
 }
 
-function canBeCorrected(journal: Journal, alreadyReversed: boolean): boolean {
-  return (
-    !alreadyReversed &&
-    journal.correctionKind !== "reversal" &&
-    journal.origin !== "inventory" &&
-    journal.origin !== "fx_revaluation" &&
-    journal.origin !== "invoice" &&
-    journal.origin !== "customer_payment" &&
-    journal.origin !== "customer_payment_batch" &&
-    journal.origin !== "supplier_payment_batch" &&
-    journal.origin !== "bill" &&
-    journal.origin !== "supplier_payment" &&
-    journal.origin !== "sales_credit_note" &&
-    journal.origin !== "sales_credit_note_refund" &&
-    journal.origin !== "supplier_credit_note" &&
-    journal.origin !== "supplier_credit_note_refund" &&
-    journal.origin !== "customer_overpayment_refund" &&
-    journal.origin !== "bank_transaction" &&
-    journal.origin !== "bank_transfer" &&
-    journal.origin !== "expense_claim" &&
-    journal.origin !== "expense_claim_payment" &&
-    journal.origin !== "fixed_asset_depreciation" &&
-    journal.origin !== "fixed_asset_disposal" &&
-    journal.origin !== "opening_balance" &&
-    journal.origin !== "payroll" &&
-    journal.origin !== "spreading"
-  );
+/**
+ * Only manual journals are corrected in the ledger ("Edit this journal"),
+ * as the bulk void and the AI's correction do: a manual journal, or the
+ * replacement from correcting one (following each replacement back to the
+ * journal it replaced). Everything else was posted by a record (a document,
+ * a payment, a recode, a livestock valuation, imported history, ...) and is
+ * corrected there, so the record and the ledger stay in step (BKF4).
+ */
+async function correctableAsManual(tx: OrgTx, journal: Journal): Promise<boolean> {
+  let current: Pick<Journal, "origin" | "correctionKind" | "relatedJournalId"> = journal;
+  for (let step = 0; step < 1000; step += 1) {
+    if (current.origin === "manual") return current.correctionKind === null;
+    if (current.origin !== "correction" || current.correctionKind !== "replacement" || !current.relatedJournalId) return false;
+    const parent = await tx.query<{ origin: string; correction_kind: string | null; related_journal_id: string | null }>(
+      "select origin, correction_kind, related_journal_id::text from ledger_journals where id = $1",
+      [current.relatedJournalId],
+    );
+    const row = parent.rows[0];
+    if (!row) return false;
+    current = { origin: row.origin as JournalOrigin, correctionKind: row.correction_kind as CorrectionKind | null, relatedJournalId: row.related_journal_id };
+  }
+  return false;
 }
 
 /**
@@ -1007,7 +1015,7 @@ export async function correctJournal(
       `Journal #${original.id} was posted by a transfer between bank accounts (${original.reference}), so it can't be corrected in the ledger. To undo it, void the transfer.`,
     );
   }
-  // These match canBeCorrected: the screen hid the button, but the API let them through.
+  // Friendly reasons for the records that post journals; correctableAsManual below is the rule.
   if (original.origin === "expense_claim" || original.origin === "expense_claim_payment") {
     throw new ValidationError(
       `Journal #${original.id} was posted by ${original.origin === "expense_claim" ? "an expense claim" : "an expense claim payment"} (${original.reference}), so it can't be corrected in the ledger (EC12). To undo it, void the ${original.origin === "expense_claim" ? "claim" : "payment"}.`,
@@ -1038,8 +1046,29 @@ export async function correctJournal(
       `Journal #${original.id} posted the opening balances (${original.reference}), so it can't be corrected like a manual journal (IM6).`,
     );
   }
+  if (original.origin === "recode") {
+    throw new ValidationError(
+      `Journal #${original.id} moved a document line to another account (${original.reference}), so it can't be corrected in the ledger. To change the account again, recode the line on its document.`,
+    );
+  }
+  if (original.origin === "livestock_valuation" || original.origin === "livestock_rations") {
+    throw new ValidationError(
+      `Journal #${original.id} was posted by ${original.origin === "livestock_valuation" ? "a livestock valuation" : "a livestock rations adjustment"} (${original.reference}), so it can't be corrected in the ledger. Change or void it under Livestock.`,
+    );
+  }
+  if (original.origin === "history") {
+    throw new ValidationError(
+      `Journal #${original.id} was brought in with imported history (${original.reference}), so it stays as it was in the old system. To change the figures, post a manual journal.`,
+    );
+  }
   if (original.correctionKind === "reversal") {
     throw new ValidationError("A reversal can't itself be corrected. Correct the replacement journal instead.");
+  }
+  // BKF4: whatever the origin, only a manual journal (or a replacement from correcting one) is corrected here.
+  if (!(await correctableAsManual(tx, original))) {
+    throw new ValidationError(
+      `Journal #${original.id} isn't a manual journal or the replacement from correcting one, so it can't be corrected in the ledger. Correct or undo it where it was made.`,
+    );
   }
 
   const commandSource = `correction:${source}`;

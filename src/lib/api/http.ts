@@ -146,7 +146,7 @@ export async function withCrm<T>(
   const people = await loadMemberNames(membership.organisation.id);
   const result = await withOrganisationTransaction(
     membership.organisation,
-    { userId: auth.user.id, email: auth.user.email },
+    { userId: auth.user.id, email: auth.user.email, role: membership.role },
     async (tx) => work(tx, { auth, membership, scope: await crmScope(tx, membership.role, auth.user.id) }),
     { people },
   );
@@ -269,7 +269,8 @@ export async function withOrganisationRunner<T>(
   const membership = await requireOrganisationRole(auth, organisationId, minimumRole);
   assertDemoAllows(request, membership.organisation);
   const people = await loadMemberNames(membership.organisation.id);
-  const actor = { userId: auth.user.id, email: auth.user.email };
+  // The role goes with every transaction, so services that check it see the person's real role.
+  const actor = { userId: auth.user.id, email: auth.user.email, role: membership.role };
   const run: OrgRunner = (each) => withOrganisationTransaction(membership.organisation, actor, each, { people });
   return addPersonNames(await work(run), people);
 }

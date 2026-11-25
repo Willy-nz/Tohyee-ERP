@@ -1,11 +1,15 @@
 import { writeAuditEvent } from "@/lib/audit";
-import { BoxError, type BoxTarget, callBox, CertificateChangedError } from "@/lib/camera-postbox/client";
+import { BoxError, type BoxTarget, callBox, CertificateChangedError, setBoxAddressCheck } from "@/lib/camera-postbox/client";
 import { decodePairingCode, displayFingerprint, hashToken, loginsVersion, newKeyPair, type PairingCode, type PushedLogin, randomToken } from "@/lib/camera-postbox/protocol";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, UnavailableError, ValidationError } from "@/lib/errors";
+import { assertOrganisationMayReach } from "@/lib/network/organisation-reach";
 import { decryptSecret, encryptSecret } from "@/lib/secrets";
 import { requireSecurity } from "@/lib/security-cameras/access";
 import packageJson from "../../../package.json";
+
+// An organisation's pairing code says where its post box is: checked like any address an organisation gives (L7).
+setBoxAddressCheck((host) => assertOrganisationMayReach(host, "a camera post box"));
 
 /*
  * The camera post box, Tohyee's side. Pairing, the

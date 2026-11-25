@@ -8,7 +8,7 @@ import { writeAuditEvent } from "@/lib/audit";
 import { FEED_ACTOR } from "@/lib/bank/akahu/sync";
 import { bankFilesFolderStatus, organisationBankFilesFolder, resolveSubfolder } from "@/lib/bank/file-folders";
 import { MAX_STATEMENT_FILE_BYTES } from "@/lib/bank/formats";
-import { importStatementFromFeed } from "@/lib/bank/imports";
+import { type FeedImportResult, importStatementFromFeed } from "@/lib/bank/imports";
 import { reportMailboxToken } from "@/lib/crm/mail/service";
 import { requireCrm } from "@/lib/crm/switch";
 import { type Actor, type OrgTx, withOrganisationTransaction } from "@/lib/db/org-transaction";
@@ -366,12 +366,14 @@ async function takeItem(
     if (seen.rowCount) return { result: "seen" as const, linesAdded: 0 };
     const outcome = tooLarge
       ? { result: "failed" as const, reason: "The file is larger than 10 MB. Split it into smaller date ranges.", linesAdded: 0, importId: null }
-      : await importStatementFromFeed(tx, row.account_id, {
-          fileName: item.name,
-          bytes: bytes!,
-          feed: row.kind,
-          key: `${row.account_id}:${createHash("sha256").update(`${location}\u0000${item.key}\u0000${hash}`).digest("hex")}`,
-        });
+      : await importOrFail(tx, () =>
+          importStatementFromFeed(tx, row.account_id, {
+            fileName: item.name,
+            bytes: bytes!,
+            feed: row.kind,
+            key: `${row.account_id}:${createHash("sha256").update(`${location}\u0000${item.key}\u0000${hash}`).digest("hex")}`,
+          }),
+        );
     await tx.query(
       `insert into bank_file_feed_seen (account_id, location, item_key, content_hash, result, reason, import_id, lines_added)
        values ($1, $2, $3, $4, $5, $6, $7, $8)`,
@@ -379,6 +381,27 @@ async function takeItem(
     );
     return { result: outcome.result, linesAdded: outcome.linesAdded };
   });
+}
+
+type ImportOutcome = FeedImportResult;
+
+/**
+ * SPF11: a file that fails to import in a way Tohyee didn't expect (a
+ * database refusal, say) counts as a failed file with a plain reason, so
+ * the feed goes on to the next file instead of stopping at this one.
+ */
+async function importOrFail(tx: OrgTx, work: () => Promise<ImportOutcome>): Promise<ImportOutcome> {
+  await tx.query("savepoint bank_file_feed_item");
+  try {
+    const outcome = await work();
+    await tx.query("release savepoint bank_file_feed_item");
+    return outcome;
+  } catch (error) {
+    await tx.query("rollback to savepoint bank_file_feed_item");
+    await tx.query("release savepoint bank_file_feed_item");
+    const detail = error instanceof Error ? error.message : String(error);
+    return { result: "failed", reason: `Tohyee couldn't import this file (${detail}). The other files are still read.`, linesAdded: 0, importId: null };
+  }
 }
 
 /** The statement files in a folder feed's subfolder, oldest first (by modified time, then name). */
@@ -490,10 +513,16 @@ async function checkMailbox(organisation: OrganisationRecord, actor: Actor, row:
   let files = 0;
   for await (const message of messages) {
     if (done.has(message.id)) continue;
+    // Statement lines only come from mail whose sender the mail service vouched for; anything else is held for a person.
+    const held = message.senderCheck === "pass" ? null : heldReason(message.senderCheck ?? "unknown", message.from ?? null);
     for (const attachment of message.attachments) {
       if (!STATEMENT_FILE.test(attachment.name)) continue;
       if (files >= MAX_FEED_FILES_PER_CHECK) return;
       files += 1;
+      if (held) {
+        await holdAttachment(organisation, actor, row, `${message.id}/${attachment.name}`, held);
+        continue;
+      }
       await take({ key: `${message.id}/${attachment.name}`, name: attachment.name, size: attachment.size, read: attachment.read });
     }
     // The message is done: it isn't read again, even if it had no statement files.
@@ -506,6 +535,25 @@ async function checkMailbox(organisation: OrganisationRecord, actor: Actor, row:
     );
     done.add(message.id);
   }
+}
+
+/** Why a statement file from this email wasn't read, in words for the feed's last-check details. */
+export function heldReason(check: "fail" | "unknown", from: string | null): string {
+  const who = from ? ` (${from.slice(0, 200)})` : "";
+  return check === "fail"
+    ? `Not imported: the mail service couldn't confirm this email really came from its sender${who}. If it's from your bank, import the file by hand.`
+    : `Not imported: the mail service gave no check of who sent this email${who}. If it's from your bank, import the file by hand.`;
+}
+
+/** Records a statement file that wasn't read because its email's sender wasn't confirmed. */
+async function holdAttachment(organisation: OrganisationRecord, actor: Actor, row: FeedRow, key: string, reason: string): Promise<void> {
+  await withOrganisationTransaction(organisation, actor, (tx) =>
+    tx.query(
+      `insert into bank_file_feed_seen (account_id, location, item_key, content_hash, result, reason, lines_added)
+       values ($1, $2, $3, $4, 'failed', $5, 0) on conflict do nothing`,
+      [row.account_id, locationOf(row), key, createHash("sha256").update(`held\u0000${key}`).digest("hex"), reason.slice(0, MAX_ERROR)],
+    ),
+  );
 }
 
 let running = false;

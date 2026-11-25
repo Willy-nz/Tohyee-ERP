@@ -1,6 +1,7 @@
 import { ImapFlow, type ImapFlowOptions, type FetchMessageObject, type MessageStructureObject } from "imapflow";
 import type { Readable } from "node:stream";
 import { providerFetch, type MailProvider } from "@/lib/crm/mail/providers";
+import { authenticationResultsFrom, type SenderCheck, senderCheck } from "@/lib/email/sender-check";
 import { UnavailableError, ValidationError } from "@/lib/errors";
 import { checkMailHost } from "./mail-host";
 import { MAX_ATTACHMENT_BYTES } from "./report-email-files";
@@ -22,6 +23,8 @@ export type ReportMessage = {
   subject?: string | null;
   /** The start of the message's text, when the mailbox gives it (Gmail's snippet, Microsoft's body preview); leads from email use it. */
   preview?: string | null;
+  /** Whether the receiving mail service found the sender to be who the From line says (src/lib/email/sender-check.ts). */
+  senderCheck?: SenderCheck;
 };
 
 /** A header value cut to a sensible length, without control characters. */
@@ -233,6 +236,10 @@ export async function* reportMessages(provider: MailProvider, token: string, fol
             from: gmailHeader(message.payload, "from"),
             subject: gmailHeader(message.payload, "subject"),
             preview: headerText(message.snippet, 2000),
+            senderCheck: senderCheck(
+              (message.payload?.headers ?? []).filter((header) => header.name?.toLowerCase() === "authentication-results").map((header) => header.value ?? ""),
+              gmailHeader(message.payload, "from"),
+            ),
           };
         });
       }
@@ -250,8 +257,9 @@ export async function* reportMessages(provider: MailProvider, token: string, fol
     subject?: string;
     bodyPreview?: string;
     from?: { emailAddress?: { name?: string; address?: string } };
+    internetMessageHeaders?: { name?: string; value?: string }[];
   }>(
-    `${folder}/messages?$top=100&$select=id,receivedDateTime,hasAttachments,subject,from,bodyPreview&$orderby=receivedDateTime%20asc`, token,
+    `${folder}/messages?$top=100&$select=id,receivedDateTime,hasAttachments,subject,from,bodyPreview,internetMessageHeaders&$orderby=receivedDateTime%20asc`, token,
   )) {
     for (const message of page) {
       if (skip(message.id)) continue;
@@ -282,6 +290,10 @@ export async function* reportMessages(provider: MailProvider, token: string, fol
         from: headerText(sender?.name && sender.address ? `${sender.name} <${sender.address}>` : (sender?.address ?? sender?.name)),
         subject: headerText(message.subject, 1000),
         preview: headerText(message.bodyPreview, 2000),
+        senderCheck: senderCheck(
+          (message.internetMessageHeaders ?? []).filter((header) => header.name?.toLowerCase() === "authentication-results").map((header) => header.value ?? ""),
+          sender?.address,
+        ),
       };
       });
     }
@@ -296,7 +308,7 @@ type ImapClient = {
   list: () => Promise<{ path: string; name: string; flags: Set<string> }[]>;
   mailbox: false | { uidValidity: bigint; exists: number };
   getMailboxLock: (folder: string, options: { readOnly: boolean; acquireTimeout: number }) => Promise<{ release: () => void }>;
-  fetch: (range: string, query: { uid: boolean; internalDate: boolean; size: boolean; bodyStructure: boolean; envelope?: boolean }) => AsyncIterable<FetchMessageObject>;
+  fetch: (range: string, query: { uid: boolean; internalDate: boolean; size: boolean; bodyStructure: boolean; envelope?: boolean; headers?: string[] }) => AsyncIterable<FetchMessageObject>;
   download: (uid: string, part: string, options: { uid: boolean; maxBytes: number }) => Promise<{ content?: Readable; meta?: { encoding?: string } }>;
 };
 type ImapFactory = (options: ImapFlowOptions) => ImapClient;
@@ -433,7 +445,7 @@ export async function* imapReportMessages(credentials: ImapCredentials, folderId
     for (let start = 1; start <= count; start += 100) {
       // Finish each FETCH before yielding: ImapFlow cannot issue a download while FETCH is active.
       const page: FetchMessageObject[] = [];
-      for await (const message of client.fetch(`${start}:${Math.min(start + 99, count)}`, { uid: true, internalDate: true, size: true, bodyStructure: true, envelope: true })) {
+      for await (const message of client.fetch(`${start}:${Math.min(start + 99, count)}`, { uid: true, internalDate: true, size: true, bodyStructure: true, envelope: true, headers: ["authentication-results"] })) {
         if (page.length >= 100) throw new ValidationError("The IMAP mailbox returned too many messages in one page.");
         page.push(message);
       }
@@ -450,6 +462,7 @@ export async function* imapReportMessages(credentials: ImapCredentials, folderId
             attachments,
             from: headerText(sender?.name && sender.address ? `${sender.name} <${sender.address}>` : (sender?.address ?? sender?.name)),
             subject: headerText(message.envelope?.subject, 1000),
+            senderCheck: senderCheck(authenticationResultsFrom(message.headers ? message.headers.toString("utf8") : ""), sender?.address),
           };
         });
       }

@@ -296,7 +296,7 @@ describeWithDatabase("one transaction split across several statement lines", () 
     await world.importFile("Date,Amount,Payee\n25/05/2026,300.00,KORU LTD\n");
     const full = await world.lineOn("300.00");
     const after = await world.asUser(viewer, (tx) => confidentMatches(tx, world.bank.id));
-    expect(after).toEqual([{ lineId: full.id, suggestion: null, candidateCount: 0, competing: false }]);
+    expect(after).toEqual([{ lineId: full.id, suggestion: null, candidateCount: 0, competing: false, possibleDuplicate: false }]);
 
     const journals = await world.journalCount();
     const coded = await cashCodeStatementLines(world.run, world.bank.id, {

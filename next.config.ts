@@ -9,8 +9,9 @@ import { securityHeaderRules } from "./src/lib/office/csp";
  * images only come from Tohyee, data:/blob: URLs and LINZ's aerial tiles (the
  * Farming map, src/lib/farming/geometry.ts), so injected markup can't send
  * data elsewhere through a form or an image address. Scripts
- * aren't limited yet: the theme script and Next's own page data are inline,
- * and need a nonce first. The one exception is the PowerPoint add-in's slide
+ * aren't limited by this policy yet: a nonce-based script policy is sent
+ * report-only by src/proxy.ts (see src/lib/security/script-policy.ts) until
+ * every page is checked with it. The one exception is the PowerPoint add-in's slide
  * page, which Office frames: see src/lib/office/csp.ts.
  */
 
