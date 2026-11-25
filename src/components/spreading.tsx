@@ -19,6 +19,7 @@ import type { SpreadExplain } from "@/lib/spreading/explain";
 import type { MonthPreview } from "@/lib/spreading/runs";
 import type { SpreadItem, SpreadWorksheet } from "@/lib/spreading/service";
 import { AddItem } from "./spreading-add";
+import { SpreadingSuggestions } from "./spreading-suggestions";
 import { downloadFile, isAccrual, KIND_HELP, type Send } from "./spreading-shared";
 import { ItemTagInputs, ItemTagsText, type TagSetups, useTagSetups } from "./spreading-tags";
 import styles from "./spreading.module.css";
@@ -137,6 +138,7 @@ export function Spreading({ organisationId }: { organisationId: string }) {
     <>
       {message ? <Notice tone="success">{message}</Notice> : null}
       {error ? <Notice tone="error">{error}</Notice> : null}
+      <SpreadingSuggestions organisationId={organisationId} canEdit={can("bookkeeper")} busy={busy} send={send} />
       <div className={ui.tabs} role="tablist" aria-label="Kinds">
         {SPREAD_KINDS.map((each) => {
           const open = worksheet.items.filter((item) => item.kind === each && !item.finished).length;

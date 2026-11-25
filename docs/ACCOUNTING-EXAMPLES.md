@@ -23438,7 +23438,7 @@ dropdown.
 - **APS10** A name that isn't a salesperson shows **0.00** everywhere,
   never the whole report.
 
-## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW25; planned with the owner 23 Nov 2026, built by Claude; the rules were summarised to the owner, who accepted them on 24 Nov 2026)
+## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW28; planned with the owner 23 Nov 2026, built by Claude; the rules SW1-SW25 were summarised to the owner, who accepted them on 24 Nov 2026; SW26-SW28 are not yet reviewed)
 
 Income or a cost often belongs to other months than the one it was billed
 or paid in. The Spreading worksheet replaces the spreadsheet kept for that.
@@ -23622,6 +23622,54 @@ added when Spreading is turned on.
   income and expense lines stops the month until the item has one, and the
   preview names the item. Months already posted keep what they were posted
   with.
+- **SW26 Suggested: a line that says its period** (25 Nov 2026; the owner
+  asked Claude to add what it thought best; following common practice, not
+  yet reviewed). The worksheet shows a Suggested card of things Tohyee has
+  noticed. Nothing is added until someone presses Add, and what's added is
+  an ordinary item that can be changed or removed like any other. Approved
+  bills, approved invoices and posted spend and receive money from the
+  last four months are read, a line at a time, for words that say the line
+  covers more than a month:
+  - A written range: a bill of 10 Nov 2026 with the line "Farm insurance
+    1 Dec 2026 to 30 Nov 2027", 2,400.00, is suggested as paid in advance
+    from 1 Dec 2026 to 30 Nov 2027, twelve months. Add does "Spread this"
+    (SW15) with those dates: 200.00 a month. Dates are read day first
+    ("3/4/26" is 3 April). "Jul 2026 to Jun 2027" is the first of July to
+    the last of June. A start with no year takes the end's year, or the
+    year before when its month comes later ("1 July to 30 June 2027"
+    starts 1 July 2026).
+  - A length, counted from the document's own date: "Annual software
+    licence" on 10 Nov 2026 is 10 Nov 2026 to 9 Nov 2027; "12 months
+    hosting" on 15 Mar 2026 ends 14 Mar 2027; "Quarterly lease" on 12 Nov
+    2026 ends 11 Feb 2027, three months. A written range wins over a
+    length.
+  - Nothing is suggested when the words don't say ("Diesel", "Monthly
+    retainer"), when the period is a month or less, when it's backwards or
+    isn't a real date, or when the line couldn't be spread anyway (not
+    approved, foreign currency, not an income or expense account, already
+    on the worksheet). The words that were read are shown beside the
+    suggestion, because they can mislead: "Annual leave payout" reads as a
+    year.
+- **SW27 Suggested: a regular bill that hasn't come.** The month looked at
+  is the one being closed: the month after the last one posted for costs
+  not billed yet (never later than this month), or last month when none
+  has been posted. A supplier is regular for an expense account when
+  approved bills put something on it in each of the three months before.
+  If nothing from them is on it in the month looked at, the average of
+  those three months is suggested as not billed yet. Meridian billed power
+  410.00 in August, 395.00 in September and 427.50 in October, and nothing
+  dated in November: the suggestion is **410.83** for November. Add makes
+  a one-month accrual for the supplier (SW6), and "bill arrived" settles
+  it as usual (SW20). A supplier who missed one of the three months
+  isn't regular. Once the November bill is approved, or an accrual for
+  that supplier and account already covers November, nothing is
+  suggested. Bills only; base currency only.
+- **SW28 Not this one.** A bookkeeper can dismiss a suggestion and it
+  doesn't come back. Only that is kept (the suggestion's key, who and
+  when); nothing in the books changes, and the line can still be spread by
+  hand. An accrual suggestion is for one month, so next month's is a new
+  one. AI keys read the same suggestions (`get_spreading_suggestions`),
+  add them with the ordinary tool, and can dismiss one.
 
 ## Where Shopify orders go (SHP1-SHP5; 23 Nov 2026; following common practice, not yet reviewed)
 

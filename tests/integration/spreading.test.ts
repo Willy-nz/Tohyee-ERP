@@ -8,6 +8,8 @@ import * as linesRoute from "@/app/api/spreading/lines/route";
 import * as worksheetRoute from "@/app/api/spreading/route";
 import * as undoRoute from "@/app/api/spreading/runs/[runId]/undo/route";
 import * as settingsRoute from "@/app/api/spreading/settings/route";
+import * as dismissRoute from "@/app/api/spreading/suggestions/dismiss/route";
+import * as suggestionsRoute from "@/app/api/spreading/suggestions/route";
 import { createAccount } from "@/lib/accounts/service";
 import type { SessionUser } from "@/lib/auth/sessions";
 import { listBankAccounts } from "@/lib/bank/accounts";
@@ -41,6 +43,7 @@ import {
 import { explainSpreadDifference } from "@/lib/spreading/explain";
 import { importSpreadItems, monthJournalFile, worksheetFile } from "@/lib/spreading/files";
 import { listSourceLines } from "@/lib/spreading/sources";
+import { listSpreadSuggestions } from "@/lib/spreading/suggestions";
 import { apiRequest, createTestOrganisation, createTestUser, describeWithDatabase, inOrganisation, key, sessionCookieFor, startTestServer, type TestServer } from "../helpers/test-server";
 
 const noContext = undefined as unknown;
@@ -711,6 +714,85 @@ describeWithDatabase("spreading", () => {
     const after = await w.as((tx) => explainSpreadDifference(tx, "accrued_expense"));
     expect(after).toMatchObject({ outsideTotal: "-920.00", expectedTotal: "-920.00", difference: "0.00" });
     expect((await w.tie("accrued_expense")).difference).toBe("0.00");
+  });
+
+  it("SW26-SW28: suggestions: a line that says its period, a regular bill that hasn't come, and not this one", async () => {
+    const w = await setup();
+    const today = "2026-11-25";
+    const supplier = async (name: string) => (await w.as((tx) => createContact(tx, { idempotencyKey: key("contact"), name, isSupplier: true }))).contact;
+    const bill = async (contactId: string, billDate: string, number: string, lines: Array<{ description: string; unitPrice: string; accountCode: string }>) => {
+      const made = (await w.as((tx) => createBill(tx, { idempotencyKey: key("bill"), contactId, billDate, dueDate: billDate, supplierInvoiceNumber: number, amountsMode: "exclusive", lines: lines.map((line) => ({ ...line, quantity: "1", taxCode: "NONE" })) }))).bill;
+      await w.as((tx) => approveBill(tx, made.id, { idempotencyKey: key("approve") }));
+      return made;
+    };
+    const suggestions = () => w.as((tx) => listSpreadSuggestions(tx, today));
+    await w.as((tx) => createAccount(tx, { code: "6470", name: "Power and fuel", accountType: "expense" }));
+    const fmg = await supplier("FMG");
+    const power = await supplier("Meridian");
+    const fuel = await supplier("Fuel Co");
+
+    // SW26: the insurance line says its period; the diesel line says nothing.
+    const insurance = await bill(fmg.id, "2026-11-10", "INS-900", [
+      { description: "Farm insurance 1 Dec 2026 to 30 Nov 2027", unitPrice: "2400.00", accountCode: "6080" },
+      { description: "Diesel", unitPrice: "150.00", accountCode: "6470" },
+    ]);
+    // SW27: power every month from August to October, and nothing in November. Fuel missed September, so it isn't regular.
+    for (const [month, amount] of [["08", "410.00"], ["09", "395.00"], ["10", "427.50"]]) await bill(power.id, `2026-${month}-20`, `PWR-${month}`, [{ description: "Electricity", unitPrice: amount, accountCode: "6470" }]);
+    for (const month of ["08", "10"]) await bill(fuel.id, `2026-${month}-05`, `FUEL-${month}`, [{ description: "Fuel", unitPrice: "300.00", accountCode: "6470" }]);
+    // The months to October are posted, so November is the one being closed.
+    await w.post("accrued_expense", "2026-10");
+
+    const first = await suggestions();
+    expect(first.month).toBe("2026-11");
+    const insuranceLine = (await w.as((tx) => listSourceLines(tx, "bill", insurance.id)))[0];
+    expect(first.lines).toEqual([
+      expect.objectContaining({
+        key: `line:bill:${insuranceLine.lineId}`, kind: "prepayment", label: "Bill INS-900 from FMG", amount: "2400.00", accountCode: "6080",
+        startDate: "2026-12-01", endDate: "2027-11-30", months: 12, because: "1 Dec 2026 to 30 Nov 2027",
+      }),
+    ]);
+    expect(first.accruals).toEqual([
+      expect.objectContaining({
+        contactName: "Meridian", accountCode: "6470", month: "2026-11", amount: "410.83",
+        history: [{ month: "2026-08", amount: "410.00" }, { month: "2026-09", amount: "395.00" }, { month: "2026-10", amount: "427.50" }],
+      }),
+    ]);
+    // Looking changes nothing.
+    expect((await w.worksheet()).items).toEqual([]);
+
+    // Accepting the line is "Spread this" with the dates it read: the move, and twelve months of 200.00.
+    const spread = await w.add({ billLineId: insuranceLine.lineId, method: "by_month", startDate: first.lines[0].startDate, endDate: first.lines[0].endDate });
+    expect(spread.months.map((row) => row.amount)).toEqual(Array.from({ length: 12 }, () => "200.00"));
+    // Accepting the accrual adds a one-month estimate for the supplier.
+    const accrual = first.accruals[0];
+    const estimate = await w.add({ kind: "accrued_expense", description: accrual.description, amount: accrual.amount, targetAccountCode: accrual.accountCode, method: "one_month", month: accrual.month, contactId: accrual.contactId });
+    expect(estimate.description).toBe("Power and fuel, Meridian, Nov 2026 (no bill yet)");
+    expect(estimate.months.map((row) => [row.month, row.amount])).toEqual([["2026-11", "410.83"]]);
+    // Once they're on the worksheet they aren't suggested again.
+    expect(await suggestions()).toMatchObject({ lines: [], accruals: [] });
+
+    // SW27: when the bill is there, there's nothing to accrue.
+    await w.as((tx) => removeSpreadItem(tx, estimate.id));
+    expect((await suggestions()).accruals).toHaveLength(1);
+    await bill(power.id, "2026-11-22", "PWR-11", [{ description: "Electricity", unitPrice: "402.00", accountCode: "6470" }]);
+    expect((await suggestions()).accruals).toEqual([]);
+
+    // SW28: "Not this one" keeps a suggestion away; only bookkeepers, and only real suggestions.
+    const rent = await bill(fmg.id, "2026-11-12", "RENT-1", [{ description: "Quarterly lease", unitPrice: "900.00", accountCode: "6470" }]);
+    const rentLine = (await w.as((tx) => listSourceLines(tx, "bill", rent.id)))[0];
+    expect((await suggestions()).lines).toEqual([expect.objectContaining({ key: `line:bill:${rentLine.lineId}`, startDate: "2026-11-12", endDate: "2027-02-11", months: 3, because: "Quarterly" })]);
+    const cookie = async (user: SessionUser) => sessionCookieFor(user);
+    const dismiss = async (user: SessionUser, suggestionKey: string) =>
+      (await dismissRoute.POST(apiRequest("/api/spreading/suggestions/dismiss", { method: "POST", cookie: await cookie(user), body: { organisationId: w.org, key: suggestionKey } }), noContext)).status;
+    expect(await dismiss(viewer, `line:bill:${rentLine.lineId}`)).toBe(403);
+    expect(await dismiss(aroha, "line:bill:1; drop table bills")).toBe(400);
+    expect(await dismiss(aroha, `line:bill:${rentLine.lineId}`)).toBe(200);
+    expect(await dismiss(aroha, `line:bill:${rentLine.lineId}`)).toBe(200);
+    const seen = await suggestionsRoute.GET(apiRequest(`/api/spreading/suggestions?organisationId=${w.org}`, { cookie: await cookie(viewer) }), noContext);
+    expect(seen.status).toBe(200);
+    expect(((await seen.json()) as { suggestions: { lines: unknown[] } }).suggestions.lines).toEqual([]);
+    // The line itself can still be spread by hand.
+    expect((await w.as((tx) => listSourceLines(tx, "bill", rent.id)))[0].reason).toBeNull();
   });
 
   it("the AI tools do what the screen does, and the undos confirm first", async () => {
