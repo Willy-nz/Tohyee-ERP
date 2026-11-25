@@ -12,6 +12,8 @@ import { add, cmp, dec, type Decimal, isPositive, isZero, parseDecimalInput, sub
 import { accountTotals, financialYearEndMonth, naturalAmount } from "@/lib/reports/financial";
 import { assetAdjustments, listTaxAssets, type TaxAsset } from "@/lib/tax/income/assets";
 import { buildIca, type Ica } from "@/lib/tax/income/ica";
+import { type LeaveAddBack, leaveAddBackNotes } from "@/lib/tax/income/leave-add-back";
+import { loadLeaveAddBack } from "@/lib/tax/income/leave-add-back-load";
 import { ir3Return, type Ir3Return } from "@/lib/tax/income/ir3";
 import { ir4Return, type Ir4Return } from "@/lib/tax/income/ir4";
 import { buildIr10, type Ir10 } from "@/lib/tax/income/ir10";
@@ -36,6 +38,7 @@ import {
   effectiveDate,
   type Payment,
   standardSchedule,
+  taxRatesNote,
   TAXPAYER_TYPES,
   TAXPAYER_TYPE_LABELS,
   type TaxpayerType,
@@ -580,6 +583,8 @@ export type IncomeTaxReport =
       /** An individual's: the excess imputation credits Tohyee works out for last year, to check against IRD's letter (ITX65). */
       lastYearExcessImputation: string | null;
       adjustments: TaxAdjustment[];
+      /** Leave owed at balance date and the 63-day rule: a suggestion a person adds as adjustments (TXF4). */
+      leaveAddBack: LeaveAddBack | null;
       payments: TaxPayment[];
       paidTotal: string;
       workpaper: Workpaper;
@@ -691,7 +696,7 @@ async function trustInput(tx: OrgTx, year: number) {
     dateOfDeath: settings.dateOfDeath,
     endMonth,
     yearEnd: incomeYearDates(year, endMonth).end,
-    allocations: years.filter((entry) => isPositive(entry.amount)).map((entry) => ({ beneficiary: entry.beneficiary, amount: entry.amount })),
+    allocations: years.filter((entry) => isPositive(entry.amount)).map((entry) => ({ beneficiary: entry.beneficiary, amount: entry.amount, fromMaoriAuthority: entry.fromMaoriAuthority })),
     trustClass: settings.trustClass,
     years,
   };
@@ -862,7 +867,14 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
         })
       : null;
 
-  const notes: string[] = [];
+  const leaveAddBack = await loadLeaveAddBack(tx, {
+    yearEnd: end,
+    lastYearAdjustments: isSupportedIncomeYear(lastYearNumber) ? await listAdjustments(tx, lastYearNumber) : [],
+    thisYearAdjustments: adjustments,
+  });
+  const notes: string[] = [...leaveAddBackNotes(leaveAddBack)];
+  const ratesNote = taxRatesNote(incomeYear);
+  if (ratesNote) notes.push(ratesNote);
   if (endMonth !== 3) notes.push(`The ${incomeYear} income year runs ${shortDate(start)} to ${shortDate(end)} (IRD SPS 24/01). The provisional tax dates follow the balance date (Income Tax Act 2007 schedule 3).`);
   if (amounts.budgetFrom) {
     const hasBudget = [...amounts.lines.values()].some((line) => !isZero(line.budget));
@@ -946,6 +958,7 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
     interest,
     ica,
     adjustments,
+    leaveAddBack,
     payments,
     paidTotal: money(paid),
     workpaper: paper,

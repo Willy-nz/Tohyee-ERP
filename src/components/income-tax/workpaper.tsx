@@ -12,6 +12,7 @@ import type { IncomeTaxSettings,ReportAccount } from "@/lib/tax/income/service";
 import { TRUST_CLASS_LABELS, TRUST_CLASSES, type TrustClass } from "@/lib/tax/income/trust-return";
 import { TRUST_KIND_LABELS, TRUST_KINDS, type TrustKind } from "@/lib/tax/income/trusts";
 import { Status,Supported,negated } from "@/components/income-tax/shared";
+import { LeaveAddBackPanel } from "@/components/income-tax/leave-add-back";
 
 export function Settings({ organisationId, settings, onSaved }: { organisationId: string; settings: IncomeTaxSettings; onSaved: () => void }) {
   const [type, setType] = useState<TaxpayerType | "">(settings.taxpayerType ?? "");
@@ -336,6 +337,7 @@ export function Workpaper({ organisationId, report, onSaved }: { organisationId:
           ) : null}
         </tbody>
       </table>
+      <LeaveAddBackPanel organisationId={organisationId} report={report} onSaved={onSaved} />
       <form className={ui.inlineForm} onSubmit={add}>
         <Field label="Other adjustment" hint="For example, holiday pay not paid within 63 days. Positive adds to taxable income; negative takes off.">
           <input value={description} onChange={(event) => setDescription(event.target.value)} maxLength={200} required />
