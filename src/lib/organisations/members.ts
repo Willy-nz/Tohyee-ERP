@@ -4,7 +4,7 @@ import type { AuthContext } from "@/lib/auth/guard";
 import { hashPassword } from "@/lib/auth/password";
 import { isRole, type Role, roleAtLeast } from "@/lib/auth/roles";
 import { normaliseEmail, parseDisplayName } from "@/lib/auth/service";
-import { createSetupLink, emailInvitation } from "@/lib/auth/setup-links";
+import { createSetupLink, emailConfirmationInvite, emailInvitation, markSetupLinkEmailed } from "@/lib/auth/setup-links";
 import { coreQuery, type DbClient, withCoreTransaction } from "@/lib/db/transactions";
 import { withOrganisationTransaction } from "@/lib/db/org-transaction";
 import { ForbiddenError, NotFoundError, TooManyRequestsError, ValidationError } from "@/lib/errors";
@@ -22,6 +22,7 @@ import {
 } from "@/lib/organisations/access-window";
 import { getOrganisation, memberAccessCurrentSql } from "@/lib/organisations/registry";
 import { removePayrollAccess, removePayrollAccessOnJoin } from "@/lib/payroll/access";
+import { holdInvitation } from "@/lib/organisations/waiting-members";
 
 export type Member = {
   userId: string;
@@ -155,13 +156,19 @@ export const INVITES_PER_HOUR = 30;
 
 /** What an invitation gives back: the setup link only when it couldn't be emailed. */
 export type InvitationLink = { emailed: boolean; expiresAt: string; url: string | null; localOnly: boolean };
-export type InviteResult = { member: Member; invited: boolean; invitation: InvitationLink | null };
+/**
+ * The person has a login whose email address isn't confirmed yet, so they
+ * weren't added: the invitation waits until they confirm it. The setup link
+ * is never shown here, only emailed.
+ */
+export type WaitingOutcome = { emailed: boolean };
+export type InviteResult = { member: Member | null; invited: boolean; invitation: InvitationLink | null; waiting: WaitingOutcome | null };
 
 async function assertInviteRate(client: DbClient, organisationId: string) {
   const recent = await client.query<{ count: string }>(
     `select count(*)::text as count from admin_audit_events
       where entity_type = 'organisation' and entity_id = $1
-        and event_type in ('organisation.member_added', 'organisation.member_invited', 'organisation.invitation_resent')
+        and event_type in ('organisation.member_added', 'organisation.member_invited', 'organisation.invitation_resent', 'organisation.member_waiting')
         and created_at > now() - interval '1 hour'`,
     [organisationId],
   );
@@ -174,11 +181,13 @@ async function sendInvitation(
   auth: AuthContext,
   organisationId: string,
   person: { email: string; displayName: string },
-  link: { url: string; expiresAt: string; localOnly: boolean },
+  link: { token: string; url: string; expiresAt: string; localOnly: boolean },
   showLinkIfNotEmailed: boolean,
 ): Promise<InvitationLink> {
   const organisation = await getOrganisation(organisationId);
   const emailed = await emailInvitation(person, link, auth.user, organisation?.displayName ?? organisationId);
+  // Emailed and shown to nobody: using it confirms the address is theirs.
+  if (emailed) await markSetupLinkEmailed(link.token);
   return {
     emailed,
     expiresAt: link.expiresAt,
@@ -221,9 +230,35 @@ export async function inviteMember(
     const newUserId = created.rows[0]?.id;
     if (newUserId && !displayName) throw new ValidationError("Enter their name.");
     if (!newUserId) {
-      // They have a login already: added as before, and nothing is sent to it.
-      const existing = await client.query<{ id: string }>("select id from users where email = $1", [email]);
+      const existing = await client.query<{ id: string; confirmed: boolean; is_active: boolean; display_name: string }>(
+        "select id, email_confirmed_at is not null as confirmed, is_active, display_name from users where email = $1 for update",
+        [email],
+      );
       const userId = existing.rows[0].id;
+      if (!existing.rows[0].confirmed) {
+        // Nobody has shown this address is theirs (its setup link was passed on by hand), so the
+        // login may not be theirs: the invitation waits for them to confirm it by email.
+        const already = await client.query("select 1 from organisation_members where organisation_id = $1 and user_id = $2", [organisationId, userId]);
+        if (already.rows[0]) throw new ValidationError(`${email} is already a member. Change their role instead.`);
+        await holdInvitation(client, {
+          organisationId,
+          userId,
+          role,
+          accessStartsAt: windowValues[0],
+          accessEndsAt: windowValues[1],
+          invitedBy: { userId: auth.user.id, email: auth.user.email },
+        });
+        await writeAdminAuditEvent(client, actor, {
+          eventType: "organisation.member_waiting",
+          entityType: "organisation",
+          entityId: organisationId,
+          details: { email, role, userId, reason: "email not confirmed", ...windowDetails },
+        });
+        const link = existing.rows[0].is_active ? await createSetupLink(client, userId, auth.user) : null;
+        return { member: null, link: null, confirm: { link, person: { email, displayName: existing.rows[0].display_name } } };
+      }
+      // They have a login already: added as before, and nothing is sent to it.
+      await client.query("delete from organisation_waiting_members where organisation_id = $1 and user_id = $2", [organisationId, userId]);
       const inserted = await client.query(
         "insert into organisation_members (organisation_id, user_id, role, access_starts_at, access_ends_at) values ($1, $2, $3, $4, $5) on conflict do nothing",
         [organisationId, userId, role, ...windowValues],
@@ -235,7 +270,7 @@ export async function inviteMember(
         entityId: organisationId,
         details: { email, role, ...windowDetails },
       });
-      return { member: await readMember(client, organisationId, userId), link: null };
+      return { member: await readMember(client, organisationId, userId), link: null, confirm: null };
     }
     await writeAdminAuditEvent(client, actor, {
       eventType: "user.created",
@@ -258,11 +293,22 @@ export async function inviteMember(
       details: { email, role, userId: newUserId, ...windowDetails },
     });
     const link = await createSetupLink(client, newUserId, auth.user);
-    return { member: await readMember(client, organisationId, newUserId), link };
+    return { member: await readMember(client, organisationId, newUserId), link, confirm: null };
   });
-  if (!done.link) return { member: done.member, invited: false, invitation: null };
+  if (done.confirm) {
+    const link = done.confirm.link;
+    let emailed = false;
+    if (link) {
+      const organisation = await getOrganisation(organisationId);
+      emailed = await emailConfirmationInvite(done.confirm.person, link, auth.user, organisation?.displayName ?? organisationId);
+      if (emailed) await markSetupLinkEmailed(link.token);
+    }
+    return { member: null, invited: false, invitation: null, waiting: { emailed } };
+  }
+  if (!done.member) throw new Error("inviteMember: no member");
+  if (!done.link) return { member: done.member, invited: false, invitation: null, waiting: null };
   const invitation = await sendInvitation(auth, organisationId, done.member, done.link, true);
-  return { member: done.member, invited: true, invitation };
+  return { member: done.member, invited: true, invitation, waiting: null };
 }
 
 type InvitationRow = { email: string; display_name: string; role: Role; is_active: boolean; other_memberships: number };

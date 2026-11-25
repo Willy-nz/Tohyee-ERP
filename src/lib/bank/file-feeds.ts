@@ -513,10 +513,16 @@ async function checkMailbox(organisation: OrganisationRecord, actor: Actor, row:
   let files = 0;
   for await (const message of messages) {
     if (done.has(message.id)) continue;
+    // Statement lines only come from mail whose sender the mail service vouched for; anything else is held for a person.
+    const held = message.senderCheck === "pass" ? null : heldReason(message.senderCheck ?? "unknown", message.from ?? null);
     for (const attachment of message.attachments) {
       if (!STATEMENT_FILE.test(attachment.name)) continue;
       if (files >= MAX_FEED_FILES_PER_CHECK) return;
       files += 1;
+      if (held) {
+        await holdAttachment(organisation, actor, row, `${message.id}/${attachment.name}`, held);
+        continue;
+      }
       await take({ key: `${message.id}/${attachment.name}`, name: attachment.name, size: attachment.size, read: attachment.read });
     }
     // The message is done: it isn't read again, even if it had no statement files.
@@ -529,6 +535,25 @@ async function checkMailbox(organisation: OrganisationRecord, actor: Actor, row:
     );
     done.add(message.id);
   }
+}
+
+/** Why a statement file from this email wasn't read, in words for the feed's last-check details. */
+export function heldReason(check: "fail" | "unknown", from: string | null): string {
+  const who = from ? ` (${from.slice(0, 200)})` : "";
+  return check === "fail"
+    ? `Not imported: the mail service couldn't confirm this email really came from its sender${who}. If it's from your bank, import the file by hand.`
+    : `Not imported: the mail service gave no check of who sent this email${who}. If it's from your bank, import the file by hand.`;
+}
+
+/** Records a statement file that wasn't read because its email's sender wasn't confirmed. */
+async function holdAttachment(organisation: OrganisationRecord, actor: Actor, row: FeedRow, key: string, reason: string): Promise<void> {
+  await withOrganisationTransaction(organisation, actor, (tx) =>
+    tx.query(
+      `insert into bank_file_feed_seen (account_id, location, item_key, content_hash, result, reason, lines_added)
+       values ($1, $2, $3, $4, 'failed', $5, 0) on conflict do nothing`,
+      [row.account_id, locationOf(row), key, createHash("sha256").update(`held\u0000${key}`).digest("hex"), reason.slice(0, MAX_ERROR)],
+    ),
+  );
 }
 
 let running = false;

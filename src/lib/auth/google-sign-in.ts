@@ -11,7 +11,7 @@ import {
   sha256Hex,
   verifyGoogleIdToken,
 } from "@/lib/auth/google-oidc";
-import { type GoogleSignInCode, safeNextPath } from "@/lib/auth/google-messages";
+import { GOOGLE_SIGN_IN_MESSAGES, type GoogleSignInCode, safeNextPath } from "@/lib/auth/google-messages";
 import { authenticate } from "@/lib/auth/guard";
 import { endPasskeys } from "@/lib/auth/passkey-end";
 import { configuredOrigin, returnOrigin } from "@/lib/auth/origin";
@@ -34,6 +34,7 @@ import { exchangeCode, type ProviderApp } from "@/lib/crm/mail/providers";
 import { coreQuery, withCoreTransaction } from "@/lib/db/transactions";
 import { sendSecurityAlert } from "@/lib/email/mailer";
 import { ConflictError, ForbiddenError, NotFoundError, UnauthorizedError, UnavailableError, ValidationError } from "@/lib/errors";
+import { confirmEmail, joinWaitingOrganisations } from "@/lib/organisations/waiting-members";
 import { secretsAvailable } from "@/lib/secrets";
 import { readServerSetting, writeServerSetting } from "@/lib/server-settings";
 
@@ -223,13 +224,15 @@ export async function startGoogleSignIn(
     loginHint = row.email;
   } else {
     const auth = await authenticate(request);
-    const found = await coreQuery<{ password_hash: string; google_only: boolean; linked: boolean }>(
-      `select u.password_hash, u.google_only, exists (select 1 from user_google_identities g where g.user_id = u.id) as linked
+    const found = await coreQuery<{ password_hash: string; google_only: boolean; linked: boolean; is_server_admin: boolean }>(
+      `select u.password_hash, u.google_only, u.is_server_admin, exists (select 1 from user_google_identities g where g.user_id = u.id) as linked
          from users u where u.id = $1 and u.is_active`,
       [auth.user.id],
     );
     const row = found.rows[0];
     if (!row) throw new UnauthorizedError();
+    // Server admins always sign in with Tohyee's own two-step sign-in.
+    if (row.is_server_admin) throw new ForbiddenError(GOOGLE_SIGN_IN_MESSAGES.server_admin_sign_in);
     if (row.linked) throw new ConflictError("A Google account is already linked to your login. Unlink it first to link a different one.");
     // Your password again, so a session left open (or taken) can't quietly add a way in.
     const password = typeof input.password === "string" ? input.password : "";
@@ -363,8 +366,8 @@ export async function finishGoogleSignIn(request: Request): Promise<GoogleCallba
 }
 
 async function signInWithGoogle(request: Request, identity: GoogleIdentity, origin: string, next: string, clear: string): Promise<GoogleCallbackResult> {
-  const found = await coreQuery<{ id: string; is_active: boolean }>(
-    "select u.id::text, u.is_active from user_google_identities g join users u on u.id = g.user_id where g.google_sub = $1",
+  const found = await coreQuery<{ id: string; is_active: boolean; is_server_admin: boolean; email: string }>(
+    "select u.id::text, u.is_active, u.is_server_admin, u.email from user_google_identities g join users u on u.id = g.user_id where g.google_sub = $1",
     [identity.sub],
   );
   const user = found.rows[0];
@@ -376,12 +379,21 @@ async function signInWithGoogle(request: Request, identity: GoogleIdentity, orig
     await logSignIn(request, { email: null, userId: user.id, step: "google", outcome: "refused", detail: "The login is turned off." });
     throw new Refusal("disabled");
   }
+  // A Google sign-in skips Tohyee's two-step, which server admins always keep (a Google account linked earlier, or before they became one).
+  if (user.is_server_admin) {
+    await logSignIn(request, { email: null, userId: user.id, step: "google", outcome: "refused", detail: "Server admins sign in with their password and two-step." });
+    throw new Refusal("server_admin_sign_in");
+  }
+  let confirmed = false;
   const session = await withCoreTransaction(async (client) => {
     await client.query("update users set last_login_at = now() where id = $1", [user.id]);
     // Google's address for the account may have changed; the link is by its ID, so it stays.
     await client.query("update user_google_identities set email = $2, last_used_at = now() where user_id = $1", [user.id, identity.email]);
+    // Google has checked the person reads this address, so the login's email is theirs.
+    if (identity.email === user.email) confirmed = await confirmEmail(client, user.id);
     return createSession(client, user.id, sessionMetaFrom(request), { method: "google" });
   });
+  if (confirmed) await joinWaitingOrganisations(user.id);
   await logSignIn(request, { email: null, userId: user.id, step: "google", outcome: "signed_in" });
   return { location: `${origin}${next}`, cookies: [clear, sessionCookieHeader(request, session.token)] };
 }
@@ -418,7 +430,7 @@ async function setupWithGoogle(request: Request, identity: GoogleIdentity, token
     await client.query(
       `update users set google_only = true, password_hash = $2, password_changed_at = now(), failed_login_count = 0, locked_until = null,
               totp_secret_ciphertext = null, totp_enabled_at = null, totp_last_step = null, totp_pending_ciphertext = null,
-              last_login_at = now(), updated_at = now()
+              last_login_at = now(), updated_at = now(), email_confirmed_at = coalesce(email_confirmed_at, now())
         where id = $1`,
       [link.user_id, unusable],
     );
@@ -440,6 +452,8 @@ async function setupWithGoogle(request: Request, identity: GoogleIdentity, token
     throw new Refusal(done.code);
   }
   await logSignIn(request, { email: null, userId: done.userId, step: "google", outcome: "signed_in" });
+  // The Google account has the invited address, so it's confirmed: organisations waiting for that join now.
+  await joinWaitingOrganisations(done.userId);
   return { location: `${origin}/operations`, cookies: [clear, sessionCookieHeader(request, done.token)] };
 }
 
@@ -448,6 +462,8 @@ async function linkGoogle(request: Request, identity: GoogleIdentity, row: State
   const current = await getSessionUser(readCookie(request, SESSION_COOKIE));
   if (!current || current.user.id !== row.user_id || current.sessionId !== row.session_id) throw new Refusal("other_session");
   const user = current.user;
+  if (user.isServerAdmin) throw new Refusal("server_admin_sign_in");
+  let confirmed = false;
   const linked = await withCoreTransaction(async (client) => {
     const taken = await client.query<{ user_id: string }>("select user_id::text from user_google_identities where google_sub = $1", [identity.sub]);
     if (taken.rows[0] && taken.rows[0].user_id !== user.id) return "taken" as const;
@@ -460,9 +476,11 @@ async function linkGoogle(request: Request, identity: GoogleIdentity, row: State
       entityId: user.id,
       details: { googleEmail: identity.email },
     });
+    if (identity.email === user.email) confirmed = await confirmEmail(client, user.id);
     return "linked" as const;
   });
   if (linked !== "linked") throw new Refusal(linked);
+  if (confirmed) await joinWaitingOrganisations(user.id);
   await sendSecurityAlert(user.email, "a Google account was linked", [
     `The Google account ${identity.email} was linked to your Tohyee login, so it can now be used to sign in.`,
     "If this wasn't you, unlink it on Your account and change your password.",

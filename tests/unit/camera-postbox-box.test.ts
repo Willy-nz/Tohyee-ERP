@@ -6,6 +6,7 @@ import { Readable } from "node:stream";
 import { Client } from "basic-ftp";
 import { afterAll, beforeAll, describe, expect, it } from "vitest";
 import { hashPassword } from "@/lib/auth/password";
+import { setOrganisationReachForTests } from "@/lib/network/organisation-reach";
 import { postboxConfig, type PostboxConfig } from "@/lib/camera-postbox/box/config";
 import { type Postbox, startPostbox } from "@/lib/camera-postbox/box/server";
 import { newPairingCode } from "@/lib/camera-postbox/box/state";
@@ -23,6 +24,10 @@ const FTP_PORT = 46450;
 const PASSIVE: [number, number] = [46460, 46469];
 
 describe("the camera post box", () => {
+  // The test post box runs on this computer, which a server admin has to allow.
+  beforeAll(() => setOrganisationReachForTests({ network: { localNetwork: true, thisComputer: true } }));
+  afterAll(() => setOrganisationReachForTests({ network: null }));
+
   let dataDir: string;
   let config: PostboxConfig;
   let box: Postbox;

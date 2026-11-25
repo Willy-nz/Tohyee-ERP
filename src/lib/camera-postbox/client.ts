@@ -39,11 +39,27 @@ export class BoxError extends Error {
 const TIMEOUT_MS = 15_000;
 const DOWNLOAD_IDLE_MS = 60_000;
 
+let addressCheck: ((host: string) => Promise<string[]>) | null = null;
+
+/** Set by Tohyee (src/lib/camera-postbox/service.ts): where a post box may be, giving the addresses to connect to. */
+export function setBoxAddressCheck(check: ((host: string) => Promise<string[]>) | null): void {
+  addressCheck = check;
+}
+
 /** A connection to the post box that checks its certificate (pinned or by name) before anything is written. For `http.request`'s createConnection. */
 export function connector(target: BoxTarget) {
   return (_options: unknown, done: (error: Error | null, socket?: Duplex) => void) => {
+    // Tohyee checks where an organisation's pairing code points (setBoxAddressCheck), and connects to the
+    // address it checked. The post box program itself, checking its own health, has no check.
+    if (!addressCheck) return open(target.address, done);
+    addressCheck(target.address).then(
+      (addresses) => open(addresses[0], done),
+      (error: Error) => done(new BoxError(error.message, "unreachable")),
+    );
+  };
+  function open(address: string, done: (error: Error | null, socket?: Duplex) => void) {
     const socket = tls.connect({
-      host: target.address,
+      host: address,
       port: target.port,
       servername: /^\d+(\.\d+){3}$/.test(target.address) ? undefined : target.address,
       minVersion: "TLSv1.2",
@@ -70,7 +86,7 @@ export function connector(target: BoxTarget) {
       }
       settle(null);
     });
-  };
+  }
 }
 
 type Call = { method: "GET" | "POST" | "PUT"; path: string; body?: unknown; auth?: boolean };

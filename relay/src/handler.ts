@@ -301,9 +301,21 @@ async function releaseAddress(request: Request, rawHostname: string, env: Env, s
   return new Response(null, { status: 204 });
 }
 
+/** Wrong admin passwords allowed in a day from one network, and from everyone together. */
+export const ADMIN_FAILURES_PER_IP_PER_DAY = 10;
+export const ADMIN_FAILURES_PER_DAY = 200;
+
 async function admin(request: Request, path: string, env: Env, s: Settings, deps: Deps): Promise<Response> {
   const given = bearer(request);
+  const now = deps.now();
+  const perIp = await ipKey(request, env, "adminfail");
+  // Checked before the password, so once the limit is reached even a right guess is refused until tomorrow.
+  if ((await store.peek(env.DB, perIp, now)) >= ADMIN_FAILURES_PER_IP_PER_DAY || (await store.peek(env.DB, "adminfail:all", now)) >= ADMIN_FAILURES_PER_DAY) {
+    throw new HttpError(429, "Too many wrong admin passwords today. Try again tomorrow.");
+  }
   if (!env.ADMIN_TOKEN || env.ADMIN_TOKEN.length < 20 || !given || !(await sameSecret(given, env.ADMIN_TOKEN))) {
+    await store.bump(env.DB, perIp, now);
+    await store.bump(env.DB, "adminfail:all", now);
     throw new HttpError(401, "Admin password missing or wrong.");
   }
   const method = request.method;

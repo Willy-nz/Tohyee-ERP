@@ -23916,6 +23916,21 @@ they put right themselves (void, remove and redo, exclude).
   that currency, at the rate for the charge date, rounded to its smallest
   unit.
 
+## Statement files from email whose sender can't be confirmed (SEC1)
+
+Dated 25 Nov 2026. Following common practice, not yet reviewed. Tested in
+`tests/integration/bank-file-feeds.test.ts` (BF7).
+
+- **SEC1** Bank account 1000 has a mailbox feed (BF7). An email in its label
+  says it's from `statements@bank.example` and has `anz-2026-06-09.csv`
+  with one line, a receipt of $500.00. The receiving mail service's check
+  of the sender (its Authentication-Results header) didn't pass, or there
+  wasn't one. The file isn't read and no statement lines are added. The
+  feed's last-check details list the file as not imported and say why, so a
+  person can download it and import it by hand if it really is from the
+  bank. An email whose sender the mail service confirmed (DMARC passed, or
+  a DKIM signature from the sender's own domain passed) is read as before.
+
 ## Sales platform fixes: stock, payouts and missed orders (SPF1-SPF12; 25 Nov 2026; following common practice, not yet reviewed)
 
 Made-up store as in SWS1: GST registered, prices include GST, clearing

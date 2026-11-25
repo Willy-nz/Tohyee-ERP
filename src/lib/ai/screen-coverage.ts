@@ -11,6 +11,7 @@ export const SCREEN_COVERAGE: Record<string, ScreenCoverage> = {
   "PATCH /api/accounts/[accountId]": {"tool": "update_account"},
   "POST /api/accounts": {"tool": "create_account"},
   "PUT /api/admin/analytics-folders": {"person": "Server settings are for server admins on the server computer."},
+  "PUT /api/admin/organisation-network": {"person": "Server settings are for server admins on the server computer."},
   "POST /api/late-fees/charge": {"person": "Charging customers late fees is for a person to choose (LATE3)."},
   "POST /api/late-fees/exclusions": {"person": "Who is never charged late fees is an admin's choice (LATE11)."},
   "PUT /api/late-fees/settings": {"person": "Turning late fees on and setting them is an admin's choice, after checking the terms of trade (LATE1)."},

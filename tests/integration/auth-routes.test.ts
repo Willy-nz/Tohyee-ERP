@@ -17,6 +17,7 @@ import { coreQuery } from "@/lib/db/transactions";
 import {
   apiRequest,
   createTestUser,
+  sessionCookieFor,
   describeWithDatabase,
   key,
   params,
@@ -318,6 +319,19 @@ describeWithDatabase("logins, roles and organisation isolation (HTTP routes)", (
 
     await logoutRoute.POST(apiRequest("/api/auth/logout", { method: "POST", cookie: first }), noContext);
     expect((await sessionRoute.GET(apiRequest("/api/auth/session", { cookie: first }), noContext)).status).toBe(401);
+  });
+
+  it("changing your password counts wrong current passwords towards the lockout", async () => {
+    const guesser = await createTestUser("password-guess@example.com");
+    const cookie = await sessionCookieFor(guesser);
+    const change = (currentPassword: string) =>
+      passwordRoute.POST(apiRequest("/api/auth/password", { method: "POST", cookie, body: { currentPassword, newPassword: "a-guessers-new-password" } }), noContext);
+    for (let attempt = 0; attempt < 5; attempt += 1) expect((await change(`wrong-guess-${attempt}`)).status).toBe(400);
+    // Locked now: even the right password is refused until the lock ends.
+    const locked = await change(TEST_PASSWORD);
+    expect(locked.status).toBe(429);
+    const row = await coreQuery<{ locked: boolean }>("select locked_until > now() as locked from users where id = $1", [guesser.id]);
+    expect(row.rows[0].locked).toBe(true);
   });
 
   it("sessions slide: using one pushes its expiry out, and the cookie outlives the first 14 days", async () => {

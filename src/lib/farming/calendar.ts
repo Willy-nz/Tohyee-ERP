@@ -1,5 +1,6 @@
 import { createHash, randomBytes } from "node:crypto";
 import { forgetMemberFarmAccess, requireFarmAccess, visibleFarmIds } from "./access";
+import { farmWorkAllows } from "@/lib/auth/roles";
 import { writeAuditEvent } from "@/lib/audit";
 import { googleApp, microsoftApp } from "@/lib/crm/mail/service";
 import { exchangeCode, MAIL_PROVIDERS, type MailProvider, mailboxAddress, type ProviderApp, refreshAccess, authorisationUrl } from "@/lib/crm/mail/providers";
@@ -549,7 +550,7 @@ function shortDay(date: string): string {
  * the same kind in the same conversation, else from the same sender and
  * still to come (for a cancellation with a date, that date first).
  */
-async function earlierItem(tx: OrgTx, accountId: string, mail: FarmMail, arrangement: Arrangement): Promise<ItemRow | null> {
+async function earlierItem(tx: OrgTx, accountId: string, mail: FarmMail, arrangement: Arrangement): Promise<(ItemRow & { bySender: boolean }) | null> {
   const columns = "id::text, kind, title, item_date::text, thread_id, sender_email, checked_at::text";
   const base = "account_id = $1 and kind = $2 and state = 'open' and change <> 'cancelled' and external_id <> $3";
   if (mail.threadId) {
@@ -559,14 +560,14 @@ async function earlierItem(tx: OrgTx, accountId: string, mail: FarmMail, arrange
       mail.externalId,
       mail.threadId,
     ]);
-    if (inThread.rows[0]) return inThread.rows[0];
+    if (inThread.rows[0]) return { ...inThread.rows[0], bySender: false };
   }
   const fromSender = await tx.query<ItemRow>(
     `select ${columns} from farm_calendar_items where ${base} and lower(sender_email) = lower($4) and item_date >= $5
       order by ($6::date is not null and item_date = $6) desc, sent_at desc, farm_calendar_items.id desc limit 1`,
     [accountId, arrangement.kind, mail.externalId, mail.from.email, nzDay(mail.sentAt), arrangement.change === "cancelled" ? arrangement.date : null],
   );
-  return fromSender.rows[0] ?? null;
+  return fromSender.rows[0] ? { ...fromSender.rows[0], bySender: true } : null;
 }
 
 /**
@@ -644,6 +645,11 @@ async function applyMail(tx: OrgTx, account: AccountRow, mail: FarmMail, farms: 
       const sentDay = shortDay(nzDay(mail.sentAt));
       if (!earlier) {
         reasons.push(arrangement.change === "moved" ? "Says a booking moved, but there's no earlier one to replace" : "Says a booking is cancelled, but there's nothing to cancel");
+      } else if (earlier.bySender && mail.senderCheck !== "pass") {
+        // Matched only by the From address, which anyone can write: a person checks it rather than it changing a booking by itself.
+        reasons.push(
+          `Would ${arrangement.change === "moved" ? "move" : "cancel"} "${earlier.title}"${earlier.item_date ? ` on ${shortDay(earlier.item_date)}` : ""}, but the email isn't in that booking's conversation and its sender couldn't be confirmed`,
+        );
       } else if (earlier.checked_at) {
         // FC14: what the member checked isn't changed by a later email.
         reasons.push(
@@ -1344,7 +1350,8 @@ export async function calendarLinkFeed(organisationInput: string, fileInput: str
     return (await tx.query<{ user_id: string }>("select user_id::text from farm_calendar_links where token_hash = $1", [hash])).rows[0] ?? null;
   });
   const member = link ? await getMembership(organisationId, link.user_id) : null;
-  if (!link || !member) return null;
+  // A member whose role no longer allows farm work (moved to report-only or sales) gets nothing, like every farm screen.
+  if (!link || !member || !farmWorkAllows(member.role, "read")) return null;
   const name = await memberName(link.user_id);
   return withOrganisationTransaction(organisation, { userId: link.user_id, email: "calendar-link@tohyee", role: member.role }, async (tx) => {
     await tx.query("update farm_calendar_links set last_used_at = now() where user_id = $1", [link.user_id]);

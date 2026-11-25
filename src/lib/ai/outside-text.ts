@@ -29,6 +29,8 @@ export const OUTSIDE_TEXT_TOOLS: Readonly<Record<string, string>> = {
   list_orders_to_hold: "customer names, addresses and notes from the shop",
   farm_home: "calendar items' titles and details, many read from emails anyone can send",
   farm_calendar: "calendar items' titles, details and senders, many read from emails anyone can send",
+  list_signing_requests: "each signer's reason for declining, which they typed on the public signing page",
+  get_signing_request: "each signer's reason for declining, which they typed on the public signing page",
   search_my_mail: "every email's sender, subject and text",
   read_my_mail: "the email's sender, subject, text and attachments",
 };

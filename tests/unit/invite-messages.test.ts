@@ -23,4 +23,12 @@ describe("what People and roles says after inviting", () => {
     expect(said.tone).toBe("warning");
     expect(said.text).toMatch(/^Sent lani@example.com a new invitation\. The last link no longer works\. The email couldn't be sent\./);
   });
+
+  it("someone whose login's address isn't confirmed wasn't added, and the inviter is told plainly", () => {
+    const emailed = invitationMessage("invite", "hemi@example.com", "viewer", null, { emailed: true });
+    expect(emailed.tone).toBe("warning");
+    expect(emailed.text).toMatch(/^hemi@example.com already has a login on this server, but nobody has confirmed the email address belongs to whoever uses it\. They haven't been added yet\. We've emailed them a link\./);
+    const notEmailed = invitationMessage("invite", "hemi@example.com", "viewer", null, { emailed: false });
+    expect(notEmailed.text).toMatch(/We couldn't email them\. Ask a server admin to send them a setup link from Users\./);
+  });
 });
