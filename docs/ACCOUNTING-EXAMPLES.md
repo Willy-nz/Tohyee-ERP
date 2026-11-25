@@ -23829,3 +23829,26 @@ Tested in `tests/integration/sales-platform-negative-stock-sent.test.ts`,
   orders are tried again oldest first (by the day they were placed), up to
   50 a sync. Voiding such an invoice later is refused while other stock has
   moved since, as for any invoice (ST4).
+- **SPF3 A payout whose deposit is already in the books.** Before posting a
+  payout, Tohyee looks on the bank account it's paid into for its deposit:
+  the payout's net, dated from 3 days before the payout to 10 days after.
+  Payout 70001 (net **49.38**, fees **2.52**) on 7 Oct. The store hadn't
+  given the payout scopes, so the 49.38 deposit on 8 Oct was reconciled by
+  hand with a transfer from 1010 to 1000 (SPR9). Once the scopes are given,
+  the payout **links to that transfer** and isn't posted again; only its
+  fees are: Dr 6020 **2.52** / Cr 1010 **2.52**. Bank 1000 stays **49.38**,
+  the same as the statement, and 1010 is **0.00**. If what's there isn't
+  sure (the deposit's statement line was reconciled to something else, such
+  as a receive money coded to sales, or there's more than one candidate),
+  the payout isn't posted: its log line says it needs a person, what was
+  found and what to do (record the fees by hand if the deposit is right, or
+  undo the hand entry and choose Try again on payouts). A withdrawal is
+  posted as before.
+- **SPF4 Payouts doubled before SPF3 (read-only).** A payout posted before
+  SPF3 may sit beside the same deposit entered by hand: the payout's
+  transfer isn't reconciled, and a transfer made by hand from the clearing
+  account to the same bank, for the same amount and in the same days, is.
+  The bank account is then higher than its statement by that amount. Each
+  such payout is listed in the store's status (and to the AI) and once a day
+  in the sync log, for a person to check and void the entry that's wrong.
+  Nothing is voided or changed by Tohyee.

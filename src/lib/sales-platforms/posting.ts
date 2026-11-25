@@ -1,4 +1,5 @@
 import { formatDate } from "@/lib/format";
+import { depositAlreadyInBooks, type DepositInBooks } from "@/lib/sales-platforms/payout-doubles";
 import { createTransfer, createBankTransaction } from "@/lib/bank/transactions";
 import { createContact } from "@/lib/contacts/service";
 import { applyCreditNote } from "@/lib/credit-notes/applications";
@@ -1063,6 +1064,25 @@ export async function postPayout(tx: OrgTx, context: PostingContext, payout: Pla
   }
   const accountFor = (line: PayoutLine) => (line.account === "chargebacks" ? posting.chargebacksAccountCode! : posting.feesAccountCode);
   const reference = `${platformLabel(posting)} payout ${id}`;
+  // SPF3: the deposit may already be in the books by hand (a transfer out of clearing, SPR9). Then it isn't posted again.
+  const inBooks: DepositInBooks =
+    plan.direction === "deposit"
+      ? await depositAlreadyInBooks(tx, { bankAccountCode: posting.payoutAccountCode, clearingAccountId: posting.clearingAccountId, amount: plan.net, date: plan.date })
+      : { kind: "none" };
+  if (inBooks.kind === "unsure") {
+    if (
+      await log(tx, context, {
+        action: "skipped",
+        recordKind: "payout",
+        externalId: id,
+        message: `Payout ${id} (${plan.net}) needs a person, so it wasn't posted: ${inBooks.reason} Posting it too could count the money twice. If the deposit is already right in the books, record the payout's fees by hand. Otherwise unreconcile and void the entry made by hand, then choose Try again on payouts.`,
+      })
+    ) {
+      context.counts.skipped += 1;
+    }
+    return "refused";
+  }
+  const linkedTransferId = inBooks.kind === "hand_transfer" ? inBooks.transferId : null;
   const made = await attempt(tx, async () => {
     const moveReserve = async (step: string, amount: string | null, from: string, to: string, what: string) =>
       amount === null
@@ -1125,7 +1145,7 @@ export async function postPayout(tx: OrgTx, context: PostingContext, payout: Pla
       });
       bankTransactionId = bankTransaction.id;
     }
-    const transfer = withdrawn ?? (await moveNet());
+    const transfer = withdrawn ?? (linkedTransferId ? { id: linkedTransferId } : await moveNet());
     return { transferId: transfer.id, bankTransactionId, receiptId, heldId, releasedId };
   });
   if (!made.ok) {
@@ -1152,7 +1172,9 @@ export async function postPayout(tx: OrgTx, context: PostingContext, payout: Pla
   const parts = [
     plan.direction === "withdrawal"
       ? `${plan.net} taken from ${posting.payoutAccountCode} into ${posting.clearingAccountCode} (a withdrawal)`
-      : `${plan.net} from ${posting.clearingAccountCode} to ${posting.payoutAccountCode}`,
+      : inBooks.kind === "hand_transfer"
+        ? `${plan.net} from ${posting.clearingAccountCode} to ${posting.payoutAccountCode} was already in the books (a transfer made by hand on ${formatDate(inBooks.date)}), so the payout is linked to it and not posted again`
+        : `${plan.net} from ${posting.clearingAccountCode} to ${posting.payoutAccountCode}`,
   ];
   if (plan.charges.length > 0) parts.push(`${plan.charges.map((line) => `${line.amount} to ${accountFor(line)}`).join(", ")} paid out of ${posting.clearingAccountCode}`);
   if (plan.receipts.length > 0) parts.push(`${plan.receipts.map((line) => `${line.amount} from ${accountFor(line)}`).join(", ")} back into ${posting.clearingAccountCode}`);

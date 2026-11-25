@@ -1,3 +1,4 @@
+import { possibleDoublePayouts, possibleDoublesMessage } from "@/lib/sales-platforms/payout-doubles";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ValidationError } from "@/lib/errors";
 import { getGstRegistration } from "@/lib/tax/registration";
@@ -216,6 +217,13 @@ function scopeReport(connection: SalesPlatformConnection) {
   };
 }
 
+/** SPF4: payouts that may have put a deposit in the bank twice (read-only), with a plain note; nothing when there are none. */
+async function doublesReport(tx: OrgTx, connectionId: string, bankAccountCode: string | null) {
+  const doubles = await possibleDoublePayouts(tx, connectionId);
+  const note = possibleDoublesMessage(doubles, bankAccountCode);
+  return note ? { possibleDoubles: doubles, possibleDoublesNote: note } : {};
+}
+
 async function connectionReport(tx: OrgTx, connection: SalesPlatformConnection, gstRegistered: boolean, now: Date) {
   const platform = SALES_PLATFORM_LABELS[connection.platform];
   const cursors = (
@@ -331,6 +339,7 @@ async function connectionReport(tx: OrgTx, connection: SalesPlatformConnection, 
               problems: problems.payout ?? {},
               fetchedUpTo: iso(cursors.payouts_synced_until),
               toReadAgain: await payoutsToReadAgain(tx, connection.id),
+              ...(await doublesReport(tx, connection.id, connection.payoutAccountCode)),
             }
           : {}),
       },

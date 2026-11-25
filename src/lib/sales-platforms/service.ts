@@ -44,6 +44,7 @@ import type { CoverageFacts } from "@/lib/sales-platforms/coverage-status";
 import { type ShopifyPartKey, partOffMessage, partOn } from "@/lib/sales-platforms/parts";
 import { itemNameFor, mergeField, priceCopyable } from "@/lib/sales-platforms/merge";
 import { oldestFirst, SHOPIFY_PAYMENTS_GATEWAY, startOfLocalDate } from "@/lib/sales-platforms/orders";
+import { possibleDoublePayouts, possibleDoublesMessage } from "@/lib/sales-platforms/payout-doubles";
 import { markPayoutsForRecheck, payoutsRecheckFrom, savePayout } from "@/lib/sales-platforms/payout-store";
 import { ordersStillToSend } from "@/lib/sales-platforms/to-send";
 import { type PostingContext, loadPosting, ordersHeld, ordersToRetry, postOrder, postPayout, postedPayoutIds } from "@/lib/sales-platforms/posting";
@@ -1973,6 +1974,9 @@ export async function syncConnection(
           }
           payoutsUntil = firstOpen ?? last;
           for (const note of payouts.notes) await writeNote(tx, row.id, "sync", note);
+          // SPF4: payouts posted before SPF3 that may have doubled a deposit entered by hand (read-only, once a day).
+          const doubles = possibleDoublesMessage(await possibleDoublePayouts(tx, current.id), posting.payoutAccountCode);
+          if (doubles) await writeNote(tx, row.id, "sync", doubles);
         } else if (connectorFor(current.platform).hasPayouts) {
           await writeNote(tx, row.id, "sync", NO_PAYOUT_SCOPES);
         }
