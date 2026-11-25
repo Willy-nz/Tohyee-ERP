@@ -12,8 +12,8 @@ namespace Tohyee.Tray
     /// <summary>
     /// The second half of "Install": after the server has backed
     /// everything up and handed over the installer's address and SHA-256, this
-    /// downloads TohyeeSetup, checks it against the SHA-256, and runs it
-    /// silently. The installer stops Tohyee, replaces the program, starts it
+    /// downloads TohyeeSetup, checks it against the SHA-256 and its signature
+    /// (ReleaseSignature), and runs it silently. The installer stops Tohyee, replaces the program, starts it
     /// again (the database upgrades run as it starts) and starts this app again
     /// with --after-update. A note in this person's local app data says what
     /// was being installed, so the restarted app can say how it went.
@@ -36,8 +36,20 @@ namespace Tohyee.Tray
             get { return Path.Combine(Folder, "pending-update.txt"); }
         }
 
-        /// <summary>Downloads the installer to this person's temp folder and checks its SHA-256. Throws if it doesn't match.</summary>
-        public static async Task<string> Download(string url, string fileName, string sha256, long size, Action<int> progress)
+        /// <summary>A downloaded installer that passed its checks.</summary>
+        internal sealed class Downloaded
+        {
+            public string File;
+            /// <summary>The signature check (UPD14-UPD19): Signed is false when this install trusts no keys yet.</summary>
+            public SignatureCheck Signature;
+        }
+
+        /// <summary>
+        /// Downloads the installer to this person's temp folder, checks its
+        /// SHA-256 and then its signature (signatureUrl: the release's .sig, or
+        /// null if it has none). Throws if either check fails.
+        /// </summary>
+        public static async Task<Downloaded> Download(string url, string fileName, string sha256, string signatureUrl, long size, Action<int> progress)
         {
             if (url == null || !url.StartsWith(ReleasesPrefix, StringComparison.Ordinal))
             {
@@ -46,6 +58,24 @@ namespace Tohyee.Tray
             if (string.IsNullOrEmpty(fileName) || fileName.IndexOfAny(Path.GetInvalidFileNameChars()) >= 0 || !fileName.EndsWith(".exe", StringComparison.OrdinalIgnoreCase))
             {
                 throw new ApiException(0, "The installer's name isn't right, so it wasn't downloaded.");
+            }
+            if (signatureUrl != null && !signatureUrl.StartsWith(ReleasesPrefix, StringComparison.Ordinal))
+            {
+                throw new ApiException(0, "The installer's signature isn't on Tohyee's GitHub releases page, so it wasn't downloaded.");
+            }
+            List<KeyValuePair<string, RSA>> trusted;
+            try
+            {
+                trusted = ReleaseSignature.LoadKeys(ReleaseSignature.KeysFile);
+            }
+            catch (SignatureRefused refused)
+            {
+                throw new ApiException(0, refused.Message);
+            }
+            if (trusted.Count > 0 && signatureUrl == null)
+            {
+                // Said before downloading anything: a release without a .sig can't be installed here.
+                throw new ApiException(0, fileName + " isn't signed, and this Tohyee only installs signed updates, so it wasn't downloaded. Nothing was changed.");
             }
             var folder = Path.Combine(Path.GetTempPath(), "Tohyee");
             Directory.CreateDirectory(folder);
@@ -104,6 +134,7 @@ namespace Tohyee.Tray
                 throw new ApiException(0, "Couldn't save the installer: " + error.Message);
             }
 
+            var signatureFile = partial + ".sig";
             try
             {
                 var actual = Sha256Of(partial);
@@ -112,14 +143,62 @@ namespace Tohyee.Tray
                     TryDelete(partial);
                     throw new ApiException(0, "The downloaded installer doesn't match the fingerprint GitHub gave for it (expected " + sha256 + ", got " + actual + "), so it was deleted and not run. Nothing was changed.");
                 }
+                if (signatureUrl != null && trusted.Count > 0)
+                {
+                    await DownloadSignature(signatureUrl, signatureFile);
+                }
+                SignatureCheck signature;
+                try
+                {
+                    signature = ReleaseSignature.Check(partial, fileName, File.Exists(signatureFile) ? signatureFile : null, ReleaseSignature.KeysFile);
+                }
+                catch (SignatureRefused refused)
+                {
+                    TryDelete(partial);
+                    throw new ApiException(0, refused.Message);
+                }
                 TryDelete(target);
                 File.Move(partial, target);
-                return target;
+                return new Downloaded { File = target, Signature = signature };
             }
             catch (IOException error)
             {
                 TryDelete(partial);
                 throw new ApiException(0, "Couldn't check the downloaded installer: " + error.Message);
+            }
+            finally
+            {
+                TryDelete(signatureFile);
+            }
+        }
+
+        /// <summary>The release's .sig (a few hundred bytes; anything over 16 KB isn't one).</summary>
+        private static async Task DownloadSignature(string url, string target)
+        {
+            try
+            {
+                using (var client = new HttpClient { Timeout = TimeSpan.FromSeconds(60) })
+                {
+                    client.DefaultRequestHeaders.UserAgent.ParseAdd("TohyeeTray/1.0");
+                    using (var response = await client.GetAsync(url))
+                    {
+                        if (!response.IsSuccessStatusCode)
+                        {
+                            throw new ApiException((int)response.StatusCode, "GitHub didn't send the installer's signature (" + (int)response.StatusCode + "), so it wasn't run. Try again later.");
+                        }
+                        var bytes = await response.Content.ReadAsByteArrayAsync();
+                        if (bytes.Length > 16384) throw new ApiException(0, "The installer's signature file is too big to be one, so it wasn't run. Nothing was changed.");
+                        File.WriteAllBytes(target, bytes);
+                    }
+                }
+            }
+            catch (HttpRequestException error)
+            {
+                throw new ApiException(0, "Couldn't download the installer's signature: " + error.Message);
+            }
+            catch (TaskCanceledException)
+            {
+                throw new ApiException(0, "Downloading the installer's signature took too long. Try again later.");
             }
         }
 

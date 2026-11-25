@@ -22,6 +22,8 @@ namespace Tohyee.Tray
         ///                                   page; it reports how the update went (from the note Install left)
         ///   TohyeeTray.exe --self-test &lt;file&gt;   checks it can reach Tohyee (used by the installer test)
         ///   TohyeeTray.exe --demo-screenshots &lt;folder&gt;   saves pictures of each page with sample data (no server, no network)
+        ///   TohyeeTray.exe --verify-release &lt;file&gt; &lt;name&gt; &lt;sig&gt; &lt;keys&gt; &lt;result&gt;   checks an installer's
+        ///                                   signature as Install does (used by test-release-signature.ps1)
         /// </summary>
         [STAThread]
         private static int Main(string[] args)
@@ -32,6 +34,10 @@ namespace Tohyee.Tray
             if (args.Length >= 2 && args[0] == "--demo-screenshots")
             {
                 return DemoData.Screenshots(args[1]);
+            }
+            if (args.Length >= 1 && args[0] == "--verify-release")
+            {
+                return ReleaseSignature.CommandLine(args);
             }
             var settings = TraySettings.Load();
             if (args.Length >= 1 && args[0] == "--self-test")

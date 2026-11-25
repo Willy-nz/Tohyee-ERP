@@ -13,7 +13,11 @@
 # (x.y.z), and installs it only if:
 #   - it's newer than the installed version, and
 #   - it's GitHub's latest release of Tohyee, and
-#   - its TohyeeSetup-<version>.exe matches GitHub's SHA-256.
+#   - its TohyeeSetup-<version>.exe matches GitHub's SHA-256, and
+#   - it's signed by a key in release-keys.txt, installed with this script
+#     (release-signature.ps1, UPD14-UPD19). An install with no keys in that
+#     file (made before releases were signed) keeps only the SHA-256 check
+#     and says the update wasn't checked for a signature.
 # It downloads into a folder only Administrators and SYSTEM can open, runs the
 # installer silently, and says how it's going in
 # %ProgramData%\Tohyee\update-status\status.json (Tohyee can read it, not
@@ -30,6 +34,8 @@ param(
 
 $ErrorActionPreference = 'Stop'
 $ProgressPreference = 'SilentlyContinue'
+. (Join-Path $PSScriptRoot 'release-signature.ps1')
+$KeysFile = Join-Path $PSScriptRoot 'release-keys.txt'
 
 $Repository = 'Willy-nz/Tohyee-ERP'
 $ReleasesPrefix = "https://github.com/$Repository/releases/download/"
@@ -104,8 +110,19 @@ try {
   }
   if (-not $sha256) { throw "GitHub gave no SHA-256 for $setupName, so it wasn't downloaded." }
 
+  # The signature beside it (UPD14-UPD19). Refused before downloading when
+  # this install trusts keys and the release has no signature.
+  $trusted = Get-TohyeeReleaseKeys $KeysFile
+  $sigAsset = @($latest.assets | Where-Object { $_.name -eq "$setupName.sig" }) | Select-Object -First 1
+  $sigUrl = if ($sigAsset) { [string]$sigAsset.browser_download_url } else { $null }
+  if ($sigUrl -and -not $sigUrl.StartsWith($ReleasesPrefix, [System.StringComparison]::Ordinal)) { throw "The installer's signature isn't on Tohyee's GitHub releases page, so it wasn't downloaded." }
+  if ($trusted.Count -gt 0 -and -not $sigUrl) {
+    throw "Release v$wanted isn't signed, and this Tohyee only installs signed updates, so it wasn't downloaded. Nothing was changed."
+  }
+
   if ($CheckOnly) {
-    Write-Host "Would install v$wanted from $url (SHA-256 $sha256)."
+    $signedNote = if ($trusted.Count -eq 0) { 'no trusted keys, so not checked for a signature' } else { "signature $sigUrl, $($trusted.Count) trusted key(s)" }
+    Write-Host "Would install v$wanted from $url (SHA-256 $sha256; $signedNote)."
     exit 0
   }
 
@@ -120,6 +137,24 @@ try {
     Remove-Item -LiteralPath $partial -Force
     throw "The downloaded installer doesn't match GitHub's SHA-256 (expected $sha256, got $actual), so it was deleted and not run. Nothing was changed."
   }
+  $sigFile = $null
+  try {
+    if ($trusted.Count -gt 0) {
+      $sigFile = "$setup.sig"
+      Invoke-WebRequest -UseBasicParsing -Headers @{ 'User-Agent' = 'tohyee-updater' } -TimeoutSec 60 -Uri $sigUrl -OutFile $sigFile
+    }
+    $signature = Test-TohyeeReleaseSignature -Path $partial -FileName $setupName -SignaturePath $sigFile -KeysPath $KeysFile
+  } catch {
+    Remove-Item -LiteralPath $partial -Force -ErrorAction SilentlyContinue
+    throw
+  } finally {
+    if ($sigFile) { Remove-Item -LiteralPath $sigFile -Force -ErrorAction SilentlyContinue }
+  }
+  $checked = if ($signature.Signed) {
+    "Its SHA-256 and signature are right."
+  } else {
+    "Its SHA-256 is right; it wasn't checked for a signature, because this Tohyee was installed before releases were signed."
+  }
   Move-Item -LiteralPath $partial -Destination $setup -Force
 
   # Not waited for: the installer replaces this script and sets up this task
@@ -127,7 +162,7 @@ try {
   # installer says how it ended in status.json; the page also works it out
   # from the version Tohyee comes back on (src/lib/updates/updater-status.ts).
   $log = Join-Path $LogDir ("update-$wanted-" + (Get-Date -Format 'yyyyMMdd-HHmmss') + '.log')
-  Write-Status 'installing' $wanted "Installing. The installer's log is $([System.IO.Path]::GetFileName($log)) in Tohyee's logs."
+  Write-Status 'installing' $wanted "Installing. $checked The installer's log is $([System.IO.Path]::GetFileName($log)) in Tohyee's logs."
   Start-Process -FilePath $setup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', "/LOG=`"$log`"")
   exit 0
 } catch {

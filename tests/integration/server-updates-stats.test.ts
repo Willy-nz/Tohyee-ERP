@@ -147,7 +147,7 @@ describeWithDatabase("server updates and stats", () => {
     expect(result).toMatchObject({
       currentVersion: packageJson.version,
       version: NEWER,
-      setup: { name: `TohyeeSetup-${NEWER}.exe`, sha256: HASH, sha256From: "github-digest", size: 200_000_000 },
+      setup: { name: `TohyeeSetup-${NEWER}.exe`, sha256: HASH, sha256From: "github-digest", size: 200_000_000, signatureUrl: null },
     });
     expect((result.backups as { organisationId: string | null; status: string; trigger: string }[]).map((r) => [r.organisationId, r.status, r.trigger])).toEqual([
       [null, "ok", "update"],
