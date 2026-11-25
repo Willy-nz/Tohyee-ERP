@@ -4,7 +4,8 @@ import path from "node:path";
 import type { ServerAdminAuth } from "@/lib/audit";
 import { writeAdminAuditEvent } from "@/lib/audit";
 import { type BackupCheck } from "@/lib/backups/checks";
-import { BACKUP_EXTENSION, type BackupHeader, materialFromText, openBackupKeys, type RecoveryMaterial, readBackupHeader, readDecrypted } from "@/lib/backups/format";
+import { BACKUP_EXTENSION, type BackupHeader, type BackupKeys, materialFromText, openBackupKeys, type RecoveryMaterial, readBackupHeader, readDecrypted } from "@/lib/backups/format";
+import { withPrivateCopy } from "@/lib/backups/private-copy";
 import { startPgTool } from "@/lib/backups/pg-tools";
 import { openRecoveryFile } from "@/lib/backups/recovery-code";
 import { reEncryptStoredSecrets, type SecretsReport } from "@/lib/backups/rewrap";
@@ -136,25 +137,38 @@ function scratchName(): string {
   return `${/^[a-z]/.test(core) ? core : "tohyee"}_scratch_${randomBytes(5).toString("hex")}`;
 }
 
-/** Restores a backup into a throwaway database, runs `work` on it, and always drops it. */
-async function withScratchRestore<T>(file: string, material: RecoveryMaterial | undefined, work: (client: Awaited<ReturnType<typeof connectAsAdmin>>) => Promise<T>): Promise<T> {
-  const name = scratchName();
-  await getAdminPool().query(`create database ${quoteSqlIdentifier(name)}`);
-  try {
-    const restore = startPgTool("pg_restore", ["--no-owner", "--no-privileges", "--exit-on-error", `--dbname=${name}`], name);
-    restore.child.stdout?.resume();
-    const [fed, restored] = await Promise.allSettled([readDecrypted(file, restore.child.stdin!, material), restore.done]);
-    if (restored.status === "rejected") throw restored.reason;
-    if (fed.status === "rejected") throw fed.reason;
-    const client = await connectAsAdmin(name);
+/**
+ * Restores a backup into a throwaway database, runs `work` on it, and always
+ * drops it. The file is copied somewhere private first, and that one copy is
+ * checked (key and tamper seal) and then restored, so what's restored is
+ * what was checked.
+ */
+async function withScratchRestore<T>(
+  file: string,
+  material: RecoveryMaterial | undefined,
+  work: (client: Awaited<ReturnType<typeof connectAsAdmin>>, keys: BackupKeys) => Promise<T>,
+): Promise<T> {
+  return withPrivateCopy(file, async (copy) => {
+    await checkBackup(copy, material);
+    const keys = await openBackupKeys(copy, material);
+    const name = scratchName();
+    await getAdminPool().query(`create database ${quoteSqlIdentifier(name)}`);
     try {
-      return await work(client);
+      const restore = startPgTool("pg_restore", ["--no-owner", "--no-privileges", "--exit-on-error", `--dbname=${name}`], name);
+      restore.child.stdout?.resume();
+      const [fed, restored] = await Promise.allSettled([readDecrypted(copy, restore.child.stdin!, material), restore.done]);
+      if (restored.status === "rejected") throw restored.reason;
+      if (fed.status === "rejected") throw fed.reason;
+      const client = await connectAsAdmin(name);
+      try {
+        return await work(client, keys);
+      } finally {
+        await client.end();
+      }
     } finally {
-      await client.end();
+      await getAdminPool().query(`drop database if exists ${quoteSqlIdentifier(name)} with (force)`).catch(() => undefined);
     }
-  } finally {
-    await getAdminPool().query(`drop database if exists ${quoteSqlIdentifier(name)} with (force)`).catch(() => undefined);
-  }
+  });
 }
 
 // ------------------------------------------------------------------ test restores
@@ -185,8 +199,7 @@ export async function testRestore(options: { requestedByEmail: string | null; or
       let error: string | null = null;
       let details: Record<string, unknown> = {};
       try {
-        const { header, sourceLiveKey } = await openBackupKeys(file);
-        details = await withScratchRestore(file, undefined, async (client) => {
+        details = await withScratchRestore(file, undefined, async (client, { header, sourceLiveKey }) => {
           const tables = Number((await client.query<{ n: string }>("select count(*)::text as n from information_schema.tables where table_schema = 'public'")).rows[0].n);
           const secrets: SecretsReport = await reEncryptStoredSecrets(client, sourceLiveKey, { dryRun: true });
           const result: Record<string, unknown> = { madeAt: header.createdAt, tables, secretsReadable: secrets.current + secrets.reEncrypted, secretsUnreadable: secrets.unreadable };
@@ -299,11 +312,13 @@ export async function recoverPeople(
   if (!auth.user.isServerAdmin) throw new ForbiddenError("Only a server admin can recover people from a backup.");
   const { header } = await readBackupHeader(input.file);
   if (header.kind !== "server") throw new ValidationError("That's an organisation's backup. People come from a backup of the server's own database (in the _server folder).");
-  await checkBackup(input.file, input.material);
-  const { sourceLiveKey } = await openBackupKeys(input.file, input.material);
+  // Checked inside withScratchRestore, on the same private copy it restores; the live key comes from that copy too.
+  let sourceLiveKey = "";
   const replace = new Set(Array.isArray(input.replace) ? input.replace.filter((e): e is string => typeof e === "string").map((e) => e.trim().toLowerCase()) : []);
 
-  const fromBackup = await withScratchRestore(input.file, input.material, async (client) => ({
+  const fromBackup = await withScratchRestore(input.file, input.material, async (client, keys) => {
+    sourceLiveKey = keys.sourceLiveKey;
+    return {
     users: (
       await client.query<BackupUser>(
         "select id::text, email, display_name, password_hash, is_server_admin, is_active, totp_secret_ciphertext, totp_enabled_at, password_changed_at, created_at from users order by email",
@@ -328,7 +343,8 @@ export async function recoverPeople(
           )
         ).rows
       : [],
-  }));
+    };
+  });
 
   const here = (await coreQuery<{ id: string; email: string; memberships: string }>(
     "select u.id::text, u.email, (select count(*) from organisation_members m where m.user_id = u.id)::text as memberships from users u",
