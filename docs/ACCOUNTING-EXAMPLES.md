@@ -19521,7 +19521,8 @@ sent** on and Income in advance **2350** (a current liability). Order
 - **SWS7** Whatever's left: when a line has nothing left to send, anything
   still held for it goes to sales (or back), so 2350 always clears.
 - **SWS8** Sent before it's paid: the sale counts on the invoice date. A
-  cancelled fulfilment counts for nothing. A fulfilment is counted once.
+  cancelled fulfilment counts for nothing (one cancelled after it was
+  counted is reversed: SPF13). A fulfilment is counted once.
 - **SWS9** Only orders brought in while Sales when sent is on are held.
   Turning it off leaves orders already held to be counted when sent.
   Journals it posts say they came from Shopify and can't be corrected by
@@ -24294,3 +24295,112 @@ backed up before Update now starts.
   Tohyee's data folder, which only Administrators can change) sees the
   unfinished update, puts v1.0.0 back and starts it, as in UPD11. From this
   version on; an update from 0.45.0 doesn't have it yet.
+
+## Shopify shipments cancelled after they were counted (SPF13-SPF20; 26 Nov 2026; following common practice, not yet reviewed)
+
+The owner decided that when a Shopify fulfilment (a shipment) is cancelled
+after Sales when sent counted it, Tohyee reverses it: the sale goes back to
+"paid, still to send". The details below follow common practice and are not
+yet reviewed. This changes SWS8 for a fulfilment Tohyee had already counted;
+one cancelled before Tohyee counted it still counts for nothing. Tested in
+`tests/integration/sales-platform-cancelled-fulfilment.test.ts`.
+
+Made-up store as in SWS1: GST registered (invoice basis), prices include
+GST, clearing account 1010, sales and shipping 4000, Income in advance 2350,
+inventory 1400, cost of goods sold 5000. Order #1001, paid on 1 Nov:
+Paw pendant (a stock item, cost **20.00**) **115.00**, Impression kit (not
+stock) **23.00** and shipping **11.50**; total **149.50**, GST **19.50**.
+It's invoiced on 1 Nov with **130.00** held in 2350 (SWS1).
+
+- **SPF13 A shipment cancelled.** Shipment A on 3 Nov sends the pendant and
+  the kit: Dr 2350 **130.00** / Cr 4000 **130.00** (pendant 100.00, kit
+  20.00, shipping 10.00 with the first thing sent), and the pendant comes
+  out of stock, Dr 5000 **20.00** / Cr 1400 **20.00** (SWS2-SWS3). On 5 Nov
+  the shipment is cancelled in Shopify. At the next sync (or the order's
+  webhook) Tohyee undoes exactly what counting A did, dated **3 Nov**, the
+  day A was counted, because the sale should never have counted: Dr 4000
+  **130.00** / Cr 2350 **130.00**, and the pendant comes back into stock at
+  the cost it went out at, Dr 1400 **20.00** / Cr 5000 **20.00**. Sales are
+  **0.00**, 2350 holds **130.00** and stock is **1 worth 20.00** again. GST
+  doesn't move: it was counted on the invoice when the order was paid, and
+  the invoice and the payment still stand, so the GST return is the same on
+  either the invoice or the payments basis. The order is back on Sales ›
+  To send and in the held orders list (and the AI's list_held_orders) with
+  **130.00** held, and Mark as sent (mark_order_sent) works on it again. The
+  sync log says: "#1001: shipment A was cancelled in Shopify, so what it
+  sent is back to paid, still to send: 130.00 moved from sales back to
+  Income in advance, and 1 Paw pendant back into stock."
+- **SPF14 Seen twice, then sent again.** The same cancellation seen again
+  at the next sync, or in a webhook, reverses nothing more. When the
+  pendant and kit go in a new shipment B on 7 Nov, B is counted as usual on
+  7 Nov: Dr 2350 **130.00** / Cr 4000 **130.00**, and the pendant out of
+  stock at **20.00**.
+- **SPF15 Only the cancelled shipment.** Two pendants (**230.00**,
+  **200.00** net), the kit and shipping; total **264.50**, held **230.00**.
+  Shipment A (3 Nov) sends one pendant and the kit: **130.00** to sales
+  (with the shipping). Shipment B (4 Nov) sends the second pendant:
+  **100.00**. B is cancelled: Dr 4000 **100.00** / Cr 2350 **100.00**, dated
+  4 Nov, and one pendant back into stock at 20.00. A's lines aren't
+  touched, and the shipping stays in sales because A still stands. If A is
+  cancelled instead, **120.00** (pendant and kit) goes back and the shipping
+  stays, because B still stands. Once no counted shipment is left standing,
+  the last one cancelled takes the shipping back too (**10.00**), so it
+  counts again with the next thing sent.
+- **SPF16 Not GST registered.** The same order for an organisation that
+  isn't registered: the invoice is **149.50** with no GST, and 2350 holds
+  the full prices, **149.50** (pendant 115.00, kit 23.00, shipping 11.50).
+  Shipment A counts **149.50** to sales; when it's cancelled, Dr 4000
+  **149.50** / Cr 2350 **149.50**, and the pendant comes back at **20.00**.
+  No GST anywhere.
+- **SPF17 A locked period.** Paid 1 Oct, shipment A counted on 3 Oct
+  (**130.00** to sales, the pendant out at 20.00). October's GST return is
+  filed and the books are locked up to 31 Oct. A is cancelled on 4 Nov.
+  October's journals aren't changed or voided. The reversal is dated
+  **1 Nov**, the earliest day allowed: Dr 4000 **130.00** / Cr 2350
+  **130.00**, and the pendant back into stock on 1 Nov at 20.00. The
+  journal and the sync log say plainly that it's dated 1 Nov, not 3 Oct,
+  because the books are locked up to 31 Oct. Stock that can't go back to
+  that day (the item moved since) comes back on the earliest day allowed,
+  as SPF2.
+- **SPF18 Refunds and a cancelled shipment: never reversed twice.** Which
+  came first is Shopify's own time for each (the refund's time and the time
+  the shipment was last changed).
+  - *Cancelled, then refunded.* A is reversed as SPF13. The pendant is then
+    refunded (115.00): it's unsent, so it comes out of 2350 as SWS5, Dr 2350
+    **100.00**, Dr GST **15.00** / Cr 1010 **115.00**, with nothing from
+    stock (the pendant is already back). 2350 holds **30.00**; sales
+    **0.00**.
+  - *Refunded, then cancelled.* After A was counted the pendant is refunded
+    and restocked: as SPC14, Dr 4000 **100.00**, Dr GST **15.00** / Cr 1010
+    **115.00**, and the pendant back into stock. A is then cancelled. The
+    pendant was refunded already, so only the kit and the shipping go back:
+    Dr 4000 **30.00** / Cr 2350 **30.00**, and no stock moves. Sales
+    **0.00**, 2350 **30.00**, stock **1 worth 20.00**: the pendant comes out
+    of sales once and back into stock once. The same when both happen
+    between two syncs: they're dealt with in Shopify's order. (The pendant's
+    stock left when it was sent, not with the invoice, so the credit note
+    carries no item and the pendant comes back against what was sent, at
+    the cost it went out at. Before this change a restocked refund like
+    this was refused at every sync.)
+  - *Part refunded.* Two pendants sent in A, one refunded and restocked
+    after A was counted, then A cancelled: one pendant (**100.00**) goes
+    back to 2350 and one back into stock; the refunded one stays refunded.
+    The rule: a cancelled shipment takes back at most what's still counted
+    as sent and not refunded from sales on each line.
+  - *An amount refunded, not a quantity.* A goodwill refund (57.50) on the
+    pendant after A was counted comes out of sales (SPC14). If A is then
+    cancelled, the pendant's full **100.00** goes back to 2350 and sales
+    show **50.00** less until it's sent again, when the 100.00 comes back
+    and the pendant's sales are **50.00**.
+- **SPF19 Orders held after they were invoiced.** For an order held after
+  invoicing (SWS12-SWS14), the stock came off with the invoice, so a
+  cancelled shipment moves the sale back to 2350 but no stock, as sending it
+  moved none. A shipment Shopify had already sent before Sales when sent
+  applied to the order was counted by the invoice, not out of 2350, so
+  nothing is reversed: the sync log says so and asks a person to check it.
+  Shipments counted before this change are reversed the same way, at each
+  line's average amount counted per item.
+- **SPF20 WooCommerce.** Sales when sent isn't available for WooCommerce
+  (SWS9): its sales count when they're invoiced, and an order moved back
+  from completed to processing changes nothing in Tohyee. So there's
+  nothing to reverse, and it isn't covered.
