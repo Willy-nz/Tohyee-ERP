@@ -640,8 +640,8 @@ that something happened.
   year's depreciation by type, disposals this year, and ties to the ledger
   account by account. Tax depreciation beside book, pooling and low-value
   write-offs aren't built.
-- **Spreading** (Accounting, Month end; SW1-SW25, accepted by the owner
-  24 Nov 2026): one worksheet in place of the spreadsheet
+- **Spreading** (Accounting, Month end; SW1-SW25 accepted by the owner
+  24 Nov 2026, SW26-SW30 not yet reviewed): one worksheet in place of the spreadsheet
   for costs **paid in advance**, **income in advance**, costs **not billed
   yet** and income **not invoiced yet**. Each kind has one balance sheet
   account, set when an admin turns it on (1200 Prepayments, and Accrued
@@ -684,7 +684,16 @@ that something happened.
   posted, and put on the income or expense line of each month's journal.
   The journal's own custom fields are filled in on Month end. A required
   tracking category stops a month until the item has one, and the preview
-  names the item.
+  names the item. A **Suggested** card (SW26-SW28, tenant migration 0309)
+  lists what Tohyee noticed: bill, invoice and bank lines whose words say
+  they cover more than a month ("1 Dec 2026 to 30 Nov 2027", "annual",
+  "12 months"), with the dates it read, and suppliers who billed an
+  expense account in each of the last three months and haven't this
+  month, with the average. Nothing is added until someone presses Add;
+  "Not this one" keeps a suggestion away. AI keys read and dismiss them.
+  **Change** on a row (SW29, SW30) moves an item's last day, and on an
+  accrual changes the amount still to come; posted months stay as they
+  are and what's left is spread again over the months still to come.
 - **Projects and time tracking** (Sales; PJ1-PJ13, not yet approved by the owner), like project tracking in other accounting software: a **project** for a customer with an optional
   estimate and deadline, **In progress** or **Closed** (only by closing and
   reopening). **Tasks** are hourly (a rate), fixed price or non-chargeable,
@@ -1273,7 +1282,7 @@ that something happened.
   entered during a year show on their own cash line, not as receipts or
   payments (NPR11). Accounts nothing has been posted to are hidden on the
   categories list until asked for.
-- **CRM** (after [Twenty](https://github.com/twentyhq/twenty), built in):
+- **CRM** (built in):
   its **own app** at `/crm`, with its own top bar (Home, Contacts, Sales, Tasks, Dashboard, More and Settings, the last ones opening to grouped menus; a ☰ menu on phones), the same
   sign-in, organisations and roles. An **app switcher** (Accounting / CRM)
   beside the Tohyee name in both apps replaces the old CRM menu; it shows
@@ -1286,7 +1295,7 @@ that something happened.
   and error, or "Connect Shopify" for an admin; CRM › Settings ›
   Integrations opens Settings › Sales platforms. Companies are the contacts, which can now also be **prospects**; **people**
   at each company; **opportunities** with the organisation's own stages
-  (starting with Twenty's, plus Lost) on a drag-and-drop pipeline board, where a won one makes its draft invoice in
+  (starting with New, Screening, Meeting, Proposal, Won and Lost) on a drag-and-drop pipeline board, where a won one makes its draft invoice in
   one click (and makes a prospect a customer); an opportunity for a company
   in another currency is in it, amount and invoice (MC68, MC69), and the
   board totals each currency on its own; **tasks** with due dates and
@@ -1712,7 +1721,7 @@ that something happened.
   a sync log everyone can read; a webhook address per connection that
   checks the platform's signature before anything else; and a catch-up
   sync every 15 minutes (off with TOHYEE_SALES_PLATFORM_SYNC_SCHEDULER=off)
-  that pauses a store after three failures in a row. Admins connect a store
+  that pauses a store after its login is refused three times in a row. Admins connect a store
   with a Dev Dashboard app's client ID and secret (Shopify's way since
   1 Jan 2026) or an older custom app's Admin API access token and API secret
   key; only `read_customers` and `read_products` are accepted, and a token
@@ -1929,6 +1938,15 @@ that something happened.
   in to the server computer. Tohyee backs everything up, then the Tohyee
   updater (a scheduled task run as SYSTEM) installs GitHub's latest release
   after checking its SHA-256. Not yet tried on a real Windows computer.
+  **Updates that fail** (UPD7-UPD13): setup stops both services for real
+  first (with Windows' restart-on-failure off) and keeps the old program in
+  a "previous" folder instead of deleting it. If it can't stop them, nothing
+  is changed; if the update fails before the new version starts, the old
+  one is put back and started; after that it says what to do. The installer
+  writes how it ended for Update now, so the button is never left greyed
+  out. Tested on GitHub's Windows machines (a held file, and a failure on
+  purpose before the start), not yet on a real Windows computer or with a
+  restart in the middle.
 - **Server stats** in the Windows server app: CPU, memory,
   requests, people using Tohyee, database connections, disk space and each
   organisation's database size, with graphs of the last 24 hours.
@@ -3432,7 +3450,7 @@ that something happened.
   Tohyee yet: rainfall, photos and voice notes, treatments, births and
   deaths. (Rainfall is kept now: see Rainfall above.)
 
-- **Tohyee for Android** (;
+- **Tohyee for Android** (see
   [MOBILE-APP.md](MOBILE-APP.md#the-android-app)): an optional Android app
   (APK, from GitHub releases; not on the Play Store yet) built with
   Capacitor in `android/`. The first time, **Your Tohyee address** checks
@@ -3454,7 +3472,7 @@ that something happened.
   steps beside the home-screen web app. Not yet tried on a real Android
   phone. Not in the app yet: downloads, connecting farm mail, iPhone, push.
 
-- **Tohyee on phones and tablets: install** (;
+- **Tohyee on phones and tablets: install** (see
   [MOBILE-APP.md](MOBILE-APP.md)): **Get Tohyee on this device**
   (`/get-tohyee`) gives each device's steps (iPhone and iPad: Safari ›
   Share › Add to Home Screen; Android: Chrome › Install), with the app icon

@@ -24,7 +24,7 @@ import {
   lockRegister,
 } from "@/lib/fixed-assets/service";
 import { assertSameRequest, requestHash } from "@/lib/idempotency";
-import { getJournal, parseJournalBody, postJournalBody } from "@/lib/ledger/journals";
+import { getJournal, parseJournalBody, postJournalBody, withOriginalCustomFields } from "@/lib/ledger/journals";
 import { assertPostingDateAllowed } from "@/lib/ledger/period-controls";
 import { currencyMinorUnits } from "@/lib/money/currency";
 import { add, cmp, dec, type Decimal, isZero, parseDecimalInput, sum, toFixedString, ZERO_DECIMAL } from "@/lib/money/decimal";
@@ -389,18 +389,21 @@ export async function rollBackDepreciationRun(
       tx,
       "fixed_asset_depreciation:rollback",
       id,
-      parseJournalBody(tx, {
-        postingDate: run.periodEnd,
-        reference: `VOID-${original.reference}`.slice(0, 100),
-        description: `Rollback of depreciation to ${longDate(run.periodEnd)}`,
-        lines: original.lines.map((line) => ({
-          accountCode: line.accountCode,
-          debitAmount: line.creditAmount,
-          creditAmount: line.debitAmount,
-          description: line.description,
-          tracking: line.tracking,
-        })),
-      }),
+      withOriginalCustomFields(
+        parseJournalBody(tx, {
+          postingDate: run.periodEnd,
+          reference: `VOID-${original.reference}`.slice(0, 100),
+          description: `Rollback of depreciation to ${longDate(run.periodEnd)}`,
+          lines: original.lines.map((line) => ({
+            accountCode: line.accountCode,
+            debitAmount: line.creditAmount,
+            creditAmount: line.debitAmount,
+            description: line.description,
+            tracking: line.tracking,
+          })),
+        }),
+        original,
+      ),
       { origin: "fixed_asset_depreciation", relatedJournalId: original.id, correctionKind: "reversal" },
     );
     rollbackJournalId = posted.journal.id;

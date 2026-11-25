@@ -334,7 +334,13 @@ export type OrdersRequest = {
   parts?: { discounts: boolean; fulfilments: boolean; fulfilmentOrders: boolean; sent?: boolean };
 };
 
-export type OrdersResult = { orders: PlatformOrder[]; until: string | null; notes: string[] };
+export type OrdersResult = {
+  orders: PlatformOrder[];
+  until: string | null;
+  notes: string[];
+  /** Whether the read reached the last changed order (false when it stopped at its page limit). */
+  complete?: boolean;
+};
 
 export type PayoutsRequest = { issuedFrom: string; alreadyPosted: (externalId: string) => boolean };
 

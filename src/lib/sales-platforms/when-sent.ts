@@ -44,9 +44,20 @@ type HeldRow = {
   recognised_amount: string;
   refunded_amount: string;
   closed: boolean;
+  stock_out_item_id: string | null;
 };
 
-export type HeldLine = { kind: "line" | "shipping"; externalId: string; description: string; itemId: string | null; incomeAccountCode: string; quantity: string; amount: string };
+export type HeldLine = {
+  kind: "line" | "shipping";
+  externalId: string;
+  description: string;
+  itemId: string | null;
+  incomeAccountCode: string;
+  quantity: string;
+  amount: string;
+  /** SPF6: the stock item whose stock already came off with the invoice (held after invoicing). */
+  stockOutItemId?: string | null;
+};
 
 /**
  * The sales order's lines for an order held until it's sent (SWS1): lines to
@@ -86,10 +97,10 @@ export function holdLines(
 export async function saveHeld(tx: OrgTx, connectionId: string, orderId: string, heldAccountCode: string, held: readonly HeldLine[]): Promise<void> {
   for (const line of held) {
     await tx.query(
-      `insert into sales_platform_held_lines (connection_id, order_external_id, line_kind, line_external_id, description, item_id, income_account_id, held_account_id, quantity, amount)
-       values ($1, $2, $3, $4, $5, $6, (select id from accounts where lower(code) = lower($7)), (select id from accounts where lower(code) = lower($8)), $9::numeric, $10::numeric)
+      `insert into sales_platform_held_lines (connection_id, order_external_id, line_kind, line_external_id, description, item_id, income_account_id, held_account_id, quantity, amount, stock_out_item_id)
+       values ($1, $2, $3, $4, $5, $6, (select id from accounts where lower(code) = lower($7)), (select id from accounts where lower(code) = lower($8)), $9::numeric, $10::numeric, $11)
        on conflict (connection_id, order_external_id, line_kind, line_external_id) do nothing`,
-      [connectionId, orderId, line.kind, line.externalId, line.description.slice(0, 500), line.itemId, line.incomeAccountCode, heldAccountCode, line.quantity, line.amount],
+      [connectionId, orderId, line.kind, line.externalId, line.description.slice(0, 500), line.itemId, line.incomeAccountCode, heldAccountCode, line.quantity, line.amount, line.stockOutItemId ?? null],
     );
   }
 }
@@ -97,7 +108,7 @@ export async function saveHeld(tx: OrgTx, connectionId: string, orderId: string,
 async function loadHeld(tx: OrgTx, connectionId: string, orderId: string): Promise<HeldRow[]> {
   const result = await tx.query<HeldRow>(
     `select h.id, h.line_kind, h.line_external_id, h.description, i.code as item_code, i.item_type, income.code as income_code, held.code as held_code,
-            h.quantity::text, h.amount::text, h.sent_quantity::text, h.refunded_quantity::text, h.recognised_amount::text, h.refunded_amount::text, h.closed
+            h.quantity::text, h.amount::text, h.sent_quantity::text, h.refunded_quantity::text, h.recognised_amount::text, h.refunded_amount::text, h.closed, h.stock_out_item_id::text
        from sales_platform_held_lines h
        join accounts income on income.id = h.income_account_id
        join accounts held on held.id = h.held_account_id
@@ -121,6 +132,7 @@ export async function refundHeld(tx: OrgTx, connectionId: string, orderId: strin
     accountCode: rows[0].held_code,
     lines: new Map(rows.filter((row) => row.line_kind === "line").map((row) => [row.line_external_id, left(row)])),
     shipping: new Set(rows.filter((row) => row.line_kind === "shipping" && isZero(dec(row.sent_quantity))).map((row) => row.line_external_id)),
+    stockOut: new Map(rows.flatMap((row) => (row.line_kind === "line" && row.stock_out_item_id ? [[row.line_external_id, row.stock_out_item_id] as const] : []))),
   };
 }
 
@@ -129,14 +141,25 @@ export async function closeHeld(tx: OrgTx, connectionId: string, orderId: string
   await tx.query("update sales_platform_held_lines set closed = true, updated_at = now() where connection_id = $1 and order_external_id = $2", [connectionId, orderId]);
 }
 
-/** Orders a sync reads again because they still hold something to be sent. */
+/**
+ * Orders a sync reads again because they still hold something to be sent:
+ * the ones read longest ago first (SPF8), and each is stamped as read, so
+ * every held order gets its turn, 25 a sync.
+ */
 export async function ordersHeld(tx: OrgTx, connectionId: string, limit = 25): Promise<string[]> {
   const result = await tx.query<{ order_external_id: string }>(
     `select order_external_id from sales_platform_held_lines where connection_id = $1 and not closed
-      group by order_external_id order by min(updated_at) limit $2`,
+      group by order_external_id order by max(last_read_at) nulls first, min(updated_at), order_external_id limit $2`,
     [connectionId, limit],
   );
-  return result.rows.map((row) => row.order_external_id);
+  const ids = result.rows.map((row) => row.order_external_id);
+  if (ids.length > 0) {
+    await tx.query("update sales_platform_held_lines set last_read_at = now() where connection_id = $1 and not closed and order_external_id = any($2::text[])", [
+      connectionId,
+      ids,
+    ]);
+  }
+  return ids;
 }
 
 type Move = { from: string; to: string; amount: Decimal; description: string };
@@ -287,7 +310,8 @@ async function send(
           inventoryAccountCode: ctx.inventoryCode,
           offsetAccountCode: ctx.costOfSalesCode,
           quantity: toPlainString(part.quantity),
-        });
+          // SPF1: Allow negative stock applies, as on an invoice. SPF2: stock that can't be backdated goes on the earliest day allowed.
+        }, { followNegativeStockSetting: true, onEarliestDate: true });
       }
     }
   }
@@ -452,17 +476,25 @@ export async function holdAfterInvoicing(
   }
   const anythingSent = sentFulfilments.some((fulfilment) => fulfilment.lines.length > 0);
   const { held } = holdLines(input.lines, input.rates, input.amountsMode, input.heldAccountCode);
+  // SPF6: which of the lines' items moved stock at the invoice (stock items and kits), so a restocked refund can put it back.
+  const itemIds = [...new Set(held.flatMap((line) => (line.itemId ? [line.itemId] : [])))];
+  const stockItems = new Set(
+    itemIds.length
+      ? (await tx.query<{ id: string }>("select id::text from items where id = any($1::bigint[]) and item_type in ('stock', 'kit')", [itemIds])).rows.map((row) => row.id)
+      : [],
+  );
   const keep: HeldLine[] = [];
   for (const line of held) {
     if (line.kind === "shipping") {
       if (!anythingSent) keep.push({ ...line, itemId: null });
       continue;
     }
+    const stockOutItemId = line.itemId && stockItems.has(line.itemId) ? line.itemId : null;
     const quantity = dec(line.quantity);
     const unsent = sub(quantity, sentOf.get(line.externalId) ?? dec("0"));
     if (!isPositive(unsent)) continue;
     const amount = cmp(unsent, quantity) >= 0 ? dec(line.amount) : mulDiv(dec(line.amount), unsent, quantity, SCALE);
-    keep.push({ ...line, itemId: null, quantity: toPlainString(cmp(unsent, quantity) >= 0 ? quantity : unsent), amount: toFixedString(amount, SCALE) });
+    keep.push({ ...line, itemId: null, stockOutItemId, quantity: toPlainString(cmp(unsent, quantity) >= 0 ? quantity : unsent), amount: toFixedString(amount, SCALE) });
   }
   if (keep.length === 0) return null;
   const moves: Move[] = keep.map((line) => ({ from: line.incomeAccountCode, to: input.heldAccountCode, amount: dec(line.amount), description: `${line.description}: to be sent` }));

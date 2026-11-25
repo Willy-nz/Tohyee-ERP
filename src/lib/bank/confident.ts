@@ -22,8 +22,10 @@ import { asRecord, optionalSource, optionalString, requireArray, requireId, requ
  * - there's no candidate at all and a bank rule applies to the line.
  *
  * Two or more candidates for a line (a tie) show no one-click match either;
- * they're listed on the line to choose from. "OK" posts through the same
- * reconcile command as choosing it by hand.
+ * they're listed on the line to choose from. A line flagged as a possible
+ * duplicate of another line that's still there (not excluded) never has a
+ * one-click match (BKF1): a person opens it and decides. "OK" posts through
+ * the same reconcile command as choosing it by hand.
  */
 export type ConfidentSuggestion =
   | {
@@ -74,6 +76,8 @@ export type LineConfidence = {
   candidateCount: number;
   /** True when the line's only candidate is also another line's candidate. */
   competing: boolean;
+  /** True when the line may be a duplicate of another line still there (BKF1): no one-click match. */
+  possibleDuplicate: boolean;
 };
 
 type LineRow = {
@@ -87,6 +91,7 @@ type LineRow = {
   code: string | null;
   reference: string | null;
   currency_code: string | null;
+  possible_duplicate: boolean;
 };
 
 const money = (value: string) => toFixedString(dec(value), 2);
@@ -96,8 +101,10 @@ export async function confidentMatches(tx: OrgTx, accountIdInput: unknown): Prom
   const accountId = requireId(accountIdInput, "accountId");
   const lines = (
     await tx.query<LineRow>(
-      `select id, account_id, line_date::text, amount::text, description, payee, particulars, code, reference, currency_code
-         from bank_statement_lines where account_id = $1 and status = 'unreconciled' order by line_date, id`,
+      `select b.id, b.account_id, b.line_date::text, b.amount::text, b.description, b.payee, b.particulars, b.code, b.reference, b.currency_code,
+              -- BKF1: flagged as a possible duplicate of a line that's still there (an excluded or deleted one doesn't count).
+              exists (select 1 from bank_statement_lines d where d.id = b.possible_duplicate_of and d.status in ('unreconciled', 'reconciled')) as possible_duplicate
+         from bank_statement_lines b where b.account_id = $1 and b.status = 'unreconciled' order by b.line_date, b.id`,
       [accountId],
     )
   ).rows;
@@ -197,7 +204,10 @@ export async function confidentMatches(tx: OrgTx, accountIdInput: unknown): Prom
     });
   }
   const uses = new Map<string, number>();
-  for (const list of candidates.values()) {
+  // A possible duplicate (BKF1) doesn't compete with the line it may duplicate: it gets no match of its own.
+  const duplicates = new Set(lines.filter((row) => row.possible_duplicate).map((row) => row.id));
+  for (const [lineId, list] of candidates) {
+    if (duplicates.has(lineId)) continue;
     for (const candidate of list) uses.set(candidate.key, (uses.get(candidate.key) ?? 0) + 1);
   }
   const rules = await listBankRules(tx, { activeOnly: true });
@@ -208,11 +218,13 @@ export async function confidentMatches(tx: OrgTx, accountIdInput: unknown): Prom
 
   async function confidenceOf(row: (typeof lines)[number]): Promise<LineConfidence> {
     const list = candidates.get(row.id) ?? [];
+    // BKF1: a possible duplicate waits for a person, whatever it would match.
+    if (row.possible_duplicate) return { lineId: row.id, suggestion: null, candidateCount: list.length, competing: false, possibleDuplicate: true };
     if (list.length === 1) {
       const competing = (uses.get(list[0].key) ?? 0) > 1;
-      return { lineId: row.id, suggestion: competing ? null : list[0], candidateCount: 1, competing };
+      return { lineId: row.id, suggestion: competing ? null : list[0], candidateCount: 1, competing, possibleDuplicate: false };
     }
-    if (list.length > 1) return { lineId: row.id, suggestion: null, candidateCount: list.length, competing: false };
+    if (list.length > 1) return { lineId: row.id, suggestion: null, candidateCount: list.length, competing: false, possibleDuplicate: false };
     const line = { accountId: row.account_id, amount: money(row.amount), description: row.description, payee: row.payee, particulars: row.particulars, code: row.code, reference: row.reference };
     const fitting = firstFittingRule(rules, line);
     // A foreign-currency line is converted at the last rate used (D4); with none, a rule isn't confident.
@@ -243,6 +255,7 @@ export async function confidentMatches(tx: OrgTx, accountIdInput: unknown): Prom
           : null,
       candidateCount: 0,
       competing: false,
+      possibleDuplicate: false,
     };
   }
 }

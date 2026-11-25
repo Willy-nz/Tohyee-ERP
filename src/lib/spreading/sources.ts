@@ -143,6 +143,17 @@ export async function listSourceLines(tx: OrgTx, sourceKind: SourceKind, documen
   return result.rows.map((row) => toSourceLine(tx, sourceKind, row));
 }
 
+const DATE_COLUMN: Record<SourceKind, string> = { bill: "d.bill_date", invoice: "d.invoice_date", bank: "d.transaction_date" };
+
+/** Lines dated on or after `since` that could still be spread: not on the worksheet, and nothing in the way. Newest first, for suggestions (SW26). */
+export async function listRecentSourceLines(tx: OrgTx, sourceKind: SourceKind, since: string, limit = 400): Promise<SourceLine[]> {
+  const result = await tx.query<LineRow>(
+    `${QUERIES[sourceKind]} where ${DATE_COLUMN[sourceKind]} >= $1::date and d.status = $2 order by ${DATE_COLUMN[sourceKind]} desc, l.id desc limit ${Number(limit)}`,
+    [since, sourceKind === "bank" ? "posted" : "approved"],
+  );
+  return result.rows.map((row) => toSourceLine(tx, sourceKind, row)).filter((line) => line.reason === null && line.itemId === null);
+}
+
 /** Moves the line's amount into the kind's account, on the bill's or invoice's date (SW15, SW16). */
 export async function postMove(tx: OrgTx, itemId: string, line: SourceLine, holdingCode: string, description: string): Promise<string> {
   const controls = await getPeriodControls(tx);

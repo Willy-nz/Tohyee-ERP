@@ -398,7 +398,7 @@ Server-wide:
   (`src/lib/server-admin/`). `/api/admin/*` and the `/server` pages refuse
   anything without it, so they can't be reached over the network or through
   the Cloudflare Tunnel even with a server admin's session. The one exception
-  is Update now (`/api/server-update`, UPD1-UPD6), which a server admin can
+  is Update now (`/api/server-update`, UPD1-UPD13), which a server admin can
   use from anywhere: it only backs up and leaves a version number for the
   Windows updater (a SYSTEM scheduled task, `installer/windows/tohyee-updater.ps1`),
   which installs nothing but GitHub's latest release, checked against its
@@ -1787,8 +1787,10 @@ The sales platform sync (`src/lib/sales-platforms/service.ts`, started from
 it) runs two minutes after start-up and then every 15 minutes, like mail
 sync: for each ready organisation, each active connection is synced one at
 a time, asking only for what changed since the last sync. A failure is kept
-on the connection; after three in a row it's paused until someone chooses
-Sync now. No network calls inside a database transaction.
+on the connection; after three in a row of the store refusing Tohyee's login
+it's paused until someone chooses Sync now (other failures, such as an
+outage, keep being tried). One order or payout that fails is logged and
+tried again without undoing the rest of the sync (SPF10). No network calls inside a database transaction.
 
 The farm security cameras (docs/FARM-SECURITY.md)
 add two: the camera media clean-up (`src/lib/security-cameras/cleanup.ts`,

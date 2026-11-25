@@ -7,6 +7,8 @@ type Context = { params: Promise<{ lineId: string }> };
  * Reconciles a line. `kind`: match (`journalLineIds`), payments (`allocations`
  * of `{ invoiceId | billId, amount }`), bank_transaction (`contactId`,
  * `amountsMode`, `lines`, `reference`) or transfer (`otherAccountCode`).
+ * Payments take `allowOverpayment: true` to keep anything paid beyond an
+ * invoice's amount due as an overpayment; without it that's refused (BKF2).
  * Match and payments take an optional `adjustment` (`accountCode`,
  * `taxCode`, `contactId`, `description`) for a small difference (BK24, BK25).
  * On a foreign-currency line, bank_transaction takes `exchangeRate` (else the

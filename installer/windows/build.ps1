@@ -46,6 +46,24 @@ function Assert-Sha256([string] $Path, [string] $Expected, [string] $Name) {
   if ($actual -ne $Expected) { throw "$Name download has SHA-256 $actual, expected $Expected." }
 }
 
+# Downloads with up to 3 tries, waiting 5 then 15 seconds between them: a
+# download cut off half-way ("The response ended prematurely") failed the
+# whole build in CI on 17 Nov 2026.
+function Invoke-Download([string] $Uri, [string] $OutFile) {
+  $waits = @(5, 15)
+  for ($attempt = 1; ; $attempt++) {
+    try {
+      Invoke-WebRequest $Uri -OutFile $OutFile
+      return
+    } catch {
+      Remove-Item -Force $OutFile -ErrorAction SilentlyContinue
+      if ($attempt -gt $waits.Count) { throw }
+      Write-Host "Download of $Uri failed ($($_.Exception.Message)); trying again in $($waits[$attempt - 1]) seconds."
+      Start-Sleep -Seconds $waits[$attempt - 1]
+    }
+  }
+}
+
 $root = (Resolve-Path (Join-Path $PSScriptRoot '..\..')).Path
 $out = Join-Path $root 'dist\windows'
 $stage = Join-Path $out 'stage'
@@ -78,7 +96,7 @@ Copy-Item (Join-Path $root 'dist\tohyee-admin.cjs') (Join-Path $stage 'app\tohye
 $nodeVersion = (& node -v).Trim()
 Write-Host "== Node.js $nodeVersion"
 $nodeZip = Join-Path $downloads 'node.zip'
-Invoke-WebRequest "https://nodejs.org/dist/$nodeVersion/node-$nodeVersion-win-x64.zip" -OutFile $nodeZip
+Invoke-Download "https://nodejs.org/dist/$nodeVersion/node-$nodeVersion-win-x64.zip" -OutFile $nodeZip
 Expand-Archive $nodeZip (Join-Path $downloads 'node') -Force
 $nodeDir = Join-Path $downloads "node\node-$nodeVersion-win-x64"
 Copy-Item (Join-Path $nodeDir 'node.exe') (Join-Path $stage 'node\node.exe')
@@ -86,7 +104,7 @@ Copy-Item (Join-Path $nodeDir 'LICENSE') (Join-Path $stage 'node\LICENSE.txt')
 
 Write-Host "== PostgreSQL $PostgresVersion"
 $pgZip = Join-Path $downloads 'pgsql.zip'
-Invoke-WebRequest $PostgresUrl -OutFile $pgZip
+Invoke-Download $PostgresUrl -OutFile $pgZip
 Expand-Archive $pgZip (Join-Path $downloads 'pg') -Force
 $pgDir = Join-Path $downloads 'pg\pgsql'
 if (-not (Test-Path (Join-Path $pgDir 'bin\postgres.exe'))) { throw "The PostgreSQL download didn't contain pgsql\bin\postgres.exe." }
@@ -99,16 +117,16 @@ foreach ($unused in @('pgAdmin 4', 'StackBuilder', 'doc', 'include', 'symbols'))
 }
 
 Write-Host '== WinSW and the Visual C++ runtime'
-Invoke-WebRequest $WinSwUrl -OutFile (Join-Path $stage 'service\WinSW-x64.exe')
+Invoke-Download $WinSwUrl -OutFile (Join-Path $stage 'service\WinSW-x64.exe')
 $vcRedist = Join-Path $stage 'vc_redist.x64.exe'
-Invoke-WebRequest $VcRedistUrl -OutFile $vcRedist
+Invoke-Download $VcRedistUrl -OutFile $vcRedist
 Assert-Sha256 $vcRedist $VcRedistSha256 'Visual C++ runtime'
 
 Write-Host "== cloudflared $CloudflaredVersion"
 $cloudflaredExe = Join-Path $stage 'cloudflared\cloudflared.exe'
-Invoke-WebRequest $CloudflaredUrl -OutFile $cloudflaredExe
+Invoke-Download $CloudflaredUrl -OutFile $cloudflaredExe
 Assert-Sha256 $cloudflaredExe $CloudflaredSha256 'cloudflared'
-Invoke-WebRequest "https://raw.githubusercontent.com/cloudflare/cloudflared/$CloudflaredVersion/LICENSE" -OutFile (Join-Path $stage 'cloudflared\LICENSE.txt')
+Invoke-Download "https://raw.githubusercontent.com/cloudflare/cloudflared/$CloudflaredVersion/LICENSE" -OutFile (Join-Path $stage 'cloudflared\LICENSE.txt')
 
 Write-Host '== Tohyee server app (tray icon and server settings)'
 # .NET Framework 4.8 comes with Windows 10 and 11, so nothing extra is installed.
@@ -117,7 +135,7 @@ if ($LASTEXITCODE -ne 0) { throw "Building the Tohyee server app failed with exi
 if (-not (Test-Path (Join-Path $stage 'tray\TohyeeTray.exe'))) { throw 'The Tohyee server app (TohyeeTray.exe) was not built.' }
 Get-ChildItem (Join-Path $stage 'tray') -Include *.pdb, *.xml -Recurse | Remove-Item -Force
 
-foreach ($script in @('configure-tohyee.ps1', 'remove-services.ps1', 'tohyee-updater.ps1', 'database-logins.sql', 'database-owner.sql')) {
+foreach ($script in @('configure-tohyee.ps1', 'remove-services.ps1', 'tohyee-updater.ps1', 'update-guard.ps1', 'database-logins.sql', 'database-owner.sql')) {
   Copy-Item (Join-Path $PSScriptRoot $script) (Join-Path $stage "scripts\$script")
 }
 
@@ -128,7 +146,7 @@ $innoDir = Join-Path $downloads "innosetup-$InnoSetupVersion"
 $iscc = Join-Path $innoDir 'ISCC.exe'
 if (-not (Test-Path $iscc)) {
   $innoSetup = Join-Path $downloads "innosetup-$InnoSetupVersion.exe"
-  Invoke-WebRequest $InnoSetupUrl -OutFile $innoSetup
+  Invoke-Download $InnoSetupUrl -OutFile $innoSetup
   Assert-Sha256 $innoSetup $InnoSetupSha256 'Inno Setup'
   $p = Start-Process -FilePath $innoSetup -ArgumentList @('/VERYSILENT', '/SUPPRESSMSGBOXES', '/NORESTART', '/SP-', '/CURRENTUSER', "/DIR=`"$innoDir`"") -Wait -PassThru
   if ($p.ExitCode -ne 0) { throw "Installing Inno Setup failed with exit code $($p.ExitCode)" }

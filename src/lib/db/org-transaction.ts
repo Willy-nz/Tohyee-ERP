@@ -70,13 +70,14 @@ export function assertOrganisationUsable(organisation: OrganisationRecord): void
  * The single entry point for organisation data: resolves the organisation's
  * own database from the core registry and runs `work` in one transaction there.
  * Requests carry organisation IDs; database names never come from clients.
- * `readOnly` makes the whole transaction read-only in PostgreSQL.
+ * `readOnly` makes the whole transaction read-only in PostgreSQL;
+ * `snapshot` makes it see one point in time (repeatable read).
  */
 export async function withOrganisationTransaction<T>(
   organisation: OrganisationRecord,
   actor: Actor,
   work: (tx: OrgTx) => Promise<T>,
-  options: { people?: PeopleNames; readOnly?: boolean } = {},
+  options: { people?: PeopleNames; readOnly?: boolean; snapshot?: boolean } = {},
 ): Promise<T> {
   assertOrganisationUsable(organisation);
   // A core database read, done before the organisation's transaction opens.
@@ -88,6 +89,10 @@ export async function withOrganisationTransaction<T>(
       // nextval, select ... for update) for the rest of this transaction.
       // Used for AI tools.
       await client.query("set transaction read only");
+    }
+    if (options.snapshot) {
+      // Every query in the transaction sees the data as it was when it began (a copy taken at one point in time).
+      await client.query("set transaction isolation level repeatable read");
     }
     const settings = await client.query<{ base_currency: string; organisation_id: string }>(
       "select base_currency, organisation_id from organisation_settings where id = true",

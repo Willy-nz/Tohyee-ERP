@@ -10,7 +10,7 @@ import { controlAccountCode } from "@/lib/invoices/service";
 import { foreignRefund, foreignRefundFields, openBase, parseRateInput } from "@/lib/fx/documents";
 import { getJournal, parseJournalBody, postJournalBody, sameForeign } from "@/lib/ledger/journals";
 import { currencyMinorUnits } from "@/lib/money/currency";
-import { cmp, dec, isZero, parseDecimalInput, toFixedString, toPlainString } from "@/lib/money/decimal";
+import { cmp, dec, isZero, parseDecimalInput, significantScale, toFixedString, toPlainString } from "@/lib/money/decimal";
 import {
   getSupplierCreditNote,
   lockSupplierCreditNote,
@@ -226,9 +226,8 @@ export async function refundSupplierCreditNote(
   const source = optionalSource(command.source);
   const idempotencyKey = requireIdempotencyKey(command.idempotencyKey);
   const refundDate = parseIsoDate(command.refundDate, "refundDate");
-  // Approved credit notes are always in the base currency: it can't change once anything is posted.
-  const scale = currencyMinorUnits(tx.baseCurrency);
-  const amount = dec(parseDecimalInput(command.amount, "amount", { maxScale: scale }));
+  // Checked against the credit note's own currency once it's loaded (BKF6).
+  const amount = dec(parseDecimalInput(command.amount, "amount", { maxScale: 4 }));
   const bankAccountCode = parseAccountCodeInput(command.bankAccountCode, "bankAccountCode");
   const reference = optionalString(command.reference, "reference", { maxLength: 100 });
   const typedRate = parseRateInput(command.exchangeRate);
@@ -272,6 +271,11 @@ export async function refundSupplierCreditNote(
   }
   if (refundDate < creditNote.creditNoteDate) {
     throw new ValidationError(`The refund date can't be before the credit note date (${creditNote.creditNoteDate}).`);
+  }
+  // BKF6: in the credit note's own currency's smallest unit (whole yen for JPY), not the base currency's.
+  const scale = currencyMinorUnits(creditNote.currencyCode);
+  if (significantScale(amount) > scale) {
+    throw new ValidationError(scale === 0 ? "amount must be a whole number." : `amount can have at most ${scale} decimal places.`);
   }
   const remaining = dec(creditNote.remainingCredit!);
   if (isZero(remaining)) {

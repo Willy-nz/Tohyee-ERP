@@ -1121,6 +1121,8 @@ export async function approveCreditNote(
   tx: OrgTx,
   creditNoteIdInput: unknown,
   command: { source?: unknown; idempotencyKey: unknown },
+  /** SPF2: for documents brought in from a sales platform, stock that can't be backdated moves on the earliest day allowed. */
+  options: { stockOnEarliestDate?: boolean } = {},
 ): Promise<{ created: boolean; creditNote: CreditNote }> {
   const creditNoteId = requireId(creditNoteIdInput, "creditNoteId");
   const source = optionalSource(command.source);
@@ -1217,6 +1219,7 @@ export async function approveCreditNote(
     { id: creditNoteId, date: current.creditNoteDate, reference: creditNoteNumber, contactId: current.contactId, returnInvoiceId: current.returnInvoiceId },
     resolved.resolvedLines,
     `Stock returned, credit note ${creditNoteNumber}`,
+    { stockOnEarliestDate: options.stockOnEarliestDate === true },
   );
   if (stock) journalLines.push(...stock.journalLines);
   const posted = await postJournalBody(

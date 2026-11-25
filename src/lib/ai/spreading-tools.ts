@@ -17,7 +17,9 @@ import {
   unsettleSpreadItem,
   updateSpreadItemTags,
 } from "@/lib/spreading/service";
+import { changeSpreadItem } from "@/lib/spreading/change";
 import { listSourceLines } from "@/lib/spreading/sources";
+import { dismissSpreadSuggestion, listSpreadSuggestions } from "@/lib/spreading/suggestions";
 import { ValidationError } from "@/lib/errors";
 
 /**
@@ -72,6 +74,15 @@ export const SPREADING_READ_TOOLS: readonly AiTool[] = [
     run: (tx, args) => explainSpreadDifference(tx, args.kind),
   },
   {
+    name: "get_spreading_suggestions",
+    title: "Spreading suggestions",
+    level: "read",
+    description:
+      "What Tohyee has noticed that could go on the Spreading worksheet; nothing is added until one is accepted. lines: recent bill, invoice and bank lines whose own words say they cover more than a month (because holds the words; startDate, endDate and months are what it read from them). Accept one with add_spreading_item, giving its billLineId, invoiceLineId or bankLineId with startDate and endDate, after checking the dates make sense against the description. accruals: suppliers who billed an expense account in each of the three months before month and haven't in month, with the average of those months as amount. Accept one with add_spreading_item (kind accrued_expense, description, amount, targetAccountCode, method one_month, month, contactId). They're guesses from patterns: check each one, say which you weren't sure of, and use dismiss_spreading_suggestion for one that's wrong so it doesn't come back.",
+    inputSchema: schema(),
+    run: (tx) => listSpreadSuggestions(tx),
+  },
+  {
     name: "get_spreadable_lines",
     title: "Lines that can be spread",
     level: "read",
@@ -115,6 +126,18 @@ export const SPREADING_ACTION_TOOLS: AiTool[] = [
     act: (tx, args, command) => createSpreadItem(tx, { ...args, ...command }),
   }),
   tool({
+    name: "dismiss_spreading_suggestion",
+    title: "Dismiss a Spreading suggestion",
+    description: "Says one of get_spreading_suggestions' suggestions isn't wanted, so it doesn't come back. Nothing in the books changes.",
+    level: "post",
+    input: { key: { type: "string", description: "The suggestion's key from get_spreading_suggestions." } },
+    required: ["key"],
+    act: async (tx, args) => {
+      await dismissSpreadSuggestion(tx, { key: args.key });
+      return { dismissed: args.key };
+    },
+  }),
+  tool({
     name: "post_spreading_month",
     title: "Post a Spreading month",
     description:
@@ -144,6 +167,16 @@ export const SPREADING_ACTION_TOOLS: AiTool[] = [
     input: { itemId: ID("worksheet item"), month: MONTH },
     required: ["itemId", "month"],
     act: (tx, args) => endSpreadItemEarly(tx, args.itemId, { month: args.month }),
+  }),
+  tool({
+    name: "change_spreading_item",
+    title: "Change a Spreading item part way through",
+    description:
+      "Moves an item's last day (endDate), or on an accrual changes what's still to come (left, without GST), or both. Months already posted don't change; what's left is spread again over the months still to come, the way it was spread before. Only for items spread by month or by days. What's left of a paid-in-advance or income-in-advance item can't be changed (it's what was paid or invoiced): end it early instead.",
+    level: "post",
+    input: { itemId: ID("worksheet item"), endDate: { type: "string", description: "The new last day, YYYY-MM-DD." }, left: { type: "string", description: "Accruals only: the amount still to come over the months not yet posted, without GST." } },
+    required: ["itemId"],
+    act: (tx, args) => changeSpreadItem(tx, args.itemId, { endDate: args.endDate, left: args.left }),
   }),
   tool({
     name: "mark_spreading_item_done",

@@ -1,3 +1,5 @@
+import { formatDate } from "@/lib/format";
+import { depositAlreadyInBooks, type DepositInBooks } from "@/lib/sales-platforms/payout-doubles";
 import { createTransfer, createBankTransaction } from "@/lib/bank/transactions";
 import { createContact } from "@/lib/contacts/service";
 import { applyCreditNote } from "@/lib/credit-notes/applications";
@@ -326,6 +328,19 @@ async function attempt<T>(tx: OrgTx, work: () => Promise<T>): Promise<Attempt<T>
     if (error instanceof HttpError || typeof (error as { code?: unknown }).code === "string") return { ok: false, error: error as Error };
     throw error;
   }
+}
+
+/** SPF2: a plain note when a document's stock moved on a later day than the document, or null. */
+async function stockMovedLater(tx: OrgTx, sourceType: "invoice" | "credit_note", sourceId: string, date: string): Promise<string | null> {
+  const found = await tx.query<{ item_code: string; movement_date: string }>(
+    `select distinct item_code, movement_date::text from inventory_movements
+      where source_type = $1 and source_id = $2 and movement_date > $3::date order by movement_date, item_code`,
+    [sourceType, sourceId, date],
+  );
+  if (found.rows.length === 0) return null;
+  const moved = found.rows.map((row) => `${row.item_code} on ${formatDate(row.movement_date)}`).join(", ");
+  const what = sourceType === "invoice" ? "invoice" : "credit note";
+  return `its stock moved on a later day than the ${what} (${moved}), because stock can't be backdated and there were already stock movements on that day. The cost of sales is on that day too.`;
 }
 
 /** An idempotency key for a document made from a platform record: the same record always gives the same key. */
@@ -704,7 +719,8 @@ export async function postOrder(tx: OrgTx, context: PostingContext, order: Platf
         invoiceDate,
         dueDate: invoiceDate,
       });
-      const approved = await approveInvoice(tx, invoice.id, { source: SOURCE, idempotencyKey: keyFor(posting, "order", id, "invoice-approve") });
+      // SPF2: the invoice keeps the day it was paid; stock that can't be backdated moves on the earliest day allowed.
+      const approved = await approveInvoice(tx, invoice.id, { source: SOURCE, idempotencyKey: keyFor(posting, "order", id, "invoice-approve") }, { stockOnEarliestDate: true });
       if (owing) return { invoice: approved.invoice, payment: null, fromCards: null };
       // GC2: what a gift card paid comes out of what's held for gift cards, as credit applied to the invoice; the rest is a payment.
       const fromCards = payments.giftCardAmount;
@@ -758,6 +774,8 @@ export async function postOrder(tx: OrgTx, context: PostingContext, order: Platf
           ? `Invoiced ${order.name} as ${invoiced.value.invoice.invoiceNumber} (${money(invoiced.value.invoice.total)}) on ${invoiceDate}, paid with a gift card (${invoiced.value.fromCards}).`
           : `Invoiced ${order.name} as ${invoiced.value.invoice.invoiceNumber} (${money(invoiced.value.invoice.total)}) on ${invoiceDate}, left owing for the bank feed to match.`,
     });
+    const later = await stockMovedLater(tx, "invoice", invoiced.value.invoice.id, invoiceDate);
+    if (later) await log(tx, context, { action: "posted", recordKind: kind, externalId: id, documentType: "invoice", documentId: invoiced.value.invoice.id, message: `${order.name}: ${later}` });
     doc = await findDocument(tx, posting, kind, id);
     if (!doc || doc.invoice_id === null) return;
     justInvoiced = true;
@@ -885,7 +903,12 @@ export async function postOrder(tx: OrgTx, context: PostingContext, order: Platf
         lines: plan.lines,
         returnInvoiceId: doc!.invoice_id,
       });
-      const approved = await approveCreditNote(tx, creditNote.id, { source: SOURCE, idempotencyKey: keyFor(posting, "refund", refund.externalId, "approve") });
+      const approved = await approveCreditNote(
+        tx,
+        creditNote.id,
+        { source: SOURCE, idempotencyKey: keyFor(posting, "refund", refund.externalId, "approve") },
+        { stockOnEarliestDate: true },
+      );
       await takeRefundFromHeld(tx, {
         connectionId: posting.connectionId,
         order,
@@ -953,6 +976,10 @@ export async function postOrder(tx: OrgTx, context: PostingContext, order: Platf
             cmp(dec(credited.value.applied ?? "0"), dec(credited.value.creditNote.total)) < 0 ? "; the rest is left as credit to refund by hand" : ""
           }).`,
     });
+    const restockedLater = await stockMovedLater(tx, "credit_note", credited.value.creditNote.id, date);
+    if (restockedLater) {
+      await log(tx, context, { action: "posted", recordKind: "refund", externalId: refund.externalId, documentType: "credit_note", documentId: credited.value.creditNote.id, message: `${order.name}'s refund: ${restockedLater}` });
+    }
   }
   if (!(await countWhatWasSent(null))) return;
   await saveDocument(tx, posting, kind, id, { retry: failedRefund, external_updated_at: order.updatedAt });
@@ -1037,6 +1064,25 @@ export async function postPayout(tx: OrgTx, context: PostingContext, payout: Pla
   }
   const accountFor = (line: PayoutLine) => (line.account === "chargebacks" ? posting.chargebacksAccountCode! : posting.feesAccountCode);
   const reference = `${platformLabel(posting)} payout ${id}`;
+  // SPF3: the deposit may already be in the books by hand (a transfer out of clearing, SPR9). Then it isn't posted again.
+  const inBooks: DepositInBooks =
+    plan.direction === "deposit"
+      ? await depositAlreadyInBooks(tx, { bankAccountCode: posting.payoutAccountCode, clearingAccountId: posting.clearingAccountId, amount: plan.net, date: plan.date })
+      : { kind: "none" };
+  if (inBooks.kind === "unsure") {
+    if (
+      await log(tx, context, {
+        action: "skipped",
+        recordKind: "payout",
+        externalId: id,
+        message: `Payout ${id} (${plan.net}) needs a person, so it wasn't posted: ${inBooks.reason} Posting it too could count the money twice. If the deposit is already right in the books, record the payout's fees by hand. Otherwise unreconcile and void the entry made by hand, then choose Try again on payouts.`,
+      })
+    ) {
+      context.counts.skipped += 1;
+    }
+    return "refused";
+  }
+  const linkedTransferId = inBooks.kind === "hand_transfer" ? inBooks.transferId : null;
   const made = await attempt(tx, async () => {
     const moveReserve = async (step: string, amount: string | null, from: string, to: string, what: string) =>
       amount === null
@@ -1099,7 +1145,7 @@ export async function postPayout(tx: OrgTx, context: PostingContext, payout: Pla
       });
       bankTransactionId = bankTransaction.id;
     }
-    const transfer = withdrawn ?? (await moveNet());
+    const transfer = withdrawn ?? (linkedTransferId ? { id: linkedTransferId } : await moveNet());
     return { transferId: transfer.id, bankTransactionId, receiptId, heldId, releasedId };
   });
   if (!made.ok) {
@@ -1126,7 +1172,9 @@ export async function postPayout(tx: OrgTx, context: PostingContext, payout: Pla
   const parts = [
     plan.direction === "withdrawal"
       ? `${plan.net} taken from ${posting.payoutAccountCode} into ${posting.clearingAccountCode} (a withdrawal)`
-      : `${plan.net} from ${posting.clearingAccountCode} to ${posting.payoutAccountCode}`,
+      : inBooks.kind === "hand_transfer"
+        ? `${plan.net} from ${posting.clearingAccountCode} to ${posting.payoutAccountCode} was already in the books (a transfer made by hand on ${formatDate(inBooks.date)}), so the payout is linked to it and not posted again`
+        : `${plan.net} from ${posting.clearingAccountCode} to ${posting.payoutAccountCode}`,
   ];
   if (plan.charges.length > 0) parts.push(`${plan.charges.map((line) => `${line.amount} to ${accountFor(line)}`).join(", ")} paid out of ${posting.clearingAccountCode}`);
   if (plan.receipts.length > 0) parts.push(`${plan.receipts.map((line) => `${line.amount} from ${accountFor(line)}`).join(", ")} back into ${posting.clearingAccountCode}`);
@@ -1152,10 +1200,16 @@ export async function postedPayoutIds(tx: OrgTx, platform: SalesPlatform, storeD
   return new Set(result.rows.map((row) => row.external_id));
 }
 
-/** Orders a sync should fetch again because something stopped them on Tohyee's side. */
-export async function ordersToRetry(tx: OrgTx, connectionId: string, limit = 25): Promise<string[]> {
+/**
+ * Orders a sync should fetch again because something stopped them on
+ * Tohyee's side: the oldest orders first (by the day they were placed), so
+ * they post in date order (SPF2), up to 50 a sync.
+ */
+export async function ordersToRetry(tx: OrgTx, connectionId: string, limit = 50): Promise<string[]> {
   const result = await tx.query<{ external_id: string }>(
-    "select external_id from sales_platform_documents where connection_id = $1 and record_kind = 'order' and retry order by updated_at limit $2",
+    `select d.external_id from sales_platform_documents d left join sales_orders so on so.id = d.sales_order_id
+      where d.connection_id = $1 and d.record_kind = 'order' and d.retry
+      order by so.order_date nulls last, d.created_at, d.id limit $2`,
     [connectionId, limit],
   );
   return result.rows.map((row) => row.external_id);

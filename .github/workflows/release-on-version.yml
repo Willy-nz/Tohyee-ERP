@@ -8,9 +8,17 @@ name: Release on version
 # token doesn't start workflows by itself, so they're started by hand
 # (workflow_dispatch), which it can do.
 #
-# Nothing happens when the version's tag already exists, so pushing a tag by
-# hand still works as before. Run it by hand (Actions › Release on version ›
-# Run workflow, on main) to release the version already on main.
+# The release is made with --latest=false: it's public, but GitHub's
+# "latest" (what servers update to, Docker's :latest and the website's
+# Download) stays on the previous release until all of its files are
+# attached. Each build workflow runs scripts/promote-release.sh after
+# attaching its files, and the last one makes it the latest.
+#
+# When the version's tag already exists, only the builds whose files are
+# missing from its release are started again (a failed or cancelled build,
+# say), so running this by hand (Actions > Release on version > Run
+# workflow, on main) finishes a half-made release. Pushing a tag by hand
+# still works as before.
 #
 # It runs none of the repo's code: it only reads package.json and the notes.
 
@@ -57,7 +65,7 @@ jobs:
           echo "version=${version}" >> "$GITHUB_OUTPUT"
           echo "tag=${tag}" >> "$GITHUB_OUTPUT"
           if gh api "repos/${GH_REPO}/git/ref/tags/${tag}" >/dev/null 2>&1; then
-            echo "::notice title=Already released::${tag} already exists, so there's nothing to do."
+            echo "::notice title=Already released::${tag} already exists: only builds whose files are missing are started."
             echo "exists=true" >> "$GITHUB_OUTPUT"
           else
             echo "exists=false" >> "$GITHUB_OUTPUT"
@@ -76,16 +84,40 @@ jobs:
             echo "No release notes at ${notes}: add them in the release pull request."
             exit 1
           fi
-          gh release create "$TAG" --target "$GITHUB_SHA" \
+          # Not the latest until every file is there (scripts/promote-release.sh).
+          gh release create "$TAG" --target "$GITHUB_SHA" --latest=false \
             --title "Tohyee ${TAG}" --notes-file "$notes"
 
-      - name: Start the release builds
-        if: steps.version.outputs.exists == 'false'
+      - name: Start the release builds (only those whose files are missing)
         env:
           GH_TOKEN: ${{ github.token }}
           GH_REPO: ${{ github.repository }}
           TAG: ${{ steps.version.outputs.tag }}
+          VERSION: ${{ steps.version.outputs.version }}
         run: |
-          for workflow in release-server-bundle.yml windows-installer.yml android-app.yml; do
-            gh workflow run "$workflow" --ref "$TAG"
-          done
+          if ! have="$(gh release view "$TAG" --json assets --jq '.assets[].name')"; then
+            echo "There's no release for ${TAG}: make it (or delete the tag) first."
+            exit 1
+          fi
+          has() { grep -qxF "$1" <<<"$have"; }
+          started=0
+          # Starts a build unless one is already running or waiting on this tag.
+          start() {
+            running="$(gh run list --workflow "$1" --branch "$TAG" --json status --jq '[.[] | select(.status != "completed")] | length')"
+            if [ "${running:-0}" != "0" ]; then
+              echo "$1 is already running for ${TAG}."
+              return
+            fi
+            gh workflow run "$1" --ref "$TAG"
+            started=$((started + 1))
+          }
+          if ! has "tohyee-v${VERSION}-linux-x64.tar.gz.sha256" || ! has "tohyee-v${VERSION}-windows-docker.zip.sha256"; then
+            start release-server-bundle.yml
+          fi
+          if ! has "TohyeeSetup-${VERSION}.exe.sha256"; then
+            start windows-installer.yml
+          fi
+          if ! has "Tohyee-${VERSION}.apk" && ! has "Tohyee-${VERSION}-test.apk"; then
+            start android-app.yml
+          fi
+          echo "Started ${started} release build(s) for ${TAG}."
