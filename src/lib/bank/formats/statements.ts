@@ -174,6 +174,8 @@ export function readCamt053(text: string): StatementReadResult {
       const unsigned = parseBankAmount(rawAmount ?? "");
       if (unsigned === null) throw new RowError("has no amount.");
       if (direction !== "CRDT" && direction !== "DBIT") throw new RowError("doesn't say whether it's a credit or a debit.");
+      // A 0.00 entry (a card check, say) moves no money: skipped, as in OFX and QIF (SPF11).
+      if (/^-?0\.00$/.test(unsigned)) return;
       const amount = direction === "DBIT" ? `-${unsigned.replace(/^-/, "")}` : unsigned.replace(/^-/, "");
       const dateText = xmlValue(entry, ["BookgDt", "Dt"]) ?? xmlValue(entry, ["BookgDt", "DtTm"]) ?? xmlValue(entry, ["ValDt", "Dt"]);
       const date = dateText ? parseBankDate(dateText.slice(0, 10)) : null;
@@ -264,6 +266,7 @@ export function readMt940(text: string): StatementReadResult {
       if (!date) throw new RowError("has no valid date.");
       const unsigned = parseBankAmount(match[5], { decimalComma: true });
       if (unsigned === null) throw new RowError("has no amount.");
+      if (/^-?0\.00$/.test(unsigned)) return;
       const moneyIn = match[3] === "C" || match[3] === "RD";
       const amount = moneyIn ? unsigned : `-${unsigned}`;
       const next = fields[index + 1];

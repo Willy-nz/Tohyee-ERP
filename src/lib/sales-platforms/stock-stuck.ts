@@ -12,19 +12,24 @@ import { requireId } from "@/lib/validation";
 
 export type StockStuck = { orders: Array<{ orderId: string; name: string | null }>; items: Array<{ id: string; code: string; name: string }> };
 
-const NO_STOCK = "%no stock on hand%";
+/** What a stock refusal says: no stock (or not enough) to take out, or a date before the item's latest movement. */
+const STUCK = ["%no stock on hand%", "%Stock can't go negative%", "%Backdated stock movements%"];
 
-/** The store's orders whose last try failed for no stock, and its stock items that could become non-stock. */
+/**
+ * The store's orders whose last try failed on stock, and its stock items
+ * that could become non-stock. That's orders not yet invoiced, and (SPF1)
+ * orders under Sales when sent whose fulfilment couldn't take the stock out.
+ */
 export async function stockStuck(tx: OrgTx, connectionIdInput: unknown): Promise<StockStuck> {
   const connectionId = requireId(connectionIdInput, "connectionId");
   const orders = await tx.query<{ order_id: string; name: string | null }>(
     `select d.external_id as order_id, d.name from sales_platform_documents d
-      where d.connection_id = $1 and d.record_kind = 'order' and d.invoice_id is null and d.state <> 'cancelled'
+      where d.connection_id = $1 and d.record_kind = 'order' and d.state <> 'cancelled' and (d.invoice_id is null or d.sales_when_sent)
         and (select l.message from sales_platform_sync_log l
               where l.connection_id = d.connection_id and l.record_kind = 'order' and l.external_id = d.external_id
-              order by l.id desc limit 1) ilike $2
+              order by l.id desc limit 1) ilike any($2::text[])
       order by d.external_id`,
-    [connectionId, NO_STOCK],
+    [connectionId, STUCK],
   );
   if (orders.rows.length === 0) return { orders: [], items: [] };
   const items = await tx.query<{ id: string; code: string; name: string }>(

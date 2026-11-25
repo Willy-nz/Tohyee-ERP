@@ -1721,7 +1721,7 @@ that something happened.
   a sync log everyone can read; a webhook address per connection that
   checks the platform's signature before anything else; and a catch-up
   sync every 15 minutes (off with TOHYEE_SALES_PLATFORM_SYNC_SCHEDULER=off)
-  that pauses a store after three failures in a row. Admins connect a store
+  that pauses a store after its login is refused three times in a row. Admins connect a store
   with a Dev Dashboard app's client ID and secret (Shopify's way since
   1 Jan 2026) or an older custom app's Admin API access token and API secret
   key; only `read_customers` and `read_products` are accepted, and a token

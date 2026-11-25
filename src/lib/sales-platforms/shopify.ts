@@ -940,26 +940,46 @@ export const shopifyConnector: SalesPlatformConnector = {
   },
 
   async fetchOrders(context, token, request: OrdersRequest): Promise<OrdersResult> {
-    const result: OrdersResult = { orders: [], until: null, notes: [] };
+    const result: OrdersResult = { orders: [], until: null, notes: [], complete: true };
     const ids: string[] = [];
+    const listedAt = new Map<string, string | null>();
     let after: string | null = null;
     const filters = [`processed_at:>='${searchTime(request.processedFrom)}'`, changedSince(request.updatedSince)].filter(Boolean).join(" ");
     for (let page = 0; page < MAX_ORDER_PAGES; page += 1) {
       const data = await graphql(context.storeDomain, token, ORDERS_QUERY, { first: ORDERS_PER_PAGE, after, query: filters });
       const connection = record(data.orders);
       for (const node of nodesOf(connection)) {
-        ids.push(shopifyId(node.id, "order"));
+        const id = shopifyId(node.id, "order");
+        ids.push(id);
+        listedAt.set(id, timestamp(node.updatedAt));
         result.until = later(result.until, timestamp(node.updatedAt));
       }
       const info = record(connection.pageInfo);
       if (info.hasNextPage !== true || !text(info.endCursor)) break;
       after = text(info.endCursor);
-      if (page === MAX_ORDER_PAGES - 1) result.notes.push(`More than ${ORDERS_PER_PAGE * MAX_ORDER_PAGES} orders changed; the rest come with the next sync.`);
+      if (page === MAX_ORDER_PAGES - 1) {
+        result.complete = false;
+        result.notes.push(`More than ${ORDERS_PER_PAGE * MAX_ORDER_PAGES} orders changed; the rest come with the next sync.`);
+      }
     }
     const parts: OrderParts = { ...NO_PARTS, ...request.parts };
+    // SPF10: one order Shopify can't answer for doesn't stop the rest. The next sync reads again from it.
+    let firstFailed: string | null = null;
     for (const id of [...new Set([...ids, ...request.retryIds])]) {
-      const order = await fetchOneOrder(context.storeDomain, token, id, parts, result.notes);
-      if (order) result.orders.push(order);
+      try {
+        const order = await fetchOneOrder(context.storeDomain, token, id, parts, result.notes);
+        if (order) result.orders.push(order);
+      } catch (error) {
+        if (!(error instanceof PlatformError || error instanceof ValidationError) || (error instanceof PlatformError && error.refused)) throw error;
+        result.notes.push(`Order ${id} couldn't be read this time (${error.message}). It's read again at the next sync.`);
+        const at = listedAt.get(id);
+        if (at && (firstFailed === null || Date.parse(at) < Date.parse(firstFailed))) firstFailed = at;
+      }
+    }
+    if (firstFailed !== null) {
+      // Changed-since reads include their start time, so the next read starts at the failed order.
+      if (result.until === null || Date.parse(firstFailed) < Date.parse(result.until)) result.until = firstFailed;
+      result.complete = false;
     }
     return result;
   },

@@ -2,7 +2,9 @@ import type { OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, ValidationError } from "@/lib/errors";
 import { requestHash } from "@/lib/idempotency";
 import { applyMovement, type CostingInput, type CostingResult } from "@/lib/inventory/costing";
+import { formatDate } from "@/lib/format";
 import { controlAccountCode, type ControlAccount } from "@/lib/invoices/service";
+import { parseJournalBody, postJournalBody } from "@/lib/ledger/journals";
 import type { ItemType } from "@/lib/items/pricing";
 import { currencyMinorUnits } from "@/lib/money/currency";
 import { abs, add, cmp, dec, type Decimal, isNegative, isPositive, isZero, mul, neg, sub, toFixedString, toPlainString, ZERO_DECIMAL } from "@/lib/money/decimal";
@@ -25,6 +27,33 @@ import { trackingKey, type TrackingTags } from "@/lib/tracking/service";
  *   back out exactly, which needs it to be the latest movement for that item
  *   and location; otherwise the void is refused.
  */
+
+/** What a person can do when stock would go below zero and negative stock is off, in plain words. */
+export const NEGATIVE_STOCK_HELP =
+  "To go ahead, do one of these: enter a bill that receives the stock, add the stock with a stock adjustment (Stock), or turn on Allow negative stock in Organisation settings.";
+
+/** The help for a costing refusal with negative stock off, or "" when it isn't about stock running out. */
+export function negativeStockHelp(message: string, allowNegative: boolean): string {
+  return !allowNegative && /negative|no stock on hand|on hand, so/i.test(message) ? ` ${NEGATIVE_STOCK_HELP}` : "";
+}
+
+/**
+ * The unit cost for stock going out with none on hand (ST11): the last cost
+ * it came in at there, else the item's purchase price, else null.
+ */
+export async function fallbackStockCost(tx: OrgTx, itemId: string | null, itemCode: string, location: string | null): Promise<string | null> {
+  const last = await tx.query<{ unit_cost: string }>(
+    `select unit_cost::text from inventory_movements
+      where item_code = $1 and location_value_id is not distinct from $2 and quantity_delta > 0 and unit_cost is not null
+      order by id desc limit 1`,
+    [itemCode, location],
+  );
+  if (last.rows[0]) return last.rows[0].unit_cost;
+  const item = itemId
+    ? await tx.query<{ purchase_price: string | null }>("select purchase_price::text from items where id = $1", [itemId])
+    : await tx.query<{ purchase_price: string | null }>("select purchase_price::text from items where lower(code) = lower($1)", [itemCode]);
+  return item.rows[0]?.purchase_price ?? null;
+}
 
 export const INVENTORY_ACCOUNT: ControlAccount = { systemKey: "inventory", label: "inventory", accountClass: "asset" };
 export const COST_OF_SALES_ACCOUNT: ControlAccount = { systemKey: "cost_of_goods_sold", label: "cost of goods sold", accountClass: "expense" };
@@ -113,6 +142,18 @@ type Planned = {
   reversalOf: string | null;
   /** Which document line it's for, to tag the cost of sales line. */
   lineIndex: number;
+  /** The day the stock moves: the document's date, or later (SPF2) when it can't be backdated. */
+  date: string;
+};
+
+export type StockPlannerOptions = {
+  /**
+   * SPF2: when the document's date is before the item's latest stock
+   * movement, move the stock on the earliest day allowed (that latest
+   * movement's day) in a journal of its own, instead of refusing. Only for
+   * documents brought in from a sales platform, whose date can't change.
+   */
+  stockOnEarliestDate?: boolean;
 };
 
 export type DocumentSource =
@@ -140,7 +181,21 @@ export class StockPlanner {
     readonly ctx: StockContext,
     private readonly date: string,
     private readonly source: { type: DocumentSource; id: string; reference: string },
+    private readonly options: StockPlannerOptions = {},
   ) {}
+
+  /** How later-dated cost of sales lines are tagged and described (set by journalLines). */
+  private lateLines: { tagsOf: (lineIndex: number) => TrackingTags; alreadyMoved: (lineIndex: number) => Decimal; description: string } | null = null;
+
+  /** SPF2: the stock moved on a later day than the document, with a plain note for each. */
+  get movedLater(): Array<{ itemCode: string; date: string; note: string }> {
+    return this.planned.filter((entry) => entry.date !== this.date).map((entry) => ({ itemCode: entry.itemCode, date: entry.date, note: this.lateNote(entry) }));
+  }
+
+  private lateNote(entry: Planned): string {
+    const place = placeLabel(this.ctx, entry.itemCode, entry.location);
+    return `${place} moved on ${formatDate(entry.date)}, not ${formatDate(this.date)} (the date of ${this.source.reference}), because ${place} already had stock movements dated ${formatDate(entry.date)} and stock can't be backdated.`;
+  }
 
   private balanceKey(itemCode: string, location: string | null): string {
     return `${itemCode}|${location ?? ""}`;
@@ -166,35 +221,24 @@ export class StockPlanner {
     return state;
   }
 
-  /** The unit cost for stock going out with none on hand (ST11): the last cost it came in at here, else the item's purchase price. */
-  private async fallbackCost(itemId: string | null, itemCode: string, location: string | null): Promise<string | null> {
-    const last = await this.tx.query<{ unit_cost: string }>(
-      `select unit_cost::text from inventory_movements
-        where item_code = $1 and location_value_id is not distinct from $2 and quantity_delta > 0 and unit_cost is not null
-        order by id desc limit 1`,
-      [itemCode, location],
-    );
-    if (last.rows[0]) return last.rows[0].unit_cost;
-    if (!itemId) return null;
-    const item = await this.tx.query<{ purchase_price: string | null }>("select purchase_price::text from items where id = $1", [itemId]);
-    return item.rows[0]?.purchase_price ?? null;
-  }
-
   private async apply(
-    entry: Omit<Planned, "result" | "offsetAccountId"> & { offsetAccountId?: string },
+    entry: Omit<Planned, "result" | "offsetAccountId" | "date"> & { offsetAccountId?: string },
     input: CostingInput,
     label: string,
   ): Promise<CostingResult> {
     const state = await this.balance(entry.itemCode, entry.location);
     const place = placeLabel(this.ctx, entry.itemCode, entry.location);
-    if (state.lastDate && this.date < state.lastDate) {
+    let date = this.date;
+    if (state.lastDate && date < state.lastDate && this.options.stockOnEarliestDate && entry.movementType !== "reversal") {
+      date = state.lastDate;
+    } else if (state.lastDate && date < state.lastDate) {
       throw new ValidationError(
         `${label}: ${place} already has stock movements dated ${state.lastDate}. Backdated stock movements aren't supported yet, because every later sale would need re-costing. Use ${state.lastDate} or later.`,
       );
     }
     let fallbackUnitCost: string | null = null;
     if (this.ctx.allowNegative && isZero(dec(state.quantity)) && (input.type === "issue" || input.type === "supplier_return")) {
-      fallbackUnitCost = await this.fallbackCost(entry.itemId, entry.itemCode, entry.location);
+      fallbackUnitCost = await fallbackStockCost(this.tx, entry.itemId, entry.itemCode, entry.location);
     }
     let result: CostingResult;
     try {
@@ -204,15 +248,14 @@ export class StockPlanner {
       });
     } catch (error) {
       if (error instanceof ValidationError) {
-        const turnOn = !this.ctx.allowNegative && /negative|no stock on hand/i.test(error.message) ? " (Negative stock is off in Settings.)" : "";
-        throw new ValidationError(`${label}: ${place}: ${error.message}${turnOn}`);
+        throw new ValidationError(`${label}: ${place}: ${error.message}${negativeStockHelp(error.message, this.ctx.allowNegative)}`);
       }
       throw error;
     }
     state.quantity = result.quantityAfter;
     state.value = result.valueAfter;
-    state.lastDate = this.date;
-    this.planned.push({ ...entry, offsetAccountId: entry.offsetAccountId ?? this.ctx.costOfSalesAccountId, result });
+    state.lastDate = date;
+    this.planned.push({ ...entry, offsetAccountId: entry.offsetAccountId ?? this.ctx.costOfSalesAccountId, result, date });
     return result;
   }
 
@@ -323,6 +366,7 @@ export class StockPlanner {
 
   /** Records the planned movements against the posted journal and saves the balances. */
   async record(journalId: string): Promise<void> {
+    const lateJournals = await this.postLateJournals();
     for (const entry of this.planned) {
       const commandSource = `stock:${this.source.type}`;
       const key = `${this.source.id}:${entry.key}`;
@@ -339,7 +383,7 @@ export class StockPlanner {
           key,
           requestHash("stock_movement", { commandSource, key }),
           entry.movementType,
-          this.date,
+          entry.date,
           entry.itemCode,
           entry.itemId,
           entry.location,
@@ -350,12 +394,12 @@ export class StockPlanner {
           entry.result.quantityAfter,
           toFixedString(dec(entry.result.valueAfter), this.ctx.scale),
           this.source.reference.slice(0, 100),
-          `${entry.itemCode} ${entry.result.quantityDelta}`,
+          (entry.date === this.date ? `${entry.itemCode} ${entry.result.quantityDelta}` : `${entry.itemCode} ${entry.result.quantityDelta}. ${this.lateNote(entry)}`).slice(0, 500),
           this.ctx.inventoryAccountId,
           entry.offsetAccountId,
           entry.originalMovementId,
           entry.reversalOf,
-          journalId,
+          lateJournals.get(entry.date) ?? journalId,
           this.source.type,
           this.source.id,
           this.tx.actor.userId,
@@ -382,8 +426,54 @@ export class StockPlanner {
    * line, ST1).
    */
   journalLines(tagsOf: (lineIndex: number) => TrackingTags, alreadyMoved: (lineIndex: number) => Decimal = () => ZERO_DECIMAL, description: string) {
+    this.lateLines = { tagsOf, alreadyMoved, description };
+    return this.linesFor(this.planned.filter((entry) => entry.date === this.date), tagsOf, alreadyMoved, description);
+  }
+
+  /**
+   * SPF2: stock moved on a later day gets its own journal on that day
+   * (inventory and cost of sales), so the stock and the inventory account
+   * agree on every date. Returns the journal for each later day.
+   */
+  private async postLateJournals(): Promise<Map<string, string>> {
+    const journals = new Map<string, string>();
+    const later = [...new Set(this.planned.filter((entry) => entry.date !== this.date).map((entry) => entry.date))].sort();
+    if (later.length === 0) return journals;
+    if (!this.lateLines) throw new Error("journalLines must be planned before stock moved later is recorded.");
+    const { tagsOf, alreadyMoved, description } = this.lateLines;
+    for (const date of later) {
+      const entries = this.planned.filter((entry) => entry.date === date);
+      const lines = this.linesFor(entries, tagsOf, alreadyMoved, description);
+      if (lines.length === 0) continue;
+      const posted = await postJournalBody(
+        this.tx,
+        `stock:${this.source.type}`,
+        `${this.source.id}:later:${date}`,
+        parseJournalBody(
+          this.tx,
+          {
+            postingDate: date,
+            reference: this.source.reference.slice(0, 100),
+            description: `${description}: ${[...new Set(entries.map((entry) => this.lateNote(entry)))].join(" ")}`.slice(0, 500),
+            lines,
+          },
+          { internal: true },
+        ),
+        { origin: "inventory" },
+      );
+      journals.set(date, posted.journal.id);
+    }
+    return journals;
+  }
+
+  private linesFor(
+    entries: readonly Planned[],
+    tagsOf: (lineIndex: number) => TrackingTags,
+    alreadyMoved: (lineIndex: number) => Decimal,
+    description: string,
+  ) {
     const perLine = new Map<number, Decimal>();
-    for (const entry of this.planned) {
+    for (const entry of entries) {
       perLine.set(entry.lineIndex, add(perLine.get(entry.lineIndex) ?? ZERO_DECIMAL, dec(entry.result.valueDelta)));
     }
     const cost = new Map<string, { tracking: TrackingTags; amount: Decimal }>();
@@ -592,10 +682,13 @@ export async function planDocumentStock(
   doc: { id: string; date: string; reference: string; contactId: string; returnInvoiceId?: string | null },
   lines: readonly StockDocumentLine[],
   description: string,
+  options: StockPlannerOptions = {},
 ): Promise<StockPlan | null> {
   if (!movesStock(lines)) return null;
   const ctx = await loadStockContext(tx, REFUSED[kind]);
-  const planner = new StockPlanner(tx, ctx, doc.date, { type: kind, id: doc.id, reference: doc.reference });
+  // SPF2: only sales documents (whose own lines don't touch inventory) can move their stock on a later day.
+  const later = options.stockOnEarliestDate === true && (kind === "invoice" || kind === "credit_note");
+  const planner = new StockPlanner(tx, ctx, doc.date, { type: kind, id: doc.id, reference: doc.reference }, { stockOnEarliestDate: later });
   const parts = await stockParts(tx, ctx, lines);
   if (parts.length === 0) return null;
   const tagsOf = (lineIndex: number) => lines[lineIndex].tracking;

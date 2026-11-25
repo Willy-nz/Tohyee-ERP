@@ -883,12 +883,13 @@ function StockStuckNotice({ organisationId, connectionId, isAdmin }: { organisat
   }
   return (
     <Notice tone="warning">
-      {orders.length} order{orders.length === 1 ? " isn't" : "s aren't"} invoiced because there&apos;s no stock on hand to take out (
+      {orders.length} order{orders.length === 1 ? " is" : "s are"} stuck (not invoiced, or not counted as sent) because there isn&apos;t enough stock on hand to take out (
       {orders
         .slice(0, 8)
         .map((order) => order.name ?? order.orderId)
         .join(", ")}
-      {orders.length > 8 ? ", …" : ""}). If you make things to order, they shouldn&apos;t be stock items.
+      {orders.length > 8 ? ", …" : ""}). If you make things to order, they shouldn&apos;t be stock items. If you keep stock, enter the bill that
+      brought it in, or add it with a stock adjustment.
       {error ? <div>{error}</div> : null}
       <div className={ui.actions} style={{ marginTop: 8 }}>
         {isAdmin && items.length > 0 ? (
@@ -896,7 +897,7 @@ function StockStuckNotice({ organisationId, connectionId, isAdmin }: { organisat
             {busy ? "Working…" : `Make ${items.length} product${items.length === 1 ? "" : "s"} non-stock`}
           </Button>
         ) : null}
-        <Link href="/operations/settings#inventory">Or allow negative stock in Settings</Link>
+        <Link href="/operations/settings#inventory">Or allow negative stock in Organisation settings</Link>
       </div>
     </Notice>
   );

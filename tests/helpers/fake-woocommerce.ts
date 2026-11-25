@@ -18,6 +18,8 @@ export type WooTax = { rateId?: number; total: string };
 export type WooLine = { id: number; productId: number; sku: string; name: string; quantity: number; subtotal: string; total: string; tax: string };
 export type WooOrderFixture = {
   id: number;
+  /** The store's prices include tax (the default); false for prices entered before tax. */
+  pricesIncludeTax?: boolean;
   status: string;
   createdAt: string;
   modifiedAt?: string;
@@ -47,7 +49,7 @@ export function wooOrderNode(o: WooOrderFixture): Json {
     number: String(o.id),
     status: o.status,
     currency: o.currency ?? "NZD",
-    prices_include_tax: true,
+    prices_include_tax: o.pricesIncludeTax ?? true,
     date_created_gmt: gmt(o.createdAt),
     date_modified_gmt: gmt(o.modifiedAt ?? o.createdAt),
     date_paid_gmt: o.paidAt ? gmt(o.paidAt) : null,

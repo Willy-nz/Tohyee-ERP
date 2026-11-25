@@ -168,7 +168,7 @@ describeWithDatabase("WooCommerce orders into the accounts (WC1-WC10)", () => {
     // WC2.
     const first = (await doc(w, "order", "2001"))!;
     const invoice = await w.as((tx) => getInvoice(tx, first.invoice_id));
-    expect(invoice).toMatchObject({ invoiceDate: "2026-10-02", total: "46.00", taxTotal: "6.00", amountDue: "0.00", amountsMode: "exclusive" });
+    expect(invoice).toMatchObject({ invoiceDate: "2026-10-02", total: "46.00", taxTotal: "6.00", amountDue: "0.00", amountsMode: "inclusive" });
     expect(await journal(w, "sales_invoices", "approval_journal_id", first.invoice_id)).toEqual({ "1100": "46.00", "2100": "-6.00", "4000": "-40.00" });
     expect(await journal(w, "customer_payments", "journal_id", first.customer_payment_id)).toEqual({ "1050": "46.00", "1100": "-46.00" });
     // WC3: the coupon is in the line's total; shipping its own line.
@@ -269,5 +269,18 @@ describeWithDatabase("WooCommerce orders into the accounts (WC1-WC10)", () => {
     expect((await logFor(w, "2011")).at(-1)?.message).toBe("#2011 has a surcharge (a fee line); surcharges aren't supported yet, so record it by hand.");
     expect((await logFor(w, "2012")).at(-1)?.message).toContain("WooCommerce's order total is 45.00");
     expect(await w.as((tx) => tx.query("select 1 from sales_orders"))).toMatchObject({ rowCount: 0 });
+  });
+
+  it("SPF12: an order changed in the same second as the last one read still comes in at the next sync", async () => {
+    const w = await setup();
+    w.state.orders.push({ ...order2001(), modifiedAt: "2026-10-02T01:30:00Z" });
+    await w.sync("2026-10-02T02:00:00Z");
+    await w.map([{ method: "stripe", accountCode: "1050" }]);
+    await w.sync("2026-10-02T02:05:00Z");
+    expect((await doc(w, "order", "2001"))?.invoice_id).not.toBeNull();
+    // Changed in that same second, but not read then (as when a sync stops at its page limit).
+    w.state.orders.push({ ...order2002(), createdAt: "2026-10-02T01:29:30Z", paidAt: "2026-10-02T01:29:45Z", modifiedAt: "2026-10-02T01:30:00Z" });
+    await w.sync("2026-10-02T02:15:00Z");
+    expect((await doc(w, "order", "2002"))?.invoice_id ?? null).not.toBeNull();
   });
 });

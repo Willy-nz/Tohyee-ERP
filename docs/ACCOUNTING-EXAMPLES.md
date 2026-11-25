@@ -6445,8 +6445,9 @@ The rules (our choice where Shopify and the owner are silent):
   errors. Syncs run every 15 minutes (off with
   TOHYEE_SALES_PLATFORM_SYNC_SCHEDULER=off) or on **Sync now**; each fetches
   what changed since the last one. A failed sync records its error and is
-  tried again next time; three failures in a row pause the connection until
-  an admin syncs it successfully.
+  tried again next time; three failures in a row of the store refusing the
+  login pause the connection until an admin syncs it successfully (other
+  failures keep being tried, SPF10).
 - **Disconnecting** removes the credentials, the cached access token and
   the links between Shopify and Tohyee records, and unsubscribes the
   webhooks it can. Contacts and items brought in stay, and so does the
@@ -23914,6 +23915,129 @@ they put right themselves (void, remove and redo, exclude).
 
   that currency, at the rate for the charge date, rounded to its smallest
   unit.
+
+## Sales platform fixes: stock, payouts and missed orders (SPF1-SPF12; 25 Nov 2026; following common practice, not yet reviewed)
+
+Made-up store as in SWS1: GST registered, prices include GST, clearing
+account 1010, bank 1000, sales 4000, Income in advance 2350. Gift box
+(GIFTBOX) is a stock item with purchase price 20.00 unless said otherwise.
+Tested in `tests/integration/sales-platform-negative-stock-sent.test.ts`,
+`tests/integration/sales-platform-stock-later.test.ts` and the other
+`tests/integration/sales-platform-*.test.ts` files named below.
+
+- **SPF1 Sales when sent follows Allow negative stock.** Sales when sent is
+  on and Allow negative stock is on. #1001 (one gift box, 115.00) is paid on
+  1 Nov and held in 2350. Shopify marks it sent on 3 Nov with nothing on
+  hand: Dr 2350 **100.00** / Cr 4000 **100.00**, and the box goes out at its
+  purchase price (ST11), Dr cost of goods sold **20.00** / Cr inventory
+  **20.00**, leaving **-1 worth -20.00**, as an invoice would. With negative
+  stock off, the order waits, its log line says what to do (enter a bill
+  that receives the stock, add it with a stock adjustment, or turn on Allow
+  negative stock in Organisation settings), and the store's stuck-stock
+  warning lists it with the orders not yet invoiced.
+- **SPF2 Stock that can't be backdated moves on the earliest day allowed.**
+  Tohyee doesn't re-cost stock, so it never moves stock before an item's
+  latest movement. #1001 is paid on 1 Nov with no gift boxes on hand
+  (negative stock off), so it waits. On 25 Nov a bill brings in 5 boxes at
+  10.00. At the next sync #1001 is invoiced on **1 Nov** (the day it was
+  paid, so its GST is in the right period): Dr 1010 34.50 / Cr 4000 30.00 /
+  Cr GST 4.50. Its box goes out on **25 Nov**, the earliest day allowed, in
+  a journal of its own: Dr cost of goods sold **10.00** / Cr inventory
+  **10.00**, dated 25 Nov. The movement and the sync log say plainly that the
+  stock moved later because stock can't be backdated. Stock is **4 worth
+  40.00**, the same as the inventory account on every date. The same goes
+  for a restocked refund and for stock sent under Sales when sent. Stuck
+  orders are tried again oldest first (by the day they were placed), up to
+  50 a sync. Voiding such an invoice later is refused while other stock has
+  moved since, as for any invoice (ST4).
+- **SPF3 A payout whose deposit is already in the books.** Before posting a
+  payout, Tohyee looks on the bank account it's paid into for its deposit:
+  the payout's net, dated from 3 days before the payout to 10 days after.
+  Payout 70001 (net **49.38**, fees **2.52**) on 7 Oct. The store hadn't
+  given the payout scopes, so the 49.38 deposit on 8 Oct was reconciled by
+  hand with a transfer from 1010 to 1000 (SPR9). Once the scopes are given,
+  the payout **links to that transfer** and isn't posted again; only its
+  fees are: Dr 6020 **2.52** / Cr 1010 **2.52**. Bank 1000 stays **49.38**,
+  the same as the statement, and 1010 is **0.00**. If what's there isn't
+  sure (the deposit's statement line was reconciled to something else, such
+  as a receive money coded to sales, or there's more than one candidate),
+  the payout isn't posted: its log line says it needs a person, what was
+  found and what to do (record the fees by hand if the deposit is right, or
+  undo the hand entry and choose Try again on payouts). A withdrawal is
+  posted as before.
+- **SPF4 Payouts doubled before SPF3 (read-only).** A payout posted before
+  SPF3 may sit beside the same deposit entered by hand: the payout's
+  transfer isn't reconciled, and a transfer made by hand from the clearing
+  account to the same bank, for the same amount and in the same days, is.
+  The bank account is then higher than its statement by that amount. Each
+  such payout is listed in the store's status (and to the AI) and once a day
+  in the sync log, for a person to check and void the entry that's wrong.
+  Nothing is voided or changed by Tohyee.
+- **SPF5 A full read of orders reads them all.** A store first read with
+  Shopify's 60 days gives read_all_orders later (SPC48), with 210 orders
+  from August. A sync reads at most 200 orders, so the full read goes on
+  from the last order it read at the next sync, until it reaches the end.
+  All **210** are invoiced, and only then does the "orders weren't read"
+  warning go. A full read that no longer reaches back to the same day (the
+  start date moved again) starts again from the beginning.
+- **SPF7 The start date moved back reads payouts again too.** Posting starts
+  on 1 Oct; the start date is then moved back to 1 Sep. The September
+  orders are read and invoiced (SPC48), and now so are the payouts issued
+  from 1 Sep: a payout already posted is skipped, and one whose deposit is
+  already in the books by hand is linked or held for a person (SPF3). The
+  clearing account is back to **0.00** once September's payout is posted.
+- **SPF9 WooCommerce prices that include GST.** WooCommerce sends each
+  line's total before tax and its tax beside it, each rounded to the cent.
+  For a store whose prices include tax (the order says
+  `prices_include_tax`), each line and shipping now comes in as its total
+  **plus** WooCommerce's tax, and the invoice is tax inclusive. A $10.00
+  product sent as 8.70 + 1.30 is a 10.00 line: GST **1.30** (3/23 of
+  10.00), net **8.70**, the same as WooCommerce's tax, and the invoice comes
+  to the order's 10.00. Before, GST was worked out again on 8.70 (1.31) and
+  about one round price in seven was refused for not adding up. A store
+  whose prices are entered before tax is as WC (tax exclusive). Refunds
+  follow the order. If WooCommerce's tax on a line ever differs from
+  Tohyee's by a cent (WooCommerce set to round tax on the order's subtotal),
+  the invoice still comes to the order's total and the log notes both.
+- **SPF10 One bad order doesn't stop the rest.** Shopify answers #1002 with
+  an error. #1001 in the same sync is still invoiced, #1002 gets a note
+  ("couldn't be read this time; it's read again at the next sync"), and
+  the next sync reads again from #1002, so it comes in once Shopify
+  answers. An order or payout that fails in an unexpected way while posting
+  is logged and tried again, and doesn't undo the others. Only the store
+  refusing Tohyee's login pauses it after three syncs in a row (SPR15); an
+  outage fails the syncs but they keep running, and the first sync that
+  works clears the failures.
+- **SPF8 Every held order is read again in turn.** A made-to-order shop has
+  30 paid orders held under Sales when sent, none changed since. Each sync
+  reads again the 25 held orders read longest ago and notes when it read
+  them, so two syncs read all 30 (before, the same 25 oldest were read
+  every time, and a fulfilment on the others could be missed).
+- **SPF11 A 0.00 line in an MT940 or CAMT statement.** A statement with a
+  115.00 credit and a 0.00 card check: the 0.00 line moves no money, so it's
+  skipped, as OFX and QIF already do. The preview says 1 new line and the
+  import adds 115.00. In a folder or mailbox feed, a file that fails to
+  import in any unexpected way is now recorded as a failed file with a
+  plain reason, and the feed goes on to the next file (BF rules).
+- **SPF6 A restocked refund of a line held after it was invoiced.** As
+  SWS12: the pendant's stock came off with the invoice (cost of goods sold
+  **20.00**), then 130.00 was moved to Income in advance. Before anything
+  is sent, Shopify refunds the pendant (115.00) and puts it back in stock.
+  The credit note's line comes out of 2350 (**100.00**) as SWS5, and now
+  carries the item, so the pendant comes back into stock at the cost it
+  went out at (ST5): Dr inventory **20.00** / Cr cost of goods sold
+  **20.00**. Stock is back to 1, the same as Shopify's. A line held from
+  the start (its stock never left) is as SWS5, with no item. Lines held
+  after invoicing before this change don't know their item, so they're as
+  before.
+- **SPF12 Smaller fixes.** The AI's payout and deposit report runs to
+  today in New Zealand by default (at 9am on 26 Nov it includes 26 Nov, not
+  just up to 25 Nov, the date in UTC). A WooCommerce sync reads from a
+  second before the last order it read, so an order changed in that same
+  second isn't missed. The nightly Analytics load no longer waits for a load
+  that has been "running" for more than an hour (one cut off by a restart),
+  and the Analytics copy of the books reads every table from the same
+  moment.
 
 ## Update now and Windows updates that fail (UPD7-UPD13; 25 Nov 2026; following common practice, not yet reviewed)
 
