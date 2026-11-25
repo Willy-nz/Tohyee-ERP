@@ -17,6 +17,7 @@ import {
   unsettleSpreadItem,
   updateSpreadItemTags,
 } from "@/lib/spreading/service";
+import { changeSpreadItem } from "@/lib/spreading/change";
 import { listSourceLines } from "@/lib/spreading/sources";
 import { dismissSpreadSuggestion, listSpreadSuggestions } from "@/lib/spreading/suggestions";
 import { ValidationError } from "@/lib/errors";
@@ -166,6 +167,16 @@ export const SPREADING_ACTION_TOOLS: AiTool[] = [
     input: { itemId: ID("worksheet item"), month: MONTH },
     required: ["itemId", "month"],
     act: (tx, args) => endSpreadItemEarly(tx, args.itemId, { month: args.month }),
+  }),
+  tool({
+    name: "change_spreading_item",
+    title: "Change a Spreading item part way through",
+    description:
+      "Moves an item's last day (endDate), or on an accrual changes what's still to come (left, without GST), or both. Months already posted don't change; what's left is spread again over the months still to come, the way it was spread before. Only for items spread by month or by days. What's left of a paid-in-advance or income-in-advance item can't be changed (it's what was paid or invoiced): end it early instead.",
+    level: "post",
+    input: { itemId: ID("worksheet item"), endDate: { type: "string", description: "The new last day, YYYY-MM-DD." }, left: { type: "string", description: "Accruals only: the amount still to come over the months not yet posted, without GST." } },
+    required: ["itemId"],
+    act: (tx, args) => changeSpreadItem(tx, args.itemId, { endDate: args.endDate, left: args.left }),
   }),
   tool({
     name: "mark_spreading_item_done",

@@ -641,7 +641,7 @@ that something happened.
   account by account. Tax depreciation beside book, pooling and low-value
   write-offs aren't built.
 - **Spreading** (Accounting, Month end; SW1-SW25 accepted by the owner
-  24 Nov 2026, SW26-SW28 not yet reviewed): one worksheet in place of the spreadsheet
+  24 Nov 2026, SW26-SW30 not yet reviewed): one worksheet in place of the spreadsheet
   for costs **paid in advance**, **income in advance**, costs **not billed
   yet** and income **not invoiced yet**. Each kind has one balance sheet
   account, set when an admin turns it on (1200 Prepayments, and Accrued
@@ -691,6 +691,9 @@ that something happened.
   expense account in each of the last three months and haven't this
   month, with the average. Nothing is added until someone presses Add;
   "Not this one" keeps a suggestion away. AI keys read and dismiss them.
+  **Change** on a row (SW29, SW30) moves an item's last day, and on an
+  accrual changes the amount still to come; posted months stay as they
+  are and what's left is spread again over the months still to come.
 - **Projects and time tracking** (Sales; PJ1-PJ13, not yet approved by the owner), like project tracking in other accounting software: a **project** for a customer with an optional
   estimate and deadline, **In progress** or **Closed** (only by closing and
   reopening). **Tasks** are hourly (a rate), fixed price or non-chargeable,

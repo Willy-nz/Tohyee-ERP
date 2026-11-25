@@ -23438,7 +23438,7 @@ dropdown.
 - **APS10** A name that isn't a salesperson shows **0.00** everywhere,
   never the whole report.
 
-## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW28; planned with the owner 23 Nov 2026, built by Claude; the rules SW1-SW25 were summarised to the owner, who accepted them on 24 Nov 2026; SW26-SW28 are not yet reviewed)
+## Spreading: prepayments, income in advance and accruals on one worksheet (SW1-SW30; planned with the owner 23 Nov 2026, built by Claude; the rules SW1-SW25 were summarised to the owner, who accepted them on 24 Nov 2026; SW26-SW30 are not yet reviewed)
 
 Income or a cost often belongs to other months than the one it was billed
 or paid in. The Spreading worksheet replaces the spreadsheet kept for that.
@@ -23670,6 +23670,36 @@ added when Spreading is turned on.
   hand. An accrual suggestion is for one month, so next month's is a new
   one. AI keys read the same suggestions (`get_spreading_suggestions`),
   add them with the ordinary tool, and can dismiss one.
+- **SW29 A new last day** (25 Nov 2026; from the plan's "Changes" step;
+  following common practice, not yet reviewed). An item spread by month or
+  by days can have its last day moved, earlier or later. Months already
+  posted never change: what's left is spread again over the months still
+  to come, the way it was spread before. A change like this is treated as
+  a change from now on, not a correction of the past. SW1's insurance,
+  1,200.00 at 100.00 a month, has July to September posted (300.00), so
+  900.00 is left:
+  - Cut short at 31 Dec 2026: October, November and December take
+    **300.00** each.
+  - Or run on to 30 Sep 2027: twelve months of **75.00**.
+  - The amount doesn't change, so the worksheet still matches the ledger.
+  - By days, each month still to come takes its days: 1,000.00 over 1 Jan
+    to 10 Apr 2027 with January's 310.00 posted and the last day moved to
+    31 Mar leaves 690.00 over February's 28 days and March's 31, **327.46**
+    and **362.54**.
+  - A last day inside the months already posted is refused ("October has
+    posted, so the last day has to be after it"): end it early instead
+    (SW8). Items with one month, your own amounts or "when it's done"
+    have nothing to respread.
+- **SW30 A new amount still to come.** On an accrual only, because an
+  accrual is an estimate. SW6's rates, 900.00 over July to September, have
+  July's 300.00 posted. The estimate rises: with **700.00** still to come,
+  August and September are **350.00** each and the item is 1,000.00 in
+  all. With the last day moved to 31 Oct as well and 750.00 to come,
+  August to October are **250.00** each. Nothing still to come is refused:
+  mark it as arrived instead. What's left of a cost paid in advance or
+  income in advance can't be changed, because it's what was paid or
+  invoiced and is already on the balance sheet. An AI key at Make and post
+  can do both (`change_spreading_item`).
 
 ## Where Shopify orders go (SHP1-SHP5; 23 Nov 2026; following common practice, not yet reviewed)
 

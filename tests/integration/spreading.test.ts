@@ -1,6 +1,7 @@
 import { afterAll, beforeAll, expect, it } from "vitest";
 import * as tokensRoute from "@/app/api/ai/tokens/route";
 import * as mcpRoute from "@/app/api/mcp/route";
+import * as changeRoute from "@/app/api/spreading/items/[itemId]/change/route";
 import * as itemRoute from "@/app/api/spreading/items/[itemId]/route";
 import * as itemsRoute from "@/app/api/spreading/items/route";
 import * as monthsRoute from "@/app/api/spreading/months/route";
@@ -40,6 +41,7 @@ import {
   unsettleSpreadItem,
   updateSpreadItemTags,
 } from "@/lib/spreading/service";
+import { changeSpreadItem } from "@/lib/spreading/change";
 import { explainSpreadDifference } from "@/lib/spreading/explain";
 import { importSpreadItems, monthJournalFile, worksheetFile } from "@/lib/spreading/files";
 import { listSourceLines } from "@/lib/spreading/sources";
@@ -714,6 +716,56 @@ describeWithDatabase("spreading", () => {
     const after = await w.as((tx) => explainSpreadDifference(tx, "accrued_expense"));
     expect(after).toMatchObject({ outsideTotal: "-920.00", expectedTotal: "-920.00", difference: "0.00" });
     expect((await w.tie("accrued_expense")).difference).toBe("0.00");
+  });
+
+  it("SW29, SW30: a new last day, and a new amount still to come on an accrual", async () => {
+    const w = await setup();
+    // SW29: SW1's insurance, 100.00 a month, with July to September posted.
+    const insurance = await w.insurance();
+    for (const month of ["2026-07", "2026-08", "2026-09"]) await w.post("prepayment", month);
+    const change = (id: string, body: Record<string, unknown>) => w.asAroha((tx) => changeSpreadItem(tx, id, body));
+    const coming = (item: { months: Array<{ month: string; amount: string; runId: string | null }> }) => item.months.filter((row) => row.runId === null).map((row) => [row.month, row.amount]);
+    // The cover is cut short at the end of December: the 900.00 left lands over October to December.
+    const shorter = await change(insurance.id, { endDate: "2026-12-31" });
+    expect(coming(shorter)).toEqual([["2026-10", "300.00"], ["2026-11", "300.00"], ["2026-12", "300.00"]]);
+    expect(shorter).toMatchObject({ amount: "1200.00", endDate: "2026-12-31", posted: "300.00", left: "900.00" });
+    // Posted months are as they were.
+    expect(shorter.months.filter((row) => row.runId !== null).map((row) => row.amount)).toEqual(["100.00", "100.00", "100.00"]);
+    // Or it runs on to the end of September 2027: twelve months of 75.00.
+    const longer = await change(insurance.id, { endDate: "2027-09-30" });
+    expect(coming(longer).map((row) => row[1])).toEqual(Array.from({ length: 12 }, () => "75.00"));
+    expect(await w.tie("prepayment")).toMatchObject({ worksheet: "900.00", ledger: "900.00" });
+    // October then posts 75.00.
+    expect((await w.post("prepayment", "2026-10")).total).toBe("75.00");
+    await expect(change(insurance.id, { endDate: "2026-10-31" })).rejects.toThrow("2026-10 has posted, so the last day has to be after it. To finish it now, end it early.");
+    await expect(change(insurance.id, { left: "500.00" })).rejects.toThrow(/what was paid or invoiced, so it can't be changed/);
+    await expect(change(insurance.id, {})).rejects.toThrow(/Give a new last day/);
+    await expect(change(insurance.id, { endDate: "soon" })).rejects.toThrow(/Give the new last day/);
+
+    // SW30: rates estimated at 900.00 for July to September; July's 300.00 has posted.
+    await w.as((tx) => createAccount(tx, { code: "6470", name: "Rates", accountType: "expense" }));
+    const rates = await w.add({ kind: "accrued_expense", description: "Rates", targetAccountCode: "6470", amount: "900.00", startDate: "2026-07-01", endDate: "2026-09-30" });
+    await w.post("accrued_expense", "2026-07");
+    // The council says the year will be dearer: 700.00 still to come instead of 600.00.
+    const dearer = await change(rates.id, { left: "700.00" });
+    expect(coming(dearer)).toEqual([["2026-08", "350.00"], ["2026-09", "350.00"]]);
+    expect(dearer.amount).toBe("1000.00");
+    // Both at once: to the end of October, 750.00 to come.
+    const both = await change(rates.id, { endDate: "2026-10-31", left: "750.00" });
+    expect(coming(both)).toEqual([["2026-08", "250.00"], ["2026-09", "250.00"], ["2026-10", "250.00"]]);
+    expect(both).toMatchObject({ amount: "1050.00", endDate: "2026-10-31" });
+    expect((await w.post("accrued_expense", "2026-08")).total).toBe("250.00");
+    await expect(change(rates.id, { left: "0" })).rejects.toThrow("If nothing more is to come, mark it as arrived instead.");
+    // Once its bill has arrived there's nothing left to change.
+    await w.asAroha((tx) => settleSpreadItem(tx, rates.id, { month: "2026-09", amount: "560.00" }));
+    await expect(change(rates.id, { endDate: "2026-12-31" })).rejects.toThrow(/marked as arrived in 2026-09/);
+
+    // Only by month and by days: a single month has nothing to respread.
+    const deposit = await w.add({ kind: "income_in_advance", description: "Deposit", targetAccountCode: "4000", amount: "500.00", method: "one_month", month: "2027-01" });
+    await expect(change(deposit.id, { endDate: "2027-03-31" })).rejects.toThrow(/Only something spread by month or by days/);
+    // The API: a viewer can't.
+    const response = await changeRoute.POST(apiRequest(`/api/spreading/items/${insurance.id}/change`, { method: "POST", cookie: await sessionCookieFor(viewer), body: { organisationId: w.org, endDate: "2027-12-31" } }), { params: Promise.resolve({ itemId: insurance.id }) });
+    expect(response.status).toBe(403);
   });
 
   it("SW26-SW28: suggestions: a line that says its period, a regular bill that hasn't come, and not this one", async () => {

@@ -601,6 +601,7 @@ export const SCREEN_COVERAGE: Record<string, ScreenCoverage> = {
   "POST /api/spreading/items/[itemId]/settle": {"tool": "mark_spreading_accrual_arrived"},
   "POST /api/spreading/items/[itemId]/unsettle": {"tool": "undo_spreading_accrual_arrived"},
   "POST /api/spreading/suggestions/dismiss": {"tool": "dismiss_spreading_suggestion"},
+  "POST /api/spreading/items/[itemId]/change": {"tool": "change_spreading_item"},
   "POST /api/spreading/export": {"next": "accounting"},
   "POST /api/spreading/import": {"next": "accounting"},
   "POST /api/spreading/months": {"tool": "post_spreading_month"},

@@ -5,6 +5,7 @@ import { useMemo, useState } from "react";
 import { Money } from "@/components/books";
 import { useConfirm } from "@/components/confirm-dialog";
 import { CustomFieldInputs, startingValues, useCustomFields } from "@/components/custom-fields";
+import { DateInput } from "@/components/date-input";
 import { useApiData } from "@/components/hooks";
 import { InfoTip } from "@/components/info-tip";
 import { caughtUpText } from "@/components/spread-this";
@@ -419,11 +420,18 @@ function MonthEnd({ organisationId, kind, worksheet, busy, send }: { organisatio
   );
 }
 
+/** What an item's months not yet posted add up to. */
+function stillToCome(item: SpreadItem): string {
+  return toFixedString(sum(item.months.filter((row) => row.runId === null && row.lineKind === "share").map((row) => dec(row.amount))), 2);
+}
+
 /** The spreadsheet view: a row an item, a column a month. Posted months are ticked. */
 function ItemsGrid({ items, kind, busy, send, canEdit, setups }: { items: SpreadItem[]; kind: SpreadKind; busy: boolean; send: Send; canEdit: boolean; setups: TagSetups }) {
   const [tagging, setTagging] = useState<{ id: string; tracking: SpreadItem["tracking"]; customFields: SpreadItem["customFields"] } | null>(null);
   const confirm = useConfirm();
-  const [acting, setActing] = useState<{ id: string; action: "end" | "done" | "settle" } | null>(null);
+  const [acting, setActing] = useState<{ id: string; action: "end" | "done" | "settle" | "change" } | null>(null);
+  const [actEnd, setActEnd] = useState("");
+  const [actLeft, setActLeft] = useState("");
   const [actMonth, setActMonth] = useState(todayInBrowser().slice(0, 7));
   const [actAmount, setActAmount] = useState("");
   const [showFinished, setShowFinished] = useState(false);
@@ -438,6 +446,14 @@ function ItemsGrid({ items, kind, busy, send, canEdit, setups }: { items: Spread
 
   async function act(item: SpreadItem) {
     if (!acting) return;
+    if (acting.action === "change") {
+      // Only what was changed is sent: a new last day, and for an accrual a new amount still to come.
+      const body: Record<string, unknown> = {};
+      if (actEnd && actEnd !== item.endDate) body.endDate = actEnd;
+      if (isAccrual(kind) && actLeft.trim() && actLeft.trim() !== stillToCome(item)) body.left = actLeft.trim();
+      if (await send("POST", `/api/spreading/items/${item.id}/change`, body, `${item.description}: the months still to come are spread again.`)) setActing(null);
+      return;
+    }
     const path = `/api/spreading/items/${item.id}/${acting.action === "end" ? "end-early" : acting.action}`;
     const body = acting.action === "settle" ? { month: actMonth, amount: actAmount } : { month: actMonth };
     const text = acting.action === "end" ? `The rest of ${item.description} now lands in ${longMonth(actMonth)}.` : acting.action === "done" ? `${item.description} lands in ${longMonth(actMonth)}.` : `${item.description} marked at ${actAmount}.`;
@@ -470,6 +486,7 @@ function ItemsGrid({ items, kind, busy, send, canEdit, setups }: { items: Spread
                 const open = acting?.id === item.id;
                 const canEnd = !isAccrual(kind) && !item.waiting && item.months.some((row) => row.runId === null);
                 const canSettle = isAccrual(kind) && !item.settledMonth;
+                const canChange = (item.method === "by_month" || item.method === "by_days") && !item.settledMonth && item.months.some((row) => row.runId === null);
                 const canRemove = !item.months.some((row) => row.runId !== null);
                 return (
                   <tr key={item.id}>
@@ -508,6 +525,20 @@ function ItemsGrid({ items, kind, busy, send, canEdit, setups }: { items: Spread
                           {canEnd ? (
                             <Button size="small" variant="secondary" disabled={busy} onClick={() => setActing({ id: item.id, action: "end" })}>
                               End early
+                            </Button>
+                          ) : null}
+                          {canChange ? (
+                            <Button
+                              size="small"
+                              variant="secondary"
+                              disabled={busy}
+                              onClick={() => {
+                                setActEnd(item.endDate ?? "");
+                                setActLeft(stillToCome(item));
+                                setActing({ id: item.id, action: "change" });
+                              }}
+                            >
+                              Change
                             </Button>
                           ) : null}
                           {setups.any && !item.finished ? (
@@ -562,7 +593,30 @@ function ItemsGrid({ items, kind, busy, send, canEdit, setups }: { items: Spread
                           </div>
                         </div>
                       ) : null}
-                      {open ? (
+                      {open && acting.action === "change" ? (
+                        <div className={styles.rowForm}>
+                          <label>
+                            New last day
+                            <DateInput value={actEnd} onChange={(event) => setActEnd(event.target.value)} />
+                          </label>
+                          {isAccrual(kind) ? (
+                            <label>
+                              Still to come (without GST)
+                              <input inputMode="decimal" value={actLeft} onChange={(event) => setActLeft(event.target.value)} />
+                            </label>
+                          ) : null}
+                          <p className={ui.muted}>Months already posted stay as they are. What&apos;s left is spread again over the months still to come.</p>
+                          <div className={styles.rowActions}>
+                            <Button size="small" disabled={busy || (actEnd === (item.endDate ?? "") && (!isAccrual(kind) || actLeft.trim() === stillToCome(item)))} onClick={() => void act(item)}>
+                              Save
+                            </Button>
+                            <Button size="small" variant="secondary" onClick={() => setActing(null)}>
+                              Cancel
+                            </Button>
+                          </div>
+                        </div>
+                      ) : null}
+                      {open && acting.action !== "change" ? (
                         <div className={styles.rowForm}>
                           <label>
                             {acting.action === "end" ? "Release the rest in" : acting.action === "done" ? "Done in" : KIND_HELP[kind].arrived + " in"}
