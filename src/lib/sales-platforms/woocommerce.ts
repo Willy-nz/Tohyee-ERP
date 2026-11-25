@@ -348,6 +348,7 @@ export const woocommerceConnector: SalesPlatformConnector = {
     const notes: string[] = [];
     const seen = new Set<string>();
     let until: string | null = null;
+    let complete = true;
     for (let page = 1; page <= MAX_ORDER_PAGES; page += 1) {
       const query = new URLSearchParams({
         modified_after: since.replace(/\.\d+Z$/, "").replace(/Z$/, ""),
@@ -372,14 +373,17 @@ export const woocommerceConnector: SalesPlatformConnector = {
       }
       const pages = Number(headers.get("x-wp-totalpages") ?? "1");
       if (!Number.isFinite(pages) || page >= pages) break;
-      if (page === MAX_ORDER_PAGES) notes.push("More orders changed than one sync reads; the rest come in at the next sync.");
+      if (page === MAX_ORDER_PAGES) {
+        complete = false;
+        notes.push("More orders changed than one sync reads; the rest come in at the next sync.");
+      }
     }
     for (const id of request.retryIds) {
       if (seen.has(id)) continue;
       const order = await woocommerceConnector.fetchOrder(context, token, id);
       if (order) orders.push(order);
     }
-    return { orders, until, notes };
+    return { orders, until, notes, complete };
   },
 
   async fetchOrder(context, token, orderId) {

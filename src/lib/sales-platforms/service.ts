@@ -139,6 +139,8 @@ type ConnectionRow = {
   granted_scopes: string[];
   orders_synced_until: string | null;
   orders_read_from: string | null;
+  full_read_after: string | null;
+  full_read_from: string | null;
   payout_bank_words: string[];
   payouts_synced_until: string | null;
   extras_synced_at: string | null;
@@ -169,7 +171,7 @@ const COLUMNS =
   "sync_products, status, customers_synced_until, products_synced_until, last_sync_at, last_successful_sync_at, last_error, failures, connected_by_email, " +
   "connected_at, disconnected_by_email, disconnected_at, post_to_accounts, stock_items, start_date, clearing_account_id, payout_account_id, " +
   "fees_account_id, sales_account_id, shipping_account_id, chargebacks_account_id, reserve_account_id, sales_when_sent_account_id, gift_card_account_id, untaxed_tax_code_id, granted_scopes, " +
-  "orders_synced_until, orders_read_from::text, payout_bank_words, payouts_synced_until, extras_synced_at, stats_synced_at, customer_scope, " +
+  "orders_synced_until, orders_read_from::text, full_read_after, full_read_from::text, payout_bank_words, payouts_synced_until, extras_synced_at, stats_synced_at, customer_scope, " +
   "(select count(*)::int from sales_platform_mappings v where v.connection_id = sales_platform_connections.id and v.record_kind = 'product_variant') as variants_linked, " +
   "(select count(*)::int from sales_platform_mappings v where v.connection_id = sales_platform_connections.id and v.record_kind = 'product_variant'" +
   " and coalesce(v.synced_values->>'sku', '') = '') as variants_without_sku, " +
@@ -1139,6 +1141,11 @@ export async function updateConnectionSettings(tx: OrgTx, connectionIdInput: unk
       next.giftCards,
     ],
   );
+  if (startDate !== null && row.start_date !== null && startDate < row.start_date) {
+    // SPF7: the start date moved back: payouts are read again from the new start date as well as orders
+    // (a payout already posted is skipped by its record). A full read under way starts again.
+    await tx.query("update sales_platform_connections set payouts_synced_until = null, full_read_after = null, full_read_from = null where id = $1", [row.id]);
+  }
   if (next.giftCards !== null && next.giftCards !== row.gift_card_account_id) {
     // GC5: orders refused for a gift card are tried again at the next sync, now there's somewhere to hold it.
     const retried = await tx.query(
@@ -1913,10 +1920,12 @@ export async function syncConnection(
     let payouts: PayoutsResult | null = null;
     // SPC47-SPC48: every order from the start date when a read now reaches further back than before.
     const fullRead = posts(row) && needsFullRead(historyOf(row), row.orders_synced_until, now);
+    const fullReach = fullRead ? readableFrom(historyOf(row), now) : null;
     if (posts(row)) {
       const startInstant = startOfLocalDate(row.start_date!);
       orders = await connector.fetchOrders(context, token, {
-        updatedSince: fullRead ? null : iso(row.orders_synced_until),
+        // SPF5: a full read goes on from where the last one stopped, until it reaches the end.
+        updatedSince: fullRead ? (row.full_read_from === fullReach ? iso(row.full_read_after) : null) : iso(row.orders_synced_until),
         processedFrom: startInstant,
         retryIds,
         parts: orderParts(row),
@@ -1981,7 +1990,17 @@ export async function syncConnection(
           await writeNote(tx, row.id, "sync", NO_PAYOUT_SCOPES);
         }
       }
-      if (posting && orders && fullRead) {
+      if (posting && orders && fullRead && orders.complete === false) {
+        // SPF5: not the end yet; the next sync reads on from the last order read.
+        await tx.query(
+          `update sales_platform_connections
+              set full_read_after = case when full_read_from is not distinct from $3::date then greatest(full_read_after, $2::timestamptz) else $2::timestamptz end,
+                  full_read_from = $3::date
+            where id = $1`,
+          [row.id, orders.until, fullReach],
+        );
+      } else if (posting && orders && fullRead) {
+        await tx.query("update sales_platform_connections set full_read_after = null, full_read_from = null where id = $1", [row.id]);
         const reach = readableFrom(historyOf(current), now);
         if (reach !== null) {
           await tx.query("update sales_platform_connections set orders_read_from = least(coalesce(orders_read_from, $2::date), $2::date) where id = $1", [row.id, reach]);

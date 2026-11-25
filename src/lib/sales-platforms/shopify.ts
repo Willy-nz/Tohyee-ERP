@@ -940,7 +940,7 @@ export const shopifyConnector: SalesPlatformConnector = {
   },
 
   async fetchOrders(context, token, request: OrdersRequest): Promise<OrdersResult> {
-    const result: OrdersResult = { orders: [], until: null, notes: [] };
+    const result: OrdersResult = { orders: [], until: null, notes: [], complete: true };
     const ids: string[] = [];
     let after: string | null = null;
     const filters = [`processed_at:>='${searchTime(request.processedFrom)}'`, changedSince(request.updatedSince)].filter(Boolean).join(" ");
@@ -954,7 +954,10 @@ export const shopifyConnector: SalesPlatformConnector = {
       const info = record(connection.pageInfo);
       if (info.hasNextPage !== true || !text(info.endCursor)) break;
       after = text(info.endCursor);
-      if (page === MAX_ORDER_PAGES - 1) result.notes.push(`More than ${ORDERS_PER_PAGE * MAX_ORDER_PAGES} orders changed; the rest come with the next sync.`);
+      if (page === MAX_ORDER_PAGES - 1) {
+        result.complete = false;
+        result.notes.push(`More than ${ORDERS_PER_PAGE * MAX_ORDER_PAGES} orders changed; the rest come with the next sync.`);
+      }
     }
     const parts: OrderParts = { ...NO_PARTS, ...request.parts };
     for (const id of [...new Set([...ids, ...request.retryIds])]) {

@@ -23852,3 +23852,16 @@ Tested in `tests/integration/sales-platform-negative-stock-sent.test.ts`,
   such payout is listed in the store's status (and to the AI) and once a day
   in the sync log, for a person to check and void the entry that's wrong.
   Nothing is voided or changed by Tohyee.
+- **SPF5 A full read of orders reads them all.** A store first read with
+  Shopify's 60 days gives read_all_orders later (SPC48), with 210 orders
+  from August. A sync reads at most 200 orders, so the full read goes on
+  from the last order it read at the next sync, until it reaches the end.
+  All **210** are invoiced, and only then does the "orders weren't read"
+  warning go. A full read that no longer reaches back to the same day (the
+  start date moved again) starts again from the beginning.
+- **SPF7 The start date moved back reads payouts again too.** Posting starts
+  on 1 Oct; the start date is then moved back to 1 Sep. The September
+  orders are read and invoiced (SPC48), and now so are the payouts issued
+  from 1 Sep: a payout already posted is skipped, and one whose deposit is
+  already in the books by hand is linked or held for a person (SPF3). The
+  clearing account is back to **0.00** once September's payout is posted.
