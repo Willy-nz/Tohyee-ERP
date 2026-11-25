@@ -271,17 +271,20 @@ export function IcaCard({ organisationId, ica, onSaved }: { organisationId: stri
           <tbody>
             {(
               [
-                ["41", "Opening balance (credit; debit negative)"],
+                ["41", `Opening balance (tick ${ica.ir4Sides["41"]})`],
                 ["42A", "Income tax and provisional tax paid"],
                 ["42B", "RWT on interest received"],
                 ["42C", "Imputation credits on dividends received"],
                 ["42D", "Other credits"],
+                ["42E", "Total credits"],
                 ["43A", "Income tax refunded"],
                 ["43B", "Imputation credits on dividends paid"],
                 ["43C", "Other debits"],
-                ["44B", "Closing balance (credit; debit negative)"],
+                ["43D", "Total debits"],
+                ["44", `Closing balance at 31 March (tick ${ica.ir4Sides["44"]})`],
+                ["44B", "Further income tax payable (only for a debit balance; 44A not worked out)"],
                 ["45", "Imputation penalty tax"],
-              ] as const
+              ] as Array<[keyof typeof ica.ir4, string]>
             ).map(([box, label]) => (
               <tr key={box}>
                 <td>

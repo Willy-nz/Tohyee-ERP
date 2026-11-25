@@ -119,7 +119,7 @@ describeWithDatabase("Full access AI: fixed asset types and Investment Boost (AI
       call(tokens.full, "register_fixed_asset", { ...machine, purchaseDate: "2025-05-01", taxDetails: { method: "sl", rate: "20", newAsset: true, investmentBoost: true, availableOn: "2025-06-01" } }),
     ).rejects.toThrow("on or after 22 May 2025");
     await expect(call(tokens.full, "register_fixed_asset", { ...machine, taxDetails: { method: "not_depreciable", newAsset: true, investmentBoost: true } })).rejects.toThrow(
-      "only for assets depreciated by diminishing value or straight line",
+      "straight line at IRD's 0% building rate",
     );
     await expect(call(tokens.full, "register_fixed_asset", { ...machine, taxDetails: { method: "sl", rate: "20", businessUsePercent: "120" } })).rejects.toThrow("at most 100");
     await expect(call(tokens.full, "register_fixed_asset", { ...machine, taxDetails: { method: "sl", rate: "20", boost: true } })).rejects.toThrow("taxDetails can't have boost");

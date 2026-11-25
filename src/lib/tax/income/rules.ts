@@ -110,6 +110,20 @@ export function taxRates(type: TaxpayerType, year: number): TaxRates {
   return { bands: INDIVIDUAL_FROM_2026, source: "IRD's individual rates from 1 April 2025." };
 }
 
+/**
+ * The last income year whose rates have been checked against IRD's (the 2027
+ * income year, 1 April 2026 to 31 March 2027, from IRD's 2026-27 payroll
+ * specification). Later years use the same rates with a warning, as payroll
+ * would refuse (TXF8).
+ */
+export const TAX_RATES_CHECKED_TO = 2027;
+
+/** A warning when an income year's rates are carried forward from the last year checked (TXF8). */
+export function taxRatesNote(year: number): string | null {
+  if (year <= TAX_RATES_CHECKED_TO) return null;
+  return `Tohyee has checked IRD's income tax rates up to the ${TAX_RATES_CHECKED_TO} income year. The ${year} income year uses those same rates, so check IRD's rates for it before relying on this tax.`;
+}
+
 /** Tax on taxable income: worked out exactly across the bands and rounded once to the cent, half up (ITX4). Nothing on a loss. */
 export function taxOn(income: Decimal, type: TaxpayerType, year: number): Decimal {
   if (!isPositive(income)) return ZERO_DECIMAL;
@@ -637,7 +651,7 @@ export function workpaper(input: {
     dateOfDeath: string | null;
     endMonth: number;
     yearEnd: string;
-    allocations: Array<{ beneficiary: Beneficiary; amount: Decimal }>;
+    allocations: Array<{ beneficiary: Beneficiary; amount: Decimal; fromMaoriAuthority?: boolean }>;
     /** Complying, foreign or non-complying (TRU20). */
     trustClass?: TrustClass;
     /** Each beneficiary's figures for the year, beyond the allocation (TRU18, TRU21, TRU24). */

@@ -328,6 +328,9 @@ function IncomeForm({
                             <input inputMode="decimal" value={row.openingBalance} onChange={(event) => set(beneficiary.id, { openingBalance: event.target.value })} />
                           </Field>
                           <label className={ui.checkbox}>
+                            <input type="checkbox" checked={row.fromMaoriAuthority} onChange={(event) => set(beneficiary.id, { fromMaoriAuthority: event.target.checked })} /> All of it comes from a Māori authority distribution
+                          </label>
+                          <label className={ui.checkbox}>
                             <input type="checkbox" checked={row.trusteePaysTax} onChange={(event) => set(beneficiary.id, { trusteePaysTax: event.target.checked })} /> The trust pays their tax on it
                           </label>
                           {row.trusteePaysTax ? (
@@ -435,13 +438,14 @@ function IncomeForm({
   );
 }
 
-type Draft = { amount: string; trusteePaysTax: boolean; otherIncome: string; taxableDistribution: string; nonTaxableDistribution: string; withdrawn: string; openingBalance: string };
+type Draft = { amount: string; trusteePaysTax: boolean; fromMaoriAuthority: boolean; otherIncome: string; taxableDistribution: string; nonTaxableDistribution: string; withdrawn: string; openingBalance: string };
 
 function toDraft(line: BeneficiaryIncome | undefined): Draft {
   const blank = (value: string | null | undefined) => (value === null || value === undefined || value === "0.00" ? "" : value);
   return {
     amount: blank(line?.amount),
     trusteePaysTax: line?.trusteePaysTax ?? false,
+    fromMaoriAuthority: line?.fromMaoriAuthority ?? false,
     otherIncome: blank(line?.otherIncome),
     taxableDistribution: blank(line?.taxableDistribution),
     nonTaxableDistribution: blank(line?.nonTaxableDistribution),

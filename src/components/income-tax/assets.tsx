@@ -53,7 +53,7 @@ function TaxDetailsForm({ organisationId, asset, onSaved }: { organisationId: st
           </select>
         </Field>
         {depreciating ? (
-          <Field label="IRD rate %" hint="From IRD's depreciation rate finder.">
+          <Field label="IRD rate %" hint="From IRD's depreciation rate finder. Buildings are 0%.">
             <input inputMode="decimal" value={form.rate} onChange={(event) => set("rate", event.target.value)} required />
           </Field>
         ) : null}

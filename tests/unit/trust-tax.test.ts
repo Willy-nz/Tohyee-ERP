@@ -29,6 +29,28 @@ describe("trust tax (TRU4-TRU11)", () => {
     expect(toPlainString(trusteeRate({ kind: "disabled_beneficiary", year: 2026, endMonth: 3, dateOfDeath: null, trusteeNetIncome: dec("90000") }).rate)).toBe("0.33");
   });
 
+  it("TXF1: an estate with a 31 October balance date counts the year of death as IRD numbers it", () => {
+    // Death 15 May 2025 is in the year to 31 October 2025: the 2026 income year. 33% for 2026 to 2029.
+    const estate = (year: number, endMonth: number) => trusteeRate({ kind: "deceased_estate", year, endMonth, dateOfDeath: "2025-05-15", trusteeNetIncome: dec("50000") });
+    expect([2026, 2027, 2028, 2029, 2030].map((year) => toPlainString(estate(year, 10).rate))).toEqual(["0.33", "0.33", "0.33", "0.33", "0.39"]);
+    expect(estate(2029, 10).reason).toContain("(2026)");
+    expect(trustTax({ ...base, kind: "deceased_estate", dateOfDeath: "2025-05-15", year: 2029, endMonth: 10, yearEnd: "2028-10-31", netIncome: dec("50000"), allocations: [] }).trusteeTax).toBe("16500.00");
+    // A December death with a 31 October balance date is in the next year: year to 31 October 2026, the 2027 income year.
+    const december = (year: number) => trusteeRate({ kind: "deceased_estate", year, endMonth: 10, dateOfDeath: "2025-12-10", trusteeNetIncome: dec("50000") });
+    expect([2030, 2031].map((year) => toPlainString(december(year).rate))).toEqual(["0.33", "0.39"]);
+    // A late balance date (30 June) was already right: May 2025 is the 2025 income year, so 2028 is the last 33% year.
+    expect([2028, 2029].map((year) => toPlainString(estate(year, 6).rate))).toEqual(["0.33", "0.39"]);
+  });
+
+  it("TXF7: income from a Māori authority distribution isn't caught by the minor beneficiary rule", () => {
+    const nikau = person("1", "Nikau", "2016-08-01");
+    const caught = trustTax({ ...base, netIncome: dec("5000"), allocations: [{ beneficiary: nikau, amount: dec("3000") }] });
+    expect(caught.minorCorporateIncome).toBe("3000.00");
+    const excluded = trustTax({ ...base, netIncome: dec("5000"), allocations: [{ beneficiary: nikau, amount: dec("3000"), fromMaoriAuthority: true }] });
+    expect(excluded).toMatchObject({ minorCorporateIncome: "0.00", ordinaryBeneficiaryIncome: "3000.00" });
+    expect(excluded.lines[0].reason).toContain("Māori authority");
+  });
+
   it("TRU9: the worked example", () => {
     const result = trustTax({
       ...base,

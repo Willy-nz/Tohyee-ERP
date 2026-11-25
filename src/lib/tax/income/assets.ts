@@ -198,7 +198,8 @@ export async function setTaxDetails(
   const endMonth = await financialYearEndMonth(tx);
   const method = requireOneOf(input.method, "method", TAX_DEPRECIATION_METHODS);
   const depreciating = method === "dv" || method === "sl";
-  const rate = depreciating ? parseDecimalInput(input.rate, "rate", { maxScale: 4 }) : null;
+  // 0% is allowed: it's IRD's rate for buildings, and a new commercial or industrial building can still get Investment Boost (TXF2).
+  const rate = depreciating ? parseDecimalInput(input.rate, "rate", { maxScale: 4, allowZero: true }) : null;
   if (rate !== null && cmp(dec(rate), dec("100")) > 0) throw new ValidationError("rate is a percentage: 30 means 30%.");
   const taxCost = input.taxCost == null || input.taxCost === "" ? money(dec(row.cost)) : parseDecimalInput(input.taxCost, "taxCost", { maxScale: 2 });
   const businessUse = input.businessUsePercent == null || input.businessUsePercent === "" ? "100" : parseDecimalInput(input.businessUsePercent, "businessUsePercent", { maxScale: 2 });
@@ -208,6 +209,9 @@ export async function setTaxDetails(
   const newAsset = optionalBoolean(input.newAsset, "newAsset") ?? false;
   const investmentBoost = optionalBoolean(input.investmentBoost, "investmentBoost") ?? false;
   if (investmentBoost) {
+    if (method === "not_depreciable") {
+      throw new ValidationError("Investment Boost can't be claimed on an asset set as not depreciable (land or a residential building). For a new commercial or industrial building, choose straight line at IRD's 0% building rate.");
+    }
     if (!depreciating) throw new ValidationError(`Investment Boost is only for assets depreciated by diminishing value or straight line, not ${TAX_DEPRECIATION_METHOD_LABELS[method].toLowerCase()}.`);
     if (!newAsset) throw new ValidationError("Investment Boost is only for new assets (or new to New Zealand): tick that it's new.");
     if (row.purchase_date < INVESTMENT_BOOST_FROM || availableOn < INVESTMENT_BOOST_FROM) {

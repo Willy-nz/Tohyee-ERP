@@ -337,7 +337,8 @@ export async function enterClockOut(tx: OrgTx, idInput: unknown, input: { clockO
   }
   if (record.status === "closed") throw new ConflictError(`${record.employeeName} has already clocked out.`);
   const clockOutAt = parseAt(input.clockOutAt, "The out time");
-  if (clockOutAt <= record.clockInAt) throw new ValidationError("The out time has to be after the clock-in.");
+  // Compared as instants: clockInAt is the database's text, in its session time zone (TXF9).
+  if (Date.parse(clockOutAt) <= Date.parse(record.clockInAt)) throw new ValidationError("The out time has to be after the clock-in.");
   if (clockOutAt > now.toISOString()) throw new ValidationError("The out time can't be in the future.");
   const reason = requireString(input.reason, "Reason", { maxLength: 500 });
   let breakMinutes = record.breakMinutes;

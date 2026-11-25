@@ -90,6 +90,20 @@ describeWithDatabase("income tax for trusts", () => {
     expect(report.ir6!.form).toBe(2026);
     expect(boxes).toMatchObject({ "20A": "20800.00", "20C": "13000.00", "27A": "26200.00", "27B": "10218.00", "27C": "5070.00", "27D": "15288.00", "28C": "15288.00" });
     expect(report.ir6!.beneficiaries).toHaveLength(4);
+
+    // TXF7: Nikau's income all from a Māori authority distribution isn't caught by the minor beneficiary rule.
+    const lines = (nikauFlag: boolean) => [
+      { beneficiaryId: ids.aroha, amount: "20000" },
+      { beneficiaryId: ids.nikau, amount: "3000", fromMaoriAuthority: nikauFlag },
+      { beneficiaryId: ids.tama, amount: "800" },
+      { beneficiaryId: ids.company, amount: "10000" },
+    ];
+    await as((tx) => saveBeneficiaryIncome(tx, { incomeYear: 2026, lines: lines(true) }));
+    expect((await as((tx) => listBeneficiaryIncome(tx, 2026))).find((line) => line.beneficiaryId === ids.nikau)?.fromMaoriAuthority).toBe(true);
+    const flagged = await as((tx) => buildIncomeTax(tx, { incomeYear: 2026, today: "2026-11-20" }));
+    if (!flagged.supported) throw new Error(flagged.reason);
+    expect(flagged.workpaper.trust).toMatchObject({ ordinaryBeneficiaryIncome: "23800.00", minorCorporateIncome: "10000.00" });
+    await as((tx) => saveBeneficiaryIncome(tx, { incomeYear: 2026, lines: lines(false) }));
   });
 
   it("TRU15, TRU18, TRU25: the trust's credits are shared, and the trust pays Aroha's tax", async () => {
@@ -139,7 +153,7 @@ describeWithDatabase("income tax for trusts", () => {
     // Saving the year again with a blank amount removes it.
     await as((tx) => saveBeneficiaryIncome(tx, { incomeYear: 2026, lines: [{ beneficiaryId: ids.aroha, amount: "20000" }, { beneficiaryId: ids.tama, amount: "" }] }));
     expect(await as((tx) => listBeneficiaryIncome(tx, 2026))).toEqual([
-      { beneficiaryId: ids.aroha, amount: "20000.00", trusteePaysTax: false, otherIncome: "0.00", taxableDistribution: "0.00", nonTaxableDistribution: "0.00", withdrawn: "0.00", openingBalance: null },
+      { beneficiaryId: ids.aroha, amount: "20000.00", trusteePaysTax: false, otherIncome: "0.00", taxableDistribution: "0.00", nonTaxableDistribution: "0.00", withdrawn: "0.00", openingBalance: null, fromMaoriAuthority: false },
     ]);
   });
 });

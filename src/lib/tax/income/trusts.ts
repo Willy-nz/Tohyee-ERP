@@ -1,3 +1,5 @@
+// The app-wide income year rule (early balance dates count toward the next 31 March; TXF1).
+import { incomeYearOf } from "@/lib/rd/amounts";
 import { add, cmp, dec, type Decimal, isPositive, isZero, mul, roundHalfUp, sub, toFixedString, toPlainString, truncate, ZERO_DECIMAL } from "@/lib/money/decimal";
 
 /*
@@ -74,18 +76,12 @@ function ageOn(dateOfBirth: string, date: string): number {
   return y - by - (m < bm || (m === bm && d < bd) ? 1 : 0);
 }
 
-/** The income year a date falls in, for a balance date at the end of `endMonth`. */
-function incomeYearOfDate(date: string, endMonth: number): number {
-  const [y, m] = date.split("-").map(Number);
-  return m > endMonth ? y + 1 : y;
-}
-
 /** The trustee's rate and why (TRU4-TRU6). */
 export function trusteeRate(input: { kind: TrustKind; year: number; endMonth: number; dateOfDeath: string | null; trusteeNetIncome: Decimal }): { rate: Decimal; reason: string } {
   if (input.year < TRUSTEE_RATE_FROM) return { rate: LOWER_RATE, reason: "33%: the trustee rate before the 2025 income year." };
   if (input.kind === "disabled_beneficiary") return { rate: LOWER_RATE, reason: "33%: a disabled beneficiary trust." };
   if (input.kind === "deceased_estate" && input.dateOfDeath) {
-    const deathYear = incomeYearOfDate(input.dateOfDeath, input.endMonth);
+    const deathYear = incomeYearOf(input.dateOfDeath, input.endMonth);
     if (input.year <= deathYear + 3) return { rate: LOWER_RATE, reason: `33%: a deceased estate in the income year of the death (${deathYear}) or the three after it.` };
   }
   if (cmp(input.trusteeNetIncome, DE_MINIMIS) <= 0) return { rate: LOWER_RATE, reason: "33%: the trustee's net income is $10,000 or less." };
@@ -107,14 +103,15 @@ export function trustTax(input: {
   /** Net income before losses brought forward. */
   netIncome: Decimal;
   lossesBroughtForward: Decimal;
-  allocations: Array<{ beneficiary: Beneficiary; amount: Decimal }>;
+  /** fromMaoriAuthority: the allocation all comes from a Māori authority distribution (TXF7). */
+  allocations: Array<{ beneficiary: Beneficiary; amount: Decimal; fromMaoriAuthority?: boolean }>;
 }): TrustTax {
   const notes: string[] = [];
   const lines: BeneficiaryLine[] = [];
   let ordinary = ZERO_DECIMAL;
   let minorCorporate = ZERO_DECIMAL;
   const minorRuleApplies = input.kind === "family";
-  for (const { beneficiary, amount } of input.allocations) {
+  for (const { beneficiary, amount, fromMaoriAuthority } of input.allocations) {
     if (!isPositive(amount)) continue;
     let taxedByTrustee = false;
     let reason = "Taxed to the beneficiary.";
@@ -130,6 +127,7 @@ export function trustTax(input: {
       if (!minorRuleApplies) reason = input.kind === "deceased_estate" ? "Under 16, but the minor beneficiary rule doesn't apply to a deceased estate." : "Under 16, but the minor beneficiary rule doesn't apply to a disabled beneficiary trust.";
       else if (!beneficiary.settledByRelative) reason = "Under 16, but the trust wasn't settled by a relative or guardian of theirs.";
       else if (beneficiary.disabilityAllowance) reason = "Under 16, but a disability allowance is paid for them.";
+      else if (fromMaoriAuthority) reason = "Under 16, but the income comes from a Māori authority distribution.";
       else if (cmp(amount, MINOR_LIMIT) <= 0) reason = "Under 16, but $1,000 or less this year.";
       else {
         taxedByTrustee = true;

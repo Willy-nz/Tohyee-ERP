@@ -434,15 +434,20 @@ function Extras({ quarter, send, organisationId, reload, setError }: { quarter: 
         <ol className={styles.howTo}>
           <li>Register with NZTA for fuel excise refunds (once).</li>
           <li>Fill in NZTA&apos;s MR70 form with the off-road litres, and email it with your fuel receipts to fed@nzta.govt.nz.</li>
-          <li>
-            When the money comes in, code it back to your fuel account with GST at 15%.
-            {result ? (
-              <>
-                {" "}
-                <Money value={result.gst} /> of it is GST.
-              </>
-            ) : null}
-          </li>
+          {quarter.gstRegistered ? (
+            <li>
+              When the money comes in, code it back to your fuel account with GST at 15%. That&apos;s right for petrol you claimed GST on.
+              {result ? (
+                <>
+                  {" "}
+                  <Money value={result.gst} /> of it is GST.
+                </>
+              ) : null}
+              {quarter.handAddedPetrol ? " Petrol added by hand (bought personally, say) usually had no GST claimed: code the refund for that petrol with no GST." : null}
+            </li>
+          ) : (
+            <li>When the money comes in, code it back to your fuel account with no GST. You weren&apos;t registered for GST at the end of this quarter, so no GST was claimed on the petrol.</li>
+          )}
         </ol>
         <p className={ui.muted}>Petrol is refunded at 80.5276c a litre: excise duty plus GST. Diesel isn&apos;t refunded.</p>
         {notes.map((note) => (
