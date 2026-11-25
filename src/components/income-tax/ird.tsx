@@ -52,40 +52,42 @@ function ProposalCard({ organisationId, proposal, endMonth, onDone }: { organisa
         ) : null}
       </p>
       {proposal.note ? <p className={ui.muted}>“{proposal.note}”</p> : null}
-      <table className={ui.reportTable}>
-        <thead>
-          <tr>
-            <th />
-            <th className={ui.num}>Now</th>
-            <th className={ui.num}>Proposed</th>
-          </tr>
-        </thead>
-        <tbody>
-          {PROPOSED_FIELDS.filter((field) => proposal.figures[field.key] !== undefined).map((field) => (
-            <tr key={field.key}>
-              <td>{field.label}</td>
-              <td className={ui.num}>{show(proposal.current[field.key], field.date)}</td>
-              <td className={ui.num}>
-                <strong>{show(proposal.figures[field.key], field.date)}</strong>
-              </td>
+      <div className={ui.tableWrap}>
+        <table className={ui.reportTable}>
+          <thead>
+            <tr>
+              <th />
+              <th className={ui.num}>Now</th>
+              <th className={ui.num}>Proposed</th>
             </tr>
-          ))}
-          {proposal.payments.map((payment, index) => (
-            <tr key={`payment-${index}`}>
-              <td>
-                Payment on {formatDate(payment.paidOn)}
-                {payment.note ? <span className={ui.muted}> · {payment.note}</span> : null}
-              </td>
-              <td className={ui.num}>{payment.alreadyTyped ? <Badge>Already typed</Badge> : null}</td>
-              <td className={ui.num}>
-                <strong>
-                  <Money value={payment.amount} />
-                </strong>
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {PROPOSED_FIELDS.filter((field) => proposal.figures[field.key] !== undefined).map((field) => (
+              <tr key={field.key}>
+                <td>{field.label}</td>
+                <td className={ui.num}>{show(proposal.current[field.key], field.date)}</td>
+                <td className={ui.num}>
+                  <strong>{show(proposal.figures[field.key], field.date)}</strong>
+                </td>
+              </tr>
+            ))}
+            {proposal.payments.map((payment, index) => (
+              <tr key={`payment-${index}`}>
+                <td>
+                  Payment on {formatDate(payment.paidOn)}
+                  {payment.note ? <span className={ui.muted}> · {payment.note}</span> : null}
+                </td>
+                <td className={ui.num}>{payment.alreadyTyped ? <Badge>Already typed</Badge> : null}</td>
+                <td className={ui.num}>
+                  <strong>
+                    <Money value={payment.amount} />
+                  </strong>
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {declining ? (
         <div className={ui.inlineForm}>
           <Field label="Why decline?">

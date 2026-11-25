@@ -108,7 +108,7 @@ function Workspace({ title, organisationId, linkedFarmId, render }: { title: str
         />
       </div>
       {farms.error ? <Notice tone="error">{farms.error}</Notice> : null}
-      {!farms.data ? <p className={ui.muted}>Loading…</p> : null}
+      {!farms.data && !farms.error ? <p className={ui.muted}>Loading…</p> : null}
       {farms.data && active.length === 0 ? <Empty>No farms yet. {farms.data.farms.length ? "" : "An owner or admin adds them under Farms and paddocks."}</Empty> : null}
       {!farm && farms.data && active.length ? <FarmSelector farms={active} farm={null} stale={stale} deciding={deciding} onChange={selectFarm} /> : null}
       {/* While you share your location, on every farm page. */}

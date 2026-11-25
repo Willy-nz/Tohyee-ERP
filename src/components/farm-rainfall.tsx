@@ -844,34 +844,36 @@ function DailyWeather({ organisationId, farmId }: { organisationId: string; farm
       {weather.days.length === 0 ? (
         <p className={ui.muted}>No finished days yet. They&apos;re worked out each morning from the forecasts kept.</p>
       ) : (
-        <table className={ui.table}>
-          <thead>
-            <tr>
-              <th scope="col">Day</th>
-              <th scope="col" className={ui.num}>
-                Rain (mm)
-              </th>
-              <th scope="col">From</th>
-              <th scope="col" className={ui.num}>
-                Average °C
-              </th>
-            </tr>
-          </thead>
-          <tbody>
-            {weather.days.map((day) => (
-              <tr key={day.day}>
-                <td>{shortDate(day.day, todayInBrowser())}</td>
-                <td className={ui.num}>{day.rainMm === null ? "–" : mmText(day.rainMm)}</td>
-                <td>
-                  {day.rainSource === "gauge" ? "Your gauge" : day.rainSource === "metservice" ? "MetService" : "–"}
-                  {day.rainSource === "gauge" && day.metserviceRainMm !== null ? <span className={ui.muted}> (MetService {mmText(day.metserviceRainMm)})</span> : null}
-                  {day.hours !== null && day.hours < 24 && day.rainSource === "metservice" ? <span className={ui.muted}> ({day.hours} of 24 hours)</span> : null}
-                </td>
-                <td className={ui.num}>{day.temperatureC ?? "–"}</td>
+        <div className={ui.tableWrap}>
+          <table className={ui.table}>
+            <thead>
+              <tr>
+                <th scope="col">Day</th>
+                <th scope="col" className={ui.num}>
+                  Rain (mm)
+                </th>
+                <th scope="col">From</th>
+                <th scope="col" className={ui.num}>
+                  Average °C
+                </th>
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {weather.days.map((day) => (
+                <tr key={day.day}>
+                  <td>{shortDate(day.day, todayInBrowser())}</td>
+                  <td className={ui.num}>{day.rainMm === null ? "–" : mmText(day.rainMm)}</td>
+                  <td>
+                    {day.rainSource === "gauge" ? "Your gauge" : day.rainSource === "metservice" ? "MetService" : "–"}
+                    {day.rainSource === "gauge" && day.metserviceRainMm !== null ? <span className={ui.muted}> (MetService {mmText(day.metserviceRainMm)})</span> : null}
+                    {day.hours !== null && day.hours < 24 && day.rainSource === "metservice" ? <span className={ui.muted}> ({day.hours} of 24 hours)</span> : null}
+                  </td>
+                  <td className={ui.num}>{day.temperatureC ?? "–"}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       )}
       <p className={ui.muted} style={{ margin: 0 }}>
         {weather.attribution}

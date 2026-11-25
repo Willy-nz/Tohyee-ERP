@@ -285,33 +285,35 @@ export function FarmOfflinePage({ organisationId }: { organisationId: string }) 
             description={`${sizeText(farm.bytes)}${farm.oldestSavedAt ? ` · updated ${when(farm.oldestSavedAt)}` : ""}`}
             actions={<Badge tone={farm.state === "ready" && !missing?.length ? "green" : farm.state === "preparing" ? "neutral" : "amber"}>{readinessLabel(farm.state, missing?.length ?? 0)}</Badge>}
           >
-            <table className={styles.table}>
-              <thead>
-                <tr>
-                  <th scope="col">Part</th>
-                  <th scope="col">Kept</th>
-                  <th scope="col" className={styles.size}>
-                    Size
-                  </th>
-                </tr>
-              </thead>
-              <tbody>
-                {farm.sections.map((section) => (
-                  <tr key={section.key}>
-                    <th scope="row">
-                      {section.label}
-                      <span className={styles.includes}>{PACK_SECTIONS.find((info) => info.key === section.key)?.includes}</span>
+            <div className={ui.tableWrap}>
+              <table className={styles.table}>
+                <thead>
+                  <tr>
+                    <th scope="col">Part</th>
+                    <th scope="col">Kept</th>
+                    <th scope="col" className={styles.size}>
+                      Size
                     </th>
-                    <td className={styles.kept}>
-                      {section.savedAt ? when(section.savedAt) : "Not yet"}
-                      {section.error ? <span className={styles.problem}>Didn&apos;t update: {section.error}</span> : null}
-                      {section.skipped ? <span className={styles.includes}>{section.skipped} item{section.skipped === 1 ? "" : "s"} not kept (not for your role, or too big)</span> : null}
-                    </td>
-                    <td className={styles.size}>{section.bytes ? sizeText(section.bytes) : "—"}</td>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {farm.sections.map((section) => (
+                    <tr key={section.key}>
+                      <th scope="row">
+                        {section.label}
+                        <span className={styles.includes}>{PACK_SECTIONS.find((info) => info.key === section.key)?.includes}</span>
+                      </th>
+                      <td className={styles.kept}>
+                        {section.savedAt ? when(section.savedAt) : "Not yet"}
+                        {section.error ? <span className={styles.problem}>Didn&apos;t update: {section.error}</span> : null}
+                        {section.skipped ? <span className={styles.includes}>{section.skipped} item{section.skipped === 1 ? "" : "s"} not kept (not for your role, or too big)</span> : null}
+                      </td>
+                      <td className={styles.size}>{section.bytes ? sizeText(section.bytes) : "—"}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             {isOrganisation ? null : (
               <div className={styles.actions}>
                 <Button type="button" variant="secondary" onClick={() => void extras(farm.farmId, { months: farm.months === EXTRA_PACK_MONTHS ? PACK_MONTHS : EXTRA_PACK_MONTHS })}>

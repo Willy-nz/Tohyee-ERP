@@ -224,34 +224,36 @@ export function FollowUpsPage({ organisationId }: { organisationId: string }) {
       <Card title="What the rules did">
         {data.data && runs.length === 0 ? <Empty>Nothing yet.</Empty> : null}
         {runs.length > 0 ? (
-          <table className={ui.table}>
-            <thead>
-              <tr>
-                <th>When</th>
-                <th>Rule</th>
-                <th>Result</th>
-              </tr>
-            </thead>
-            <tbody>
-              {runs.map((entry) => (
-                <tr key={entry.id}>
-                  <td>{formatDateTime(entry.ranAt)}</td>
-                  <td>{entry.ruleName}</td>
-                  <td>
-                    {entry.outcome === "skipped" ? (
-                      <span className={ui.muted}>Skipped: {entry.detail}</span>
-                    ) : entry.taskId ? (
-                      <>
-                        Task: <Link href={entry.leadId ? `/crm/leads/${entry.leadId}` : entry.opportunityId ? `/crm/opportunities/${entry.opportunityId}` : "/crm/tasks"}>{entry.taskTitle}</Link>
-                      </>
-                    ) : (
-                      "Task made"
-                    )}
-                  </td>
+          <div className={ui.tableWrap}>
+            <table className={ui.table}>
+              <thead>
+                <tr>
+                  <th>When</th>
+                  <th>Rule</th>
+                  <th>Result</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {runs.map((entry) => (
+                  <tr key={entry.id}>
+                    <td>{formatDateTime(entry.ranAt)}</td>
+                    <td>{entry.ruleName}</td>
+                    <td>
+                      {entry.outcome === "skipped" ? (
+                        <span className={ui.muted}>Skipped: {entry.detail}</span>
+                      ) : entry.taskId ? (
+                        <>
+                          Task: <Link href={entry.leadId ? `/crm/leads/${entry.leadId}` : entry.opportunityId ? `/crm/opportunities/${entry.opportunityId}` : "/crm/tasks"}>{entry.taskTitle}</Link>
+                        </>
+                      ) : (
+                        "Task made"
+                      )}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         ) : null}
       </Card>
     </>

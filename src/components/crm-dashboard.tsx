@@ -80,7 +80,7 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
         {d?.scoped ? <Notice>These figures are your own leads, deals and activity.</Notice> : null}
       </Card>
       {!d ? (
-        <p className={ui.muted}>Loading…</p>
+        data.error ? null : <p className={ui.muted}>Loading…</p>
       ) : (
         <>
           <div className={ui.statRow}>
@@ -93,57 +93,61 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
             {d.ageing.length === 0 ? (
               <Empty>No open deals.</Empty>
             ) : (
-              <table className={ui.table}>
-                <thead>
-                  <tr>
-                    <th>Stage</th>
-                    <th className={ui.num}>Deals</th>
-                    <th className={ui.num}>Amount</th>
-                    <th className={ui.num}>Average days in stage</th>
-                    <th className={ui.num}>Longest</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.ageing.map((row) => (
-                    <tr key={row.stage}>
-                      <td className={styles.stageCell}>
-                        <span className={styles.stageBar} style={{ width: `${Math.round((row.count / mostInStage) * 120)}px` }} aria-hidden="true" />
-                        {row.stageName}
-                      </td>
-                      <td className={ui.num}>{count(row.count, `Open in ${row.stageName}`, () => d.deals.filter((deal) => deal.stageType === "open" && deal.stageName === row.stageName))}</td>
-                      <td className={ui.num}>{amounts(row.amounts)}</td>
-                      <td className={ui.num}>{row.averageDays ?? "—"}</td>
-                      <td className={ui.num}>{row.oldestDays ?? "—"}</td>
+              <div className={ui.tableWrap}>
+                <table className={ui.table}>
+                  <thead>
+                    <tr>
+                      <th>Stage</th>
+                      <th className={ui.num}>Deals</th>
+                      <th className={ui.num}>Amount</th>
+                      <th className={ui.num}>Average days in stage</th>
+                      <th className={ui.num}>Longest</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {d.ageing.map((row) => (
+                      <tr key={row.stage}>
+                        <td className={styles.stageCell}>
+                          <span className={styles.stageBar} style={{ width: `${Math.round((row.count / mostInStage) * 120)}px` }} aria-hidden="true" />
+                          {row.stageName}
+                        </td>
+                        <td className={ui.num}>{count(row.count, `Open in ${row.stageName}`, () => d.deals.filter((deal) => deal.stageType === "open" && deal.stageName === row.stageName))}</td>
+                        <td className={ui.num}>{amounts(row.amounts)}</td>
+                        <td className={ui.num}>{row.averageDays ?? "—"}</td>
+                        <td className={ui.num}>{row.oldestDays ?? "—"}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Card>
           <Card title="Leads">
             {noLeads ? <Empty>No leads in these periods.</Empty> : (
             <>
             <PeriodBars label="Leads added in each period" bars={d.leads.map((row) => ({ period: label(row.periodStart), value: row.added, text: String(row.added) }))} />
-            <table className={ui.table}>
-              <thead>
-                <tr>
-                  <th>Period</th>
-                  <th className={ui.num}>Added</th>
-                  <th className={ui.num}>Converted</th>
-                  <th className={ui.num}>Conversion</th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.leads.map((row) => (
-                  <tr key={row.periodStart}>
-                    <td>{label(row.periodStart)}</td>
-                    <td className={ui.num}>{row.added}</td>
-                    <td className={ui.num}>{row.converted}</td>
-                    <td className={ui.num}>{row.rate === null ? "—" : `${row.rate}%`}</td>
+            <div className={ui.tableWrap}>
+              <table className={ui.table}>
+                <thead>
+                  <tr>
+                    <th>Period</th>
+                    <th className={ui.num}>Added</th>
+                    <th className={ui.num}>Converted</th>
+                    <th className={ui.num}>Conversion</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {d.leads.map((row) => (
+                    <tr key={row.periodStart}>
+                      <td>{label(row.periodStart)}</td>
+                      <td className={ui.num}>{row.added}</td>
+                      <td className={ui.num}>{row.converted}</td>
+                      <td className={ui.num}>{row.rate === null ? "—" : `${row.rate}%`}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
             </>
             )}
             {d.leadSources.length > 0 ? (
@@ -166,36 +170,38 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
               max={100}
               bars={d.winLoss.map((row, index) => ({ period: d.periods[index].label, value: row.winRate === null ? null : Number(row.winRate), text: row.winRate === null ? "—" : `${row.winRate}%` }))}
             />
-            <table className={ui.table}>
-              <thead>
-                <tr>
-                  <th>Period</th>
-                  <th className={ui.num}>Won</th>
-                  <th className={ui.num}>Lost</th>
-                  <th className={ui.num}>Win rate</th>
-                  <th className={ui.num}>Won amount</th>
-                  <th className={ui.num}>Average days</th>
-                  <th className={ui.num}>Median days</th>
-                </tr>
-              </thead>
-              <tbody>
-                {d.winLoss.map((row, index) => {
-                  const p = d.periods[index];
-                  const cycle = d.cycle[index];
-                  return (
-                    <tr key={row.periodStart}>
-                      <td>{p.label}</td>
-                      <td className={ui.num}>{count(row.won, `Won in ${p.label}`, () => d.deals.filter((deal) => deal.stageType === "won" && inPeriod(p.start, p.end, deal)))}</td>
-                      <td className={ui.num}>{count(row.lost, `Lost in ${p.label}`, () => d.deals.filter((deal) => deal.stageType === "lost" && inPeriod(p.start, p.end, deal)))}</td>
-                      <td className={ui.num}>{row.winRate === null ? "—" : `${row.winRate}%`}</td>
-                      <td className={ui.num}>{amounts(row.wonAmounts)}</td>
-                      <td className={ui.num}>{cycle.averageDays ?? "—"}</td>
-                      <td className={ui.num}>{cycle.medianDays ?? "—"}</td>
-                    </tr>
-                  );
-                })}
-              </tbody>
-            </table>
+            <div className={ui.tableWrap}>
+              <table className={ui.table}>
+                <thead>
+                  <tr>
+                    <th>Period</th>
+                    <th className={ui.num}>Won</th>
+                    <th className={ui.num}>Lost</th>
+                    <th className={ui.num}>Win rate</th>
+                    <th className={ui.num}>Won amount</th>
+                    <th className={ui.num}>Average days</th>
+                    <th className={ui.num}>Median days</th>
+                  </tr>
+                </thead>
+                <tbody>
+                  {d.winLoss.map((row, index) => {
+                    const p = d.periods[index];
+                    const cycle = d.cycle[index];
+                    return (
+                      <tr key={row.periodStart}>
+                        <td>{p.label}</td>
+                        <td className={ui.num}>{count(row.won, `Won in ${p.label}`, () => d.deals.filter((deal) => deal.stageType === "won" && inPeriod(p.start, p.end, deal)))}</td>
+                        <td className={ui.num}>{count(row.lost, `Lost in ${p.label}`, () => d.deals.filter((deal) => deal.stageType === "lost" && inPeriod(p.start, p.end, deal)))}</td>
+                        <td className={ui.num}>{row.winRate === null ? "—" : `${row.winRate}%`}</td>
+                        <td className={ui.num}>{amounts(row.wonAmounts)}</td>
+                        <td className={ui.num}>{cycle.averageDays ?? "—"}</td>
+                        <td className={ui.num}>{cycle.medianDays ?? "—"}</td>
+                      </tr>
+                    );
+                  })}
+                </tbody>
+              </table>
+            </div>
             </>
             )}
           </Card>
@@ -203,32 +209,34 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
             {d.activity.length === 0 ? (
               <Empty>Nothing logged.</Empty>
             ) : (
-              <table className={ui.table}>
-                <thead>
-                  <tr>
-                    <th>Period</th>
-                    <th>Who</th>
-                    <th className={ui.num}>Calls</th>
-                    <th className={ui.num}>Meetings</th>
-                    <th className={ui.num}>Notes</th>
-                    <th className={ui.num}>Tasks done</th>
-                    <th className={ui.num}>Emails sent</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.activity.map((row) => (
-                    <tr key={`${row.periodStart}:${row.userId}`}>
-                      <td>{label(row.periodStart)}</td>
-                      <td>{row.name}</td>
-                      <td className={ui.num}>{row.calls}</td>
-                      <td className={ui.num}>{row.meetings}</td>
-                      <td className={ui.num}>{row.notes}</td>
-                      <td className={ui.num}>{row.tasksDone}</td>
-                      <td className={ui.num}>{row.emailsSent}</td>
+              <div className={ui.tableWrap}>
+                <table className={ui.table}>
+                  <thead>
+                    <tr>
+                      <th>Period</th>
+                      <th>Who</th>
+                      <th className={ui.num}>Calls</th>
+                      <th className={ui.num}>Meetings</th>
+                      <th className={ui.num}>Notes</th>
+                      <th className={ui.num}>Tasks done</th>
+                      <th className={ui.num}>Emails sent</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {d.activity.map((row) => (
+                      <tr key={`${row.periodStart}:${row.userId}`}>
+                        <td>{label(row.periodStart)}</td>
+                        <td>{row.name}</td>
+                        <td className={ui.num}>{row.calls}</td>
+                        <td className={ui.num}>{row.meetings}</td>
+                        <td className={ui.num}>{row.notes}</td>
+                        <td className={ui.num}>{row.tasksDone}</td>
+                        <td className={ui.num}>{row.emailsSent}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Card>
           <Card title="Quota attainment" description={<InfoTip label="How this is worked out">As the forecast works it out: Closed in {baseCurrency} by expected close date ÷ quota.</InfoTip>}>
@@ -237,58 +245,62 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
                 No quotas set. Admins set them on <Link href="/crm/forecasts">Forecasts</Link>.
               </Empty>
             ) : (
-              <table className={ui.table}>
-                <thead>
-                  <tr>
-                    <th>Period</th>
-                    <th>Who</th>
-                    <th className={ui.num}>Closed</th>
-                    <th className={ui.num}>Quota</th>
-                    <th className={ui.num}>Attainment</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.quotas.map((row) => (
-                    <tr key={`${row.periodStart}:${row.ownerUserId}`}>
-                      <td>{label(row.periodStart)}</td>
-                      <td>{row.name}</td>
-                      <td className={ui.num}>{formatMoney(row.closed)}</td>
-                      <td className={ui.num}>{formatMoney(row.quota)}</td>
-                      <td className={ui.num}>{row.attainment === null ? "—" : `${row.attainment}%`}</td>
+              <div className={ui.tableWrap}>
+                <table className={ui.table}>
+                  <thead>
+                    <tr>
+                      <th>Period</th>
+                      <th>Who</th>
+                      <th className={ui.num}>Closed</th>
+                      <th className={ui.num}>Quota</th>
+                      <th className={ui.num}>Attainment</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {d.quotas.map((row) => (
+                      <tr key={`${row.periodStart}:${row.ownerUserId}`}>
+                        <td>{label(row.periodStart)}</td>
+                        <td>{row.name}</td>
+                        <td className={ui.num}>{formatMoney(row.closed)}</td>
+                        <td className={ui.num}>{formatMoney(row.quota)}</td>
+                        <td className={ui.num}>{row.attainment === null ? "—" : `${row.attainment}%`}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Card>
           <Card title="Campaigns">
             {d.campaigns.length === 0 ? (
               <Empty>Nothing from campaigns in these periods.</Empty>
             ) : (
-              <table className={ui.table}>
-                <thead>
-                  <tr>
-                    <th>Campaign</th>
-                    <th className={ui.num}>Leads</th>
-                    <th className={ui.num}>Deals won</th>
-                    <th className={ui.num}>Won amount</th>
-                    <th className={ui.num}>Actual cost</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {d.campaigns.map((row) => (
-                    <tr key={row.campaignId}>
-                      <td>
-                        <Link href={`/crm/campaigns/${row.campaignId}`}>{row.name}</Link>
-                      </td>
-                      <td className={ui.num}>{row.leads}</td>
-                      <td className={ui.num}>{row.won}</td>
-                      <td className={ui.num}>{amounts(row.wonAmounts)}</td>
-                      <td className={ui.num}>{row.actualCost === null ? "—" : formatMoney(row.actualCost)}</td>
+              <div className={ui.tableWrap}>
+                <table className={ui.table}>
+                  <thead>
+                    <tr>
+                      <th>Campaign</th>
+                      <th className={ui.num}>Leads</th>
+                      <th className={ui.num}>Deals won</th>
+                      <th className={ui.num}>Won amount</th>
+                      <th className={ui.num}>Actual cost</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {d.campaigns.map((row) => (
+                      <tr key={row.campaignId}>
+                        <td>
+                          <Link href={`/crm/campaigns/${row.campaignId}`}>{row.name}</Link>
+                        </td>
+                        <td className={ui.num}>{row.leads}</td>
+                        <td className={ui.num}>{row.won}</td>
+                        <td className={ui.num}>{amounts(row.wonAmounts)}</td>
+                        <td className={ui.num}>{row.actualCost === null ? "—" : formatMoney(row.actualCost)}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             )}
           </Card>
           {drill ? (
@@ -300,32 +312,34 @@ export function DashboardPage({ organisationId }: { organisationId: string }) {
                 </Button>
               }
             >
-              <table className={ui.table}>
-                <thead>
-                  <tr>
-                    <th>Deal</th>
-                    <th>Stage</th>
-                    <th className={ui.num}>Amount</th>
-                    <th>Added</th>
-                    <th>Closed</th>
-                    <th className={ui.num}>Days</th>
-                  </tr>
-                </thead>
-                <tbody>
-                  {drill.deals.map((deal) => (
-                    <tr key={deal.id}>
-                      <td>
-                        <Link href={`/crm/opportunities/${deal.id}`}>{deal.name}</Link>
-                      </td>
-                      <td>{deal.stageName}</td>
-                      <td className={ui.num}>{amountIn(deal.amount, deal.currencyCode, baseCurrency)}</td>
-                      <td>{formatDate(deal.addedOn)}</td>
-                      <td>{deal.closedOn ? formatDate(deal.closedOn) : ""}</td>
-                      <td className={ui.num}>{deal.days ?? deal.daysInStage ?? ""}</td>
+              <div className={ui.tableWrap}>
+                <table className={ui.table}>
+                  <thead>
+                    <tr>
+                      <th>Deal</th>
+                      <th>Stage</th>
+                      <th className={ui.num}>Amount</th>
+                      <th>Added</th>
+                      <th>Closed</th>
+                      <th className={ui.num}>Days</th>
                     </tr>
-                  ))}
-                </tbody>
-              </table>
+                  </thead>
+                  <tbody>
+                    {drill.deals.map((deal) => (
+                      <tr key={deal.id}>
+                        <td>
+                          <Link href={`/crm/opportunities/${deal.id}`}>{deal.name}</Link>
+                        </td>
+                        <td>{deal.stageName}</td>
+                        <td className={ui.num}>{amountIn(deal.amount, deal.currencyCode, baseCurrency)}</td>
+                        <td>{formatDate(deal.addedOn)}</td>
+                        <td>{deal.closedOn ? formatDate(deal.closedOn) : ""}</td>
+                        <td className={ui.num}>{deal.days ?? deal.daysInStage ?? ""}</td>
+                      </tr>
+                    ))}
+                  </tbody>
+                </table>
+              </div>
             </Card>
           ) : null}
         </>

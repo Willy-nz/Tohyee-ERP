@@ -94,7 +94,8 @@ function NewLead({ organisationId, onDone }: { organisationId: string; onDone: (
 
 function ImportLeads({ organisationId, onDone }: { organisationId: string; onDone: () => void }) {
   const [file, setFile] = useState<File | null>(null);
-  const [key] = useState(() => newIdempotencyKey());
+  // One key per file: kept for a resend of the same file, new for the next file.
+  const [key, setKey] = useState(() => newIdempotencyKey());
   const [result, setResult] = useState<LeadImportResult | null>(null);
   const [campaignId, setCampaignId] = useState("");
   const { busy, error, run } = useBusy();
@@ -105,7 +106,10 @@ function ImportLeads({ organisationId, onDone }: { organisationId: string; onDon
         A CSV or Excel file with headings in the first row. Each row becomes a lead you own.{" "}
         <InfoTip label="The file">The headings are First name, Last name (or Name), Company, Email, Phone, Job title, Source and Notes. Rows whose email is already an open lead are skipped.</InfoTip>
       </p>
-      <input type="file" accept=".csv,.txt,.xlsx" onChange={(event) => setFile(event.target.files?.[0] ?? null)} />
+      <input type="file" accept=".csv,.txt,.xlsx" onChange={(event) => {
+          setFile(event.target.files?.[0] ?? null);
+          setKey(newIdempotencyKey());
+        }} />
       <CampaignSelect organisationId={organisationId} label="From campaign (optional)" value={campaignId} onChange={setCampaignId} disabled={busy || result !== null} />
       <span className={ui.rowButtons}>
         <Button

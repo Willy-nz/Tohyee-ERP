@@ -63,67 +63,69 @@ function SequenceEditor({ organisationId, sequence, onDone }: { organisationId: 
         </Field>
       </div>
       {locked ? <Notice tone="warning">Someone is part-way through this sequence, so its steps can&apos;t change. Make a new sequence for different steps.</Notice> : null}
-      <table className={ui.table}>
-        <thead>
-          <tr>
-            <th>Day</th>
-            <th>Step</th>
-            <th>Task title</th>
-            <th>Template</th>
-            <th />
-          </tr>
-        </thead>
-        <tbody>
-          {form.steps.map((step, index) => (
-            <tr key={index}>
-              <td>
-                <input
-                  aria-label={`Step ${index + 1} day`}
-                  type="number"
-                  min={0}
-                  max={365}
-                  required
-                  disabled={locked}
-                  value={step.dayOffset}
-                  style={{ width: 70 }}
-                  onChange={(event) => setStep(index, { dayOffset: event.target.value })}
-                />
-              </td>
-              <td>
-                <select aria-label={`Step ${index + 1} kind`} disabled={locked} value={step.kind} onChange={(event) => setStep(index, { kind: event.target.value as StepKind })}>
-                  {(Object.keys(KIND_LABELS) as StepKind[]).map((kind) => (
-                    <option key={kind} value={kind}>
-                      {KIND_LABELS[kind]}
-                    </option>
-                  ))}
-                </select>
-              </td>
-              <td>
-                <input aria-label={`Step ${index + 1} title`} required maxLength={150} disabled={locked} value={step.title} onChange={(event) => setStep(index, { title: event.target.value })} />
-              </td>
-              <td>
-                {step.kind === "email" ? (
-                  <select aria-label={`Step ${index + 1} template`} required disabled={locked} value={step.templateId} onChange={(event) => setStep(index, { templateId: event.target.value })}>
-                    <option value="">Choose…</option>
-                    {templates.map((template) => (
-                      <option key={template.id} value={template.id}>
-                        {template.name}
+      <div className={ui.tableWrap}>
+        <table className={ui.table}>
+          <thead>
+            <tr>
+              <th>Day</th>
+              <th>Step</th>
+              <th>Task title</th>
+              <th>Template</th>
+              <th />
+            </tr>
+          </thead>
+          <tbody>
+            {form.steps.map((step, index) => (
+              <tr key={index}>
+                <td>
+                  <input
+                    aria-label={`Step ${index + 1} day`}
+                    type="number"
+                    min={0}
+                    max={365}
+                    required
+                    disabled={locked}
+                    value={step.dayOffset}
+                    style={{ width: 70 }}
+                    onChange={(event) => setStep(index, { dayOffset: event.target.value })}
+                  />
+                </td>
+                <td>
+                  <select aria-label={`Step ${index + 1} kind`} disabled={locked} value={step.kind} onChange={(event) => setStep(index, { kind: event.target.value as StepKind })}>
+                    {(Object.keys(KIND_LABELS) as StepKind[]).map((kind) => (
+                      <option key={kind} value={kind}>
+                        {KIND_LABELS[kind]}
                       </option>
                     ))}
                   </select>
-                ) : null}
-              </td>
-              <td>
-                {!locked && form.steps.length > 1 ? (
-                  <Button size="small" variant="secondary" type="button" onClick={() => setForm({ ...form, steps: form.steps.filter((_, at) => at !== index) })}>
-                    Remove
-                  </Button>
-                ) : null}
-              </td>
-            </tr>
-          ))}
-        </tbody>
-      </table>
+                </td>
+                <td>
+                  <input aria-label={`Step ${index + 1} title`} required maxLength={150} disabled={locked} value={step.title} onChange={(event) => setStep(index, { title: event.target.value })} />
+                </td>
+                <td>
+                  {step.kind === "email" ? (
+                    <select aria-label={`Step ${index + 1} template`} required disabled={locked} value={step.templateId} onChange={(event) => setStep(index, { templateId: event.target.value })}>
+                      <option value="">Choose…</option>
+                      {templates.map((template) => (
+                        <option key={template.id} value={template.id}>
+                          {template.name}
+                        </option>
+                      ))}
+                    </select>
+                  ) : null}
+                </td>
+                <td>
+                  {!locked && form.steps.length > 1 ? (
+                    <Button size="small" variant="secondary" type="button" onClick={() => setForm({ ...form, steps: form.steps.filter((_, at) => at !== index) })}>
+                      Remove
+                    </Button>
+                  ) : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       {!locked && form.steps.length < 30 ? (
         <span>
           <Button

@@ -36,6 +36,8 @@ export function DealProducts({ organisationId, opportunity, onChanged }: { organ
   const items = useItems(can("viewer") ? organisationId : null).data?.items.filter((item) => item.isActive) ?? [];
   const [editing, setEditing] = useState<Row[] | null>(null);
   const [message, setMessage] = useState<string | null>(null);
+  // Kept until a quote is made, so a resend after a lost reply makes one quote, not two.
+  const [quoteKey, setQuoteKey] = useState(() => newIdempotencyKey("deal-quote"));
   const { busy, error, run } = useBusy();
   const open = opportunity.stageType === "open";
   const scale = currencyMinorUnits(opportunity.currencyCode);
@@ -80,8 +82,9 @@ export function DealProducts({ organisationId, opportunity, onChanged }: { organ
                   void run(async () => {
                     const made = await api<{ quote: { id: string }; replaced: string | null }>(`/api/crm/opportunities/${opportunity.id}/quote`, {
                       method: "POST",
-                      body: { organisationId, idempotencyKey: newIdempotencyKey("deal-quote") },
+                      body: { organisationId, idempotencyKey: quoteKey },
                     });
+                    setQuoteKey(newIdempotencyKey("deal-quote"));
                     setMessage(made.replaced ? `${made.replaced} was declined and a new draft quote made.` : "Draft quote made.");
                     data.reload();
                     onChanged();

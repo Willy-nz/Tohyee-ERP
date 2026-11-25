@@ -10,7 +10,7 @@ import { useWorkspace } from "@/components/workspace";
 import { Badge, Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
 import { api, errorMessage } from "@/lib/client/api";
 import type { Farm } from "@/lib/farming/paddocks";
-import { formatDate, formatDateTime } from "@/lib/format";
+import { formatDate, formatDateTime, todayInBrowser } from "@/lib/format";
 import { recordAnchor } from "@/lib/safety/screens";
 import type { InductionToRead, InductionView, SignoffView, SiteLink } from "@/lib/safety/inductions";
 import { type Audience, AUDIENCE_LABELS, AUDIENCES, type CurrentRecord, HAZARD_LEVEL_LABELS, INVITE_CONTRACTORS, NOT_COMPETENCE, SELF_DECLARED, SIGN_STATEMENT, SIGNED_HOW_LABELS, type VisitData } from "@/lib/safety/shared";
@@ -175,7 +175,7 @@ function OnSiteCard({ organisationId, farm, data, onChanged }: { organisationId:
             <div className={ui.muted} style={{ fontSize: "var(--text-sm)" }}>
               Signed in {visit.data.phoneTime && Date.parse(visit.firstEnteredAt) - Date.parse(visit.data.phoneTime) > 120_000 ? `${formatDateTime(visit.data.phoneTime)} on a phone, sent ${formatDateTime(visit.firstEnteredAt)}` : formatDateTime(visit.firstEnteredAt)}
               {visit.data.purpose ? ` · ${visit.data.purpose}` : ""} · {SIGNED_HOW_LABELS[visit.data.signedHow]}
-              {visit.happenedOn && visit.happenedOn < new Date().toISOString().slice(0, 10) ? " · still signed in from an earlier day" : ""}
+              {visit.happenedOn && visit.happenedOn < todayInBrowser() ? " · still signed in from an earlier day" : ""}
             </div>
             <div className={ui.actions} style={{ justifyContent: "flex-start" }}>
               {pendingOut.has(visit.recordId) ? (
