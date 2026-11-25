@@ -23878,3 +23878,12 @@ Tested in `tests/integration/sales-platform-negative-stock-sent.test.ts`,
   follow the order. If WooCommerce's tax on a line ever differs from
   Tohyee's by a cent (WooCommerce set to round tax on the order's subtotal),
   the invoice still comes to the order's total and the log notes both.
+- **SPF10 One bad order doesn't stop the rest.** Shopify answers #1002 with
+  an error. #1001 in the same sync is still invoiced, #1002 gets a note
+  ("couldn't be read this time; it's read again at the next sync"), and
+  the next sync reads again from #1002, so it comes in once Shopify
+  answers. An order or payout that fails in an unexpected way while posting
+  is logged and tried again, and doesn't undo the others. Only the store
+  refusing Tohyee's login pauses it after three syncs in a row (SPR15); an
+  outage fails the syncs but they keep running, and the first sync that
+  works clears the failures.

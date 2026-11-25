@@ -1778,6 +1778,24 @@ function describeCounts(counts: SyncResult): string {
 }
 
 /** A note about the sync as a whole, not repeated within a day (so "no payouts scope" isn't logged every 15 minutes). */
+/**
+ * Runs one record's posting in a savepoint (SPF10): an unexpected error
+ * (not one of Tohyee's own refusals, which posting reports itself) undoes
+ * only that record and is handed to `failed`, so the rest of the sync stays.
+ */
+async function isolated(tx: OrgTx, work: () => Promise<void>, failed: (error: Error) => Promise<void>): Promise<void> {
+  await tx.query("savepoint sales_platform_record");
+  try {
+    await work();
+    await tx.query("release savepoint sales_platform_record");
+  } catch (error) {
+    if (error instanceof ConflictError) throw error;
+    await tx.query("rollback to savepoint sales_platform_record");
+    await tx.query("release savepoint sales_platform_record");
+    await failed(error instanceof Error ? error : new Error(String(error)));
+  }
+}
+
 async function writeNote(tx: OrgTx, connectionId: string, source: "sync" | "webhook", message: string): Promise<void> {
   const recent = await tx.query(
     "select 1 from sales_platform_sync_log where connection_id = $1 and message = $2 and logged_at > now() - interval '1 day' limit 1",
@@ -1968,16 +1986,37 @@ export async function syncConnection(
       if (posting && orders) {
         const postContext = postingContext(tx, apply, posting);
         //: oldest first, so invoice numbers run in date order.
-        for (const order of oldestFirst(orders.orders)) await postOrder(tx, postContext, order);
+        // SPF10: one order that fails in an unexpected way is logged and tried again; it doesn't undo the others.
+        for (const order of oldestFirst(orders.orders)) {
+          await isolated(tx, () => postOrder(tx, postContext, order), async (error) => {
+            await tx.query(
+              `insert into sales_platform_documents (platform, store_domain, record_kind, external_id, connection_id, state, retry, name)
+               values ($1, $2, 'order', $3, $4, 'open', true, $5)
+               on conflict (platform, store_domain, record_kind, external_id) do update set retry = true, updated_at = now()`,
+              [current.platform, current.store_domain, order.externalId, current.id, order.name.slice(0, 100)],
+            );
+            await writeLog(tx, row.id, { source: "sync", action: "failed", recordKind: "order", externalId: order.externalId, message: `${order.name} couldn't be brought in: ${error.message} It's tried again at the next sync.` });
+          });
+        }
         for (const note of orders.notes) await writeNote(tx, row.id, "sync", note);
         if (payouts) {
           // The next sync starts at the first payout not finished with (not paid yet, or stopped on Tohyee's side).
           let firstOpen: string | null = null;
           let last: string | null = null;
           for (const payout of [...payouts.payouts].sort((a, b) => Date.parse(a.issuedAt) - Date.parse(b.issuedAt))) {
-            const outcome = await postPayout(tx, postContext, payout);
+            const result: { outcome: Awaited<ReturnType<typeof postPayout>> } = { outcome: "failed" };
+            await isolated(
+              tx,
+              async () => {
+                result.outcome = await postPayout(tx, postContext, payout);
+              },
+              async (error) => {
+                await writeLog(tx, row.id, { source: "sync", action: "failed", recordKind: "payout", externalId: payout.externalId, message: `Payout ${payout.externalId} couldn't be posted: ${error.message} It's tried again at the next sync.` });
+              },
+            );
             // : its settlement, for matching the bank deposit (nothing posted).
             await savePayout(tx, { id: current.id, platform: current.platform, storeDomain: current.store_domain }, payout);
+            const { outcome } = result;
             if ((outcome === "waiting" || outcome === "failed") && firstOpen === null) firstOpen = payout.issuedAt;
             last = payout.issuedAt;
           }
@@ -2069,12 +2108,14 @@ export async function syncConnection(
     await withOrganisationTransaction(organisation, actor, async (tx) => {
       const current = await readConnection(tx, row.id, { lock: true });
       if (current.status === "disconnected") return;
+      // SPF10: only the store refusing Tohyee's login counts towards pausing; an outage or a store error keeps being tried.
+      const refusedLogin = error instanceof PlatformError && error.refused;
       const updated = await tx.query<{ status: string }>(
         `update sales_platform_connections
             set failures = failures + 1, last_error = $2, last_sync_at = $3,
-                status = case when failures + 1 >= $4 then 'paused' else status end, updated_at = now()
+                status = case when $5::boolean and failures + 1 >= $4 then 'paused' else status end, updated_at = now()
           where id = $1 returning status`,
-        [row.id, message.slice(0, 1000), now.toISOString(), PAUSE_AFTER_FAILURES],
+        [row.id, message.slice(0, 1000), now.toISOString(), PAUSE_AFTER_FAILURES, refusedLogin],
       );
       const paused = updated.rows[0].status === "paused" && current.status !== "paused";
       await writeLog(tx, row.id, {
