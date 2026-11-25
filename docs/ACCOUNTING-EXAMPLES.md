@@ -23909,3 +23909,11 @@ Tested in `tests/integration/sales-platform-negative-stock-sent.test.ts`,
   the start (its stock never left) is as SWS5, with no item. Lines held
   after invoicing before this change don't know their item, so they're as
   before.
+- **SPF12 Smaller fixes.** The AI's payout and deposit report runs to
+  today in New Zealand by default (at 9am on 26 Nov it includes 26 Nov, not
+  just up to 25 Nov, the date in UTC). A WooCommerce sync reads from a
+  second before the last order it read, so an order changed in that same
+  second isn't missed. The nightly Analytics load no longer waits for a load
+  that has been "running" for more than an hour (one cut off by a restart),
+  and the Analytics copy of the books reads every table from the same
+  moment.

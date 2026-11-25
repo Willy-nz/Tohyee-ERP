@@ -1,3 +1,4 @@
+import { todayIsoDate } from "@/lib/dates";
 /**
  * Guided reconciliation of platform payout deposits (examples SPR1-SPR10). Keeps each payout's settlement as the
  * store described it (at sync, inside the sync's write transaction: no
@@ -317,7 +318,7 @@ const LINE_LIMIT = 50;
  * matched to, and every unreconciled deposit on a payout account in the
  * same dates with its guidance. Read-only: it suggests, a person reconciles.
  */
-export async function payoutMatchReport(tx: OrgTx, options: { connectionId?: unknown; from?: unknown; to?: unknown } = {}, today: string = new Date().toISOString().slice(0, 10)) {
+export async function payoutMatchReport(tx: OrgTx, options: { connectionId?: unknown; from?: unknown; to?: unknown } = {}, today: string = todayIsoDate()) {
   const connectionId = optionalId(options.connectionId, "connectionId");
   const date = (value: unknown, field: string, fallback: string) => {
     if (value === undefined || value === null || value === "") return fallback;

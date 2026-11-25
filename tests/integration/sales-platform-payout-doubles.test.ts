@@ -1,4 +1,4 @@
-import { afterAll, afterEach, beforeAll, expect, it } from "vitest";
+import { afterAll, afterEach, beforeAll, expect, it, vi } from "vitest";
 import type { SessionUser } from "@/lib/auth/sessions";
 import { listStatementLines } from "@/lib/bank/accounts";
 import { importStatementFile } from "@/lib/bank/imports";
@@ -6,7 +6,7 @@ import { reconcileStatementLine } from "@/lib/bank/reconcile";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { updateOrganisationSettings } from "@/lib/organisations/settings";
 import { getOrganisation } from "@/lib/organisations/registry";
-import { payoutGuidanceForLine } from "@/lib/sales-platforms/payout-reconcile";
+import { payoutGuidanceForLine, payoutMatchReport } from "@/lib/sales-platforms/payout-reconcile";
 import { createContact } from "@/lib/contacts/service";
 import { createTransfer } from "@/lib/bank/transactions";
 import { salesPlatformDiagnostics } from "@/lib/sales-platforms/diagnostics";
@@ -179,4 +179,18 @@ describeWithDatabase("SPF3-SPF4: a payout whose deposit was entered by hand", ()
     // Nothing was changed.
     expect(await w.balance("1000")).toBe(before);
   }, 120_000);
+
+  it("SPF12: the payout report's default 'to' date is today in New Zealand, not in UTC", async () => {
+    await createTestOrganisation(owner, "spf12-co");
+    const actor = { userId: owner.id, email: owner.email };
+    vi.useFakeTimers({ toFake: ["Date"] });
+    // 9am on 26 Nov in New Zealand is still 25 Nov in UTC.
+    vi.setSystemTime(new Date("2026-11-25T20:00:00Z"));
+    try {
+      const report = await inOrganisation("spf12-co", actor, (tx) => payoutMatchReport(tx));
+      expect(report.to).toBe("2026-11-26");
+    } finally {
+      vi.useRealTimers();
+    }
+  });
 });

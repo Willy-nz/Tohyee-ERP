@@ -270,4 +270,17 @@ describeWithDatabase("WooCommerce orders into the accounts (WC1-WC10)", () => {
     expect((await logFor(w, "2012")).at(-1)?.message).toContain("WooCommerce's order total is 45.00");
     expect(await w.as((tx) => tx.query("select 1 from sales_orders"))).toMatchObject({ rowCount: 0 });
   });
+
+  it("SPF12: an order changed in the same second as the last one read still comes in at the next sync", async () => {
+    const w = await setup();
+    w.state.orders.push({ ...order2001(), modifiedAt: "2026-10-02T01:30:00Z" });
+    await w.sync("2026-10-02T02:00:00Z");
+    await w.map([{ method: "stripe", accountCode: "1050" }]);
+    await w.sync("2026-10-02T02:05:00Z");
+    expect((await doc(w, "order", "2001"))?.invoice_id).not.toBeNull();
+    // Changed in that same second, but not read then (as when a sync stops at its page limit).
+    w.state.orders.push({ ...order2002(), createdAt: "2026-10-02T01:29:30Z", paidAt: "2026-10-02T01:29:45Z", modifiedAt: "2026-10-02T01:30:00Z" });
+    await w.sync("2026-10-02T02:15:00Z");
+    expect((await doc(w, "order", "2002"))?.invoice_id ?? null).not.toBeNull();
+  });
 });

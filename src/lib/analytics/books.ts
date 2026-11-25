@@ -564,7 +564,8 @@ export async function refreshBooks(organisation: OrganisationRecord, actor: Acto
         const tables = await readBooks(tx, ownerEmails);
         return { rows: await replaceTohyeeTables(organisation.id, tables), names: tables.map((table) => table.name) };
       },
-      { readOnly: true },
+      // SPF12: every table from the same moment, so a posting made during the copy is in all of them or none.
+      { readOnly: true, snapshot: true },
     );
     rows = copied.rows;
     changedTables = copied.names;

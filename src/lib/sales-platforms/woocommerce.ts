@@ -347,7 +347,12 @@ export const woocommerceConnector: SalesPlatformConnector = {
   },
 
   async fetchOrders(context, token, request) {
-    const since = request.updatedSince && Date.parse(request.updatedSince) > Date.parse(request.processedFrom) ? request.updatedSince : request.processedFrom;
+    // modified_after is strictly after: a second earlier, so an order changed in the same second as the last one read
+    // (left for the next page when a sync stopped at its limit) isn't missed. Posting is idempotent (SPF12).
+    const since =
+      request.updatedSince && Date.parse(request.updatedSince) > Date.parse(request.processedFrom)
+        ? new Date(Date.parse(request.updatedSince) - 1000).toISOString()
+        : request.processedFrom;
     const orders: PlatformOrder[] = [];
     const notes: string[] = [];
     const seen = new Set<string>();
