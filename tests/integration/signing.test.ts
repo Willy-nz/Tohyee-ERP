@@ -19,6 +19,7 @@ import { approveInvoice } from "@/lib/invoices/service";
 import { getJournal } from "@/lib/ledger/journals";
 import { acceptQuote, acceptQuoteAsSalesOrder, createQuote, declineQuote, finaliseQuote, getQuote } from "@/lib/quotes/service";
 import { checkSigningCopy, getSigningRequest, listSigningRequests, signAsMember } from "@/lib/signing/service";
+import { todayIsoDate } from "@/lib/dates";
 import { apiRequest, createTestOrganisation, createTestUser, describeWithDatabase, inOrganisation, key, params, sessionCookieFor, startTestServer, type TestServer } from "../helpers/test-server";
 
 /** E-signatures with quotes (examples QT9-QT11). Made-up people and addresses only. */
@@ -52,6 +53,8 @@ describeWithDatabase("signing requests (quotes)", () => {
     await server?.teardown();
   });
 
+  const daysAfterToday = (days: number) => new Date(Date.parse(`${todayIsoDate()}T00:00:00Z`) + days * 86_400_000).toISOString().slice(0, 10);
+
   async function setup(options: { email?: boolean } = {}) {
     count += 1;
     const org = `signing-${count}-co`;
@@ -65,14 +68,15 @@ describeWithDatabase("signing requests (quotes)", () => {
     const terms = (await as((tx) => getCustomerSetup(tx))).paymentTerms;
     const twentieth = terms.find((t) => t.name === "20th of the following month")!.id;
     const koru = (await as((tx) => createContact(tx, { idempotencyKey: key("c"), name: "Koru Cafe", isCustomer: true, paymentTermId: twentieth, email: "aroha@koru-cafe.test" }))).contact;
-    const quote = async () => {
+    // Valid for another 30 days by default: a quote past its expiry date isn't sent to accept (OPF5).
+    const quote = async (dates: { quoteDate?: string; expiryDate?: string | null } = {}) => {
       const draft = (
         await as((tx) =>
           createQuote(tx, {
             idempotencyKey: key("quote"),
             contactId: koru.id,
-            quoteDate: "2026-07-15",
-            expiryDate: "2026-08-14",
+            quoteDate: dates.quoteDate ?? "2026-07-15",
+            expiryDate: dates.expiryDate === undefined ? daysAfterToday(30) : dates.expiryDate,
             amountsMode: "exclusive",
             lines: [
               { description: "Pendant pendant", quantity: "2", unitPrice: "120.00", accountCode: "4000", taxCode: "GST" },
@@ -375,5 +379,44 @@ describeWithDatabase("signing requests (quotes)", () => {
     await w.link(token).post({ action: "sign", method: "typed", typedName: "Aroha Ngata", consent: true, documentSha256: sha256 }, session);
     await expect(w.as((tx) => tx.query("update signing_signers set typed_name = 'Someone Else' where request_id = $1", [request.id]))).rejects.toThrow("can't be changed");
     await expect(w.as((tx) => tx.query("update signing_requests set status = 'voided', voided_at = now(), void_reason = 'x' where id = $1", [request.id]))).rejects.toThrow("is completed");
+  });
+
+  it("OPF5: a quote past its expiry date isn't sent to accept, and the link stops with the quote", async () => {
+    const w = await setup();
+    const expired = await w.quote({ quoteDate: "2026-01-05", expiryDate: "2026-01-31" });
+    const refused = await w.send(expired.id);
+    expect(refused.status).toBe(409);
+    expect(((await refused.json()) as { error: string }).error).toContain("expired on 31 Jan 2026. Copy it to make a new quote");
+    // Valid for 5 more days: the link works for 6 (to the end of the quote's last day), not the usual 30.
+    const soon = await w.quote({ expiryDate: daysAfterToday(5) });
+    const sent = await w.send(soon.id);
+    expect(sent.status).toBe(201);
+    const { request } = (await sent.json()) as { request: { id: string; expiresAt: string } };
+    const days = (Date.parse(request.expiresAt) - Date.now()) / 86_400_000;
+    expect(days).toBeGreaterThan(5.9);
+    expect(days).toBeLessThan(6.1);
+    // With no expiry date, the usual 30 days.
+    const open = await w.quote({ expiryDate: null });
+    const { request: longer } = (await (await w.send(open.id)).json()) as { request: { expiresAt: string } };
+    expect((Date.parse(longer.expiresAt) - Date.now()) / 86_400_000).toBeGreaterThan(29.9);
+  });
+
+  it("OPF5: signing after the quote's expiry date doesn't accept it", async () => {
+    const w = await setup();
+    const quote = await w.quote({ expiryDate: daysAfterToday(3) });
+    const { request } = (await (await w.send(quote.id)).json()) as { request: { id: string; documentSha256: string } };
+    const token = w.tokenFrom((await w.emails(request.id)).find((email) => email.purpose === "link")!.body);
+    const session = await w.verify(token, request.id);
+    await w.link(token).document(session);
+    // As if the days had passed (a link sent before links were limited to the quote's dates): the quote's expiry is now behind us.
+    await w.as(async (tx) => {
+      await tx.query("alter table quotes disable trigger quotes_guard");
+      await tx.query("update quotes set expiry_date = $2, quote_date = $3 where id = $1", [quote.id, "2026-01-31", "2026-01-05"]);
+      await tx.query("alter table quotes enable trigger quotes_guard");
+    });
+    const signed = await w.link(token).post({ action: "sign", method: "typed", typedName: "Aroha Ngata", consent: true, documentSha256: request.documentSha256 }, session);
+    expect(signed.status).toBe(409);
+    expect(((await signed.json()) as { error: string }).error).toContain("expired on 31 Jan 2026, so it can't be accepted now");
+    expect((await w.as((tx) => getQuote(tx, quote.id))).status).toBe("finalised");
   });
 });

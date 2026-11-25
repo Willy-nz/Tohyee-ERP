@@ -23840,3 +23840,13 @@ as JV1-JV9), and a farm with two blocks, Home and Runoff.
   takes 4 L off the cabinet (5 L to **1 L**) and counts milk withholding
   from 7:30, the same as recording it on Mobs. A product typed instead of
   picked is kept on the treatment only, as before.
+- **OPF5 An expired quote isn't accepted by signing.** A quote dated 5 Jan
+  2026, valid until 31 Jan 2026, can't be sent to accept online after 31 Jan:
+  "QU-0007 expired on 31 Jan 2026. Copy it to make a new quote with a new
+  expiry date, then send that." A quote valid for 5 more days is sent with a
+  link that works for 6 days (to the end of its last day), not the usual
+  30; one with no expiry date keeps the usual 30. If a link sent earlier is
+  signed after the expiry date, signing doesn't accept the quote: "expired
+  on 31 Jan 2026, so it can't be accepted now. Ask the business for a new
+  quote." Nothing is posted. (Whether a business may choose to honour an
+  expired quote anyway is left for the owner; today it copies the quote.)
