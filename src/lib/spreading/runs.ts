@@ -3,7 +3,7 @@ import type { OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
 import { assertSameRequest, requestHash } from "@/lib/idempotency";
 import type { CustomValues } from "@/lib/custom-fields/values";
-import { checkManualTags, getJournal, parseJournalBody, postJournalBody } from "@/lib/ledger/journals";
+import { checkManualTags, getJournal, parseJournalBody, postJournalBody, withOriginalCustomFields } from "@/lib/ledger/journals";
 import { assertPostingDateAllowed, getPeriodControls } from "@/lib/ledger/period-controls";
 import { abs, add, dec, isNegative, isZero, toFixedString, ZERO_DECIMAL } from "@/lib/money/decimal";
 import { monthEndDate, SPREAD_KIND_LABELS, type SpreadKind, spreadPosting } from "@/lib/spreading/rules";
@@ -305,12 +305,15 @@ export async function undoSpreadRun(tx: OrgTx, idInput: unknown, bodyInput: unkn
       tx,
       "spreading:undo",
       id,
-      parseJournalBody(tx, {
-        postingDate,
-        reference: `VOID-${original.reference}`.slice(0, 100),
-        description: `Undo of ${SPREAD_KIND_LABELS[run.kind].toLowerCase()} - ${monthName(run.month)}`,
-        lines: original.lines.map((line) => ({ accountCode: line.accountCode, debitAmount: line.creditAmount, creditAmount: line.debitAmount, description: line.description, tracking: line.tracking })),
-      }),
+      withOriginalCustomFields(
+        parseJournalBody(tx, {
+          postingDate,
+          reference: `VOID-${original.reference}`.slice(0, 100),
+          description: `Undo of ${SPREAD_KIND_LABELS[run.kind].toLowerCase()} - ${monthName(run.month)}`,
+          lines: original.lines.map((line) => ({ accountCode: line.accountCode, debitAmount: line.creditAmount, creditAmount: line.debitAmount, description: line.description, tracking: line.tracking })),
+        }),
+        original,
+      ),
       { origin: "spreading", relatedJournalId: original.id, correctionKind: "reversal" },
     );
     undoJournalId = posted.journal.id;

@@ -3,10 +3,11 @@ import { RECEIVABLES_SQL, dueDateFromTerms } from "@/lib/customers/service";
 import { todayIsoDate, parseOptionalIsoDate } from "@/lib/dates";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ValidationError } from "@/lib/errors";
+import { exchangeRateFor } from "@/lib/fx/documents";
 import { type BalanceChange, type FeePart, addDays, chargeable, interestFor, splitFee } from "@/lib/invoices/late-fee-rules";
 import { approveInvoice, createInvoice, loadSalesLines } from "@/lib/invoices/service";
 import { currencyMinorUnits } from "@/lib/money/currency";
-import { add, cmp, dec, isPositive, parseDecimalInput, sum, toFixedString } from "@/lib/money/decimal";
+import { add, cmp, dec, divide, isPositive, parseDecimalInput, sum, toFixedString } from "@/lib/money/decimal";
 import { getGstRegistration, isRegisteredOn } from "@/lib/tax/registration";
 
 /**
@@ -118,8 +119,13 @@ async function accountId(tx: OrgTx, code: unknown, types: string[], label: strin
   return account.id;
 }
 
-/** LATE1, LATE10: an admin's settings. Turning it on needs a fee or a rate, and an account for each. */
-export async function saveLateFeeSettings(tx: OrgTx, input: Record<string, unknown>): Promise<LateFeeSettings> {
+/**
+ * LATE1, LATE10: an admin's settings. Turning it on needs a fee or a rate,
+ * and an account for each. When the monthly run starts (monthly ticked with
+ * late fees on, where it wasn't before), the current month counts as done,
+ * so the first run is on the 1st of next month, not within the hour (LATE13).
+ */
+export async function saveLateFeeSettings(tx: OrgTx, input: Record<string, unknown>, today: string = todayIsoDate()): Promise<LateFeeSettings> {
   const enabled = input.enabled === true;
   const feeAmount = optionalAmount(input.feeAmount, "The fee");
   const interestRate = optionalAmount(input.interestRate, "The interest rate", { maxScale: 4 });
@@ -143,6 +149,8 @@ export async function saveLateFeeSettings(tx: OrgTx, input: Record<string, unkno
     if (feeAmount !== null && feeAccountId === null) throw new ValidationError("Choose the account the fee goes to.");
     if (interestRate !== null && interestAccountId === null) throw new ValidationError("Choose the account the interest goes to.");
   }
+  const before = (await tx.query<{ running: boolean }>("select (enabled and monthly) as running from late_fee_settings for update")).rows[0];
+  const starting = enabled && input.monthly === true && !before?.running;
   await tx.query(
     `insert into late_fee_settings (id, enabled, fee_amount, interest_rate, grace_days, minimum_overdue, fee_account_id,
                                     interest_account_id, approve, monthly, updated_at, updated_by_email)
@@ -153,6 +161,7 @@ export async function saveLateFeeSettings(tx: OrgTx, input: Record<string, unkno
        approve = excluded.approve, monthly = excluded.monthly, updated_at = now(), updated_by_email = excluded.updated_by_email`,
     [enabled, feeAmount, interestRate, graceDays, minimumOverdue, feeAccountId, interestAccountId, input.approve === true, input.monthly === true, tx.actor.email],
   );
+  if (starting) await tx.query("update late_fee_settings set last_monthly_run = $1", [`${today.slice(0, 7)}-01`]);
   await writeAuditEvent(tx, {
     eventType: "late_fees.settings_saved",
     entityType: "late_fee_settings",
@@ -201,6 +210,8 @@ export type LateFeeDue = {
   dueDate: string;
   amountDue: string;
   currencyCode: string;
+  /** LATE12: for an invoice in another currency, the rate (base currency per 1 unit) the fee and minimum were converted at; else null. */
+  exchangeRate: string | null;
   fee: FeePart[];
   /** The fee before GST, all parts together; null with no fee. */
   feeTotal: string | null;
@@ -247,14 +258,47 @@ async function codeOfCategory(tx: OrgTx, category: string, preferred: string): P
   return found.rows[0]?.code ?? null;
 }
 
+/** An overdue invoice that would be charged but can't be (LATE12: no exchange rate), and why. */
+export type LateFeeCannot = { invoiceId: string; invoiceNumber: string | null; contactName: string; currencyCode: string; reason: string };
+
+/**
+ * LATE12: the fee and the minimum are set in the base currency. For an
+ * invoice in another currency they're converted at the rate for the charge
+ * date (base currency per 1 unit), rounded half up to the currency's
+ * smallest unit. Null fields need no conversion; a string is why it can't.
+ */
+async function inInvoiceCurrency(
+  tx: OrgTx,
+  input: { currencyCode: string; asOf: string; scale: number; fee: string | null; minimum: string },
+): Promise<{ rate: string | null; fee: string | null; minimum: string } | string> {
+  if (input.currencyCode === tx.baseCurrency) return { rate: null, fee: input.fee, minimum: input.minimum };
+  if (input.fee === null && !isPositive(dec(input.minimum))) return { rate: null, fee: null, minimum: input.minimum };
+  let rate: string | null = null;
+  try {
+    rate = await exchangeRateFor(tx, { currencyCode: input.currencyCode, date: input.asOf, typed: undefined, what: "late payment invoice" });
+  } catch (error) {
+    if (!(error instanceof ValidationError)) throw error;
+  }
+  if (!rate || !isPositive(dec(rate))) {
+    const what = input.fee !== null ? `the ${tx.baseCurrency} ${input.fee} fee` : `the ${tx.baseCurrency} ${input.minimum} minimum`;
+    return `There's no ${input.currencyCode} exchange rate for ${dateLabel(input.asOf)}, so ${what} can't be worked out in ${input.currencyCode}. Add a rate under Accounting › Exchange rates, then charge it again.`;
+  }
+  const convert = (amount: string) => toFixedString(divide(dec(amount), dec(rate), input.scale), input.scale);
+  return { rate, fee: input.fee === null ? null : convert(input.fee), minimum: convert(input.minimum) };
+}
+
 /**
  * LATE2-LATE12: what's due to be charged on `asOf`, invoice by invoice
- * (or only `invoiceIds`). Charges nothing.
+ * (or only `invoiceIds`). Charges nothing. `cannotCharge` lists invoices
+ * that would be charged but can't be, with why (LATE12).
  */
-export async function lateFeesDue(tx: OrgTx, input: { asOf?: unknown; invoiceIds?: readonly string[] } = {}): Promise<{ asOf: string; settings: LateFeeSettings; due: LateFeeDue[] }> {
+export async function lateFeesDue(
+  tx: OrgTx,
+  input: { asOf?: unknown; invoiceIds?: readonly string[] } = {},
+): Promise<{ asOf: string; settings: LateFeeSettings; due: LateFeeDue[]; cannotCharge: LateFeeCannot[] }> {
   const asOf = parseOptionalIsoDate(input.asOf, "asOf") ?? todayIsoDate();
   const settings = await getLateFeeSettings(tx);
-  if (!settings.enabled) return { asOf, settings, due: [] };
+  if (!settings.enabled) return { asOf, settings, due: [], cannotCharge: [] };
   const open = await tx.query<OpenInvoice>(
     `${RECEIVABLES_SQL}
      select i.id, i.invoice_number, i.contact_id, c.name as contact_name, i.due_date::text, i.amount_due::text, i.currency_code, s.total::text
@@ -274,21 +318,31 @@ export async function lateFeesDue(tx: OrgTx, input: { asOf?: unknown; invoiceIds
   const noGst = await codeOfCategory(tx, "out_of_scope", "NONE");
   const exempt = registered ? await codeOfCategory(tx, "exempt", "EXEMPT") : noGst;
   const due: LateFeeDue[] = [];
+  const cannotCharge: LateFeeCannot[] = [];
   for (const invoice of open.rows) {
-    if (!chargeable(settings, { dueDate: invoice.due_date, amountDue: invoice.amount_due }, asOf)) continue;
+    const overdue = { dueDate: invoice.due_date, amountDue: invoice.amount_due };
+    // Grace first; the minimum is compared in the invoice's own currency below (LATE12).
+    if (!chargeable({ ...settings, minimumOverdue: "0" }, overdue, asOf)) continue;
     const scale = currencyMinorUnits(invoice.currency_code);
     const earlier = await tx.query<{ kind: string; to_date: string | null }>(
       `select lc.kind, lc.to_date::text from late_fee_charges lc join sales_invoices ci on ci.id = lc.charge_invoice_id
         where lc.invoice_id = $1 and ci.status <> 'voided'`,
       [invoice.id],
     );
+    const feeDue = settings.feeAmount && settings.feeAccountCode && !earlier.rows.some((row) => row.kind === "fee") ? settings.feeAmount : null;
+    const converted = await inInvoiceCurrency(tx, { currencyCode: invoice.currency_code, asOf, scale, fee: feeDue, minimum: settings.minimumOverdue });
+    if (typeof converted === "string") {
+      cannotCharge.push({ invoiceId: invoice.id, invoiceNumber: invoice.invoice_number, contactName: invoice.contact_name, currencyCode: invoice.currency_code, reason: converted });
+      continue;
+    }
+    if (!chargeable({ ...settings, minimumOverdue: converted.minimum }, overdue, asOf)) continue;
     const lines: LateFeeLine[] = [];
     const label = invoice.invoice_number ?? `invoice ${invoice.id}`;
     // LATE4-LATE5: the fee, once, with GST like the sale.
     let fee: FeePart[] = [];
-    if (settings.feeAmount && settings.feeAccountCode && !earlier.rows.some((row) => row.kind === "fee")) {
+    if (converted.fee !== null && settings.feeAccountCode) {
       const saleLines = (await loadSalesLines(tx, "sales_invoice_lines", invoice.id)).map((line) => ({ taxCode: line.taxCode, net: line.netAmount }));
-      fee = registered ? splitFee(settings.feeAmount, saleLines, scale, noGst) : [{ taxCode: noGst, amount: toFixedString(dec(settings.feeAmount), scale) }];
+      fee = registered ? splitFee(converted.fee, saleLines, scale, noGst) : [{ taxCode: noGst, amount: toFixedString(dec(converted.fee), scale) }];
       // A part of a sale that had no tax code (it charged no GST) charges none.
       fee = fee.map((part) => ({ ...part, taxCode: part.taxCode ?? noGst }));
       for (const part of fee) {
@@ -327,6 +381,7 @@ export async function lateFeesDue(tx: OrgTx, input: { asOf?: unknown; invoiceIds
       dueDate: invoice.due_date,
       amountDue: invoice.amount_due,
       currencyCode: invoice.currency_code,
+      exchangeRate: converted.rate,
       fee,
       feeTotal: fee.length ? toFixedString(sum(fee.map((part) => dec(part.amount))), scale) : null,
       interest,
@@ -334,7 +389,7 @@ export async function lateFeesDue(tx: OrgTx, input: { asOf?: unknown; invoiceIds
       lines,
     });
   }
-  return { asOf, settings, due };
+  return { asOf, settings, due, cannotCharge };
 }
 
 export type LateFeeResult = {
@@ -351,10 +406,11 @@ export type LateFeeResult = {
  */
 export async function chargeLateFees(tx: OrgTx, input: { asOf?: unknown; invoiceIds?: unknown; source?: string } = {}): Promise<LateFeeResult> {
   const ids = Array.isArray(input.invoiceIds) ? input.invoiceIds.map((id) => String(id)).filter((id) => /^\d+$/.test(id)) : undefined;
-  const { asOf, settings, due } = await lateFeesDue(tx, { asOf: input.asOf, invoiceIds: ids });
+  const { asOf, settings, due, cannotCharge } = await lateFeesDue(tx, { asOf: input.asOf, invoiceIds: ids });
   if (!settings.enabled) throw new ValidationError("Late fees are off. Turn them on in their settings first.");
   const source = input.source ?? "late-fees";
-  const result: LateFeeResult = { asOf, charged: [], failed: [] };
+  // LATE12: an invoice with no exchange rate to convert the fee is reported; the rest carry on.
+  const result: LateFeeResult = { asOf, charged: [], failed: cannotCharge.map((item) => ({ invoiceId: item.invoiceId, invoiceNumber: item.invoiceNumber, reason: item.reason })) };
   for (const item of due) {
     await tx.query("savepoint late_fee");
     try {

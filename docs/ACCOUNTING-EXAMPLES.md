@@ -23767,7 +23767,8 @@ fee or interest to an overdue bill: a business can charge one only if its
 terms of trade say so (and for consumers, credit and fair trading law
 limit what's fair). So it's off until an admin turns it on, and the screen
 says to check the terms first. GST: IRD treats a flat late payment fee the
-same way as the sale it's on (GST Act s 5(25)), and interest charged on an
+same way as the sale it's on, shared in proportion when the sale was at
+more than one rate (GST Act s 5(25) and (26)), and interest charged on an
 overdue account as an exempt supply.
 
 A made-up café supplier, GST registered, turns late fees on with a $25.00
@@ -23805,7 +23806,8 @@ sale, $150.00 GST), due 31 October 2026.
   note or an overpayment used on the invoice counts from its date; one
   that's later voided or removed counts as never made from that date.
 - **LATE8 Next time.** At the next charge, on 31 December, interest runs from 1
-  December, on what's then still owing. No second fee.
+  December, on what's then still owing. No second fee. Only invoices with
+  something still owing on the charge date are charged (LATE14).
 - **LATE9 Not twice, not lost.** A late payment invoice kept as a draft
   still counts as charged. If it's deleted or voided, those days and that
   fee can be charged again.
@@ -23818,6 +23820,98 @@ sale, $150.00 GST), due 31 October 2026.
   charged (a key account, say). Invoices under the minimum, drafts, voided
   invoices and late payment invoices aren't charged.
 - **LATE12 Other currencies.** An invoice in another currency is charged in
+  that currency. The fee and the minimum are set in the organisation's own
+  currency, so they're converted at the exchange rate for the charge date
+  (the rate the late payment invoice itself uses), rounded half up to the
+  currency's smallest unit. With USD at 0.6000 (NZD per USD), the $25.00
+  fee is USD **41.67**. With JPY at 0.0105, it's JPY **2,381**, and the
+  $20.00 minimum is JPY **1,905**, so a JPY 1,500 invoice isn't charged.
+  Interest is a rate, so it's worked out on the invoice's own amounts. If
+  there's no rate for the charge date, that invoice isn't charged and the
+  screen says why; the rest are charged as usual. (Corrected 25 Nov 2026:
+  before, the fee was charged as that many units of the other currency.)
+
+## Bank and ledger fixes, and more on late fees (BKF1-BKF10, LATE13-LATE14; 25 Nov 2026; following common practice, not yet reviewed)
+
+Tested in `tests/integration/bank-ledger-fixes.test.ts`,
+`tests/integration/late-fees.test.ts`, `tests/integration/spreading.test.ts`
+(SW25) and `tests/integration/consolidation.test.ts`. A made-up business,
+NZD, uses account 1000 and the BK1 statement lines. Nothing here changes
+journals already posted: BKF10 helps a bookkeeper find past damage, which
+they put right themselves (void, remove and redo, exclude).
+
+- **BKF1 Possible duplicates wait for a person.** A card purchase of
+  -46.00 on 21 May comes in from an OFX file, then again from a CSV, so the
+  CSV's line is flagged as a possible duplicate (BK3). A bank rule codes
+  this payee. "OK all confident matches" reconciles the OFX line only (1
+  succeeded): one spend money of **46.00**, not 92.00. The flagged line
+  shows "Possible duplicate" instead of a one-click match. An AI's batch or
+  bank rule refuses it, saying it may be a duplicate. A person opens it and
+  either excludes it, or (if it really is a second purchase) reconciles it
+  by hand. A line whose look-alike is excluded isn't treated as a duplicate.
+- **BKF2 Paying an invoice that's already paid.** INV-0001 for 115.00 was
+  paid on the invoice screen. Its +115.00 statement line is then
+  reconciled by "paying" INV-0001 again. That's refused: "Invoice INV-0001
+  is already paid…", saying to match the line to the payment already
+  recorded instead. Nothing is posted. If an invoice owes 15.00 and 115.00
+  is set against it, that's refused too, saying what it owes. If the
+  customer really did pay twice, the person ticks "keep the extra as the
+  customer's credit" (allowOverpayment on the API): the second payment is
+  **115.00**, all overpayment (OP4).
+- **BKF3 Remove & redo takes the adjustment back too.** A +112.50 line is
+  matched to a 115.00 customer payment with a 2.50 bank fee adjustment
+  (BK24), which posted spend money of 2.50. Remove & redo unreconciles the
+  line and voids that spend money on 20 May; the payment stays (BK45). The
+  bank account is back to **115.00**. Redone the same way, it's **112.50**
+  again, with one 2.50 fee, not two.
+- **BKF4 Edit this journal is for manual journals.** Only a manual journal,
+  or the replacement from correcting one, can be corrected in the ledger.
+  A recode (moving INV-0001's line from 4000 to 4100), a livestock
+  valuation or rations adjustment, imported history, and every journal a
+  document or payment posted are refused, each saying where to change it.
+  The invoice line still says 4100, and the ledger agrees.
+- **BKF5 The lock date and things that post no journal.** Applying a
+  credit note dated 20 May takes the same lock on the lock date as posting
+  a journal does. If May is closed while the application is being saved,
+  the close waits for it to finish: the application is never saved into a
+  month that was already closed.
+- **BKF6 Whole yen.** A JPY customer overpays JPY 500. Applying JPY 0.50 of
+  it to another invoice is refused ("must be a whole number"); applying
+  JPY 500 is fine, leaving that invoice owing JPY **500**. The same goes for
+  refunds of overpayments and credit notes: amounts are in the currency's
+  own smallest unit.
+- **BKF7 Excluding in a locked period.** May is locked to 31 May. A 20 May
+  line can't be excluded, or included again ("2026-05-20 is in a locked
+  period…"), since that changes May's bank reconciliation. A June line can.
+- **BKF8 Undoing keeps custom fields.** Undoing a Spreading month (SW25),
+  or rolling back a depreciation run, reverses each line with its custom
+  fields as well as its tracking, and the journal's own custom fields. A
+  report filtered by one shows the month and its undo together.
+- **BKF9 Voids don't pull the average rate.** In CO3, Kowhai Pty Ltd also
+  posts AUD 50,000.00 of sales on 31 October (1.1500) and voids it the same
+  day. October's average stays **1.1200**: a journal and its reversal in the
+  same month are left out of the weighting, because together they're
+  nothing. A void in a later month counts in that month.
+- **BKF10 Worth checking.** The bank reconciliation report lists, without
+  changing anything: a possible duplicate that's reconciled as well as the
+  line it may duplicate (BKF1); and a payment into the account on an
+  invoice that already had a payment, where the later one became an
+  overpayment (BKF2), e.g. 21 May, 115.00 on INV-0001, 115.00 overpaid.
+  Lines left on the account by BKF3 already show under "In Tohyee, not yet
+  on the statement".
+- **LATE13 Turning on the monthly run.** An admin ticks "charge by itself on
+  the 1st" on 15 December. December counts as done, so nothing is charged
+  that day; the first run is on **1 January**, and the screen says so.
+  Saving the settings again while it's on doesn't move it.
+- **LATE14 Only what's still owing on the charge date.** INV-0040 is charged
+  on 30 November; Hilltop pays the last $500.00 on 20 December. On 31
+  December nothing is owing, so it isn't charged: interest for 1-19
+  December (about $3.12) is never charged. An invoice due 31 October and
+  paid on 25 November is never charged a fee or interest by the 30
+  November run either, and nor is one whose part payments take it under
+  the minimum. The screen says this plainly. Whether interest should run to
+  the day of payment instead is for the owner to decide.
+
   that currency, at the rate for the charge date, rounded to its smallest
   unit.
 

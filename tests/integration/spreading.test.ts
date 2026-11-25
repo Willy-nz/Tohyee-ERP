@@ -952,14 +952,16 @@ describeWithDatabase("spreading", () => {
     ]);
     // July keeps what it was posted with.
     expect((await w.as((tx) => getJournal(tx, july.journalId as string))).lines[2].tracking).toEqual({});
-    // Undoing August reverses it tag for tag.
+    // Undoing August reverses it tag for tag, custom fields too (BKF8).
     const undone = await w.undo(august.id);
-    expect((await w.as((tx) => getJournal(tx, undone.undoJournalId as string))).lines.map((line) => [line.accountCode, line.creditAmount, line.tracking])).toEqual([
-      ["6080", "100.00", { [department]: farm }],
-      ["1200", "0.00", {}],
-      ["6080", "100.00", { [department]: runoff }],
-      ["1200", "0.00", {}],
+    const undoJournal = await w.as((tx) => getJournal(tx, undone.undoJournalId as string));
+    expect(undoJournal.lines.map((line) => [line.accountCode, line.creditAmount, line.tracking, line.customFields])).toEqual([
+      ["6080", "100.00", { [department]: farm }, { [policy]: "FMG-1" }],
+      ["1200", "0.00", {}, {}],
+      ["6080", "100.00", { [department]: runoff }, {}],
+      ["1200", "0.00", {}, {}],
     ]);
+    expect(undoJournal.customFields).toEqual({ [checkedBy]: "Aroha" });
   });
 
   it("the API: viewers read, bookkeepers add and post, admins change the accounts", async () => {

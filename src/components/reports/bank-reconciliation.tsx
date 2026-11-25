@@ -264,6 +264,27 @@ export function BankReconciliationReportView({
               </tfoot>
             </table>
           </div>
+          {data.worthChecking.duplicates.length > 0 || data.worthChecking.paidAgain.length > 0 ? (
+            <Notice tone="warning">
+              <strong>Worth checking.</strong> These are reconciled, but may have been counted twice. Nothing here changes the figures above.
+              <ul style={{ margin: "8px 0 0", paddingLeft: 20 }}>
+                {data.worthChecking.duplicates.map((item) => (
+                  <li key={`d${item.lineId}`}>
+                    {formatDate(item.date)} · {item.description} · {formatMoney(item.amount)}: flagged as a possible duplicate of line {item.duplicateOfLineId}, and
+                    both lines are reconciled. If it is a duplicate, remove and redo it, then exclude it.
+                  </li>
+                ))}
+                {data.worthChecking.paidAgain.map((item) => (
+                  <li key={`p${item.paymentId}`}>
+                    {formatDate(item.date)} · payment of {formatMoney(item.amount)} on{" "}
+                    <Link href={`/operations/invoices/${item.invoiceId}`}>{item.invoiceNumber ?? `invoice #${item.invoiceId}`}</Link>: the invoice already had a
+                    payment, so {formatMoney(item.overpayment)} of this one became an overpayment. If the customer only paid once, void this payment and
+                    match the bank line to the first one.
+                  </li>
+                ))}
+              </ul>
+            </Notice>
+          ) : null}
         </>
       ) : null}
     </Card>
