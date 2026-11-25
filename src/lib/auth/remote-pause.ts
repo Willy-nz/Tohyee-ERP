@@ -7,7 +7,8 @@ import { readServerSetting, writeServerValue } from "@/lib/server-settings";
 
 /*
  * Pausing remote access when someone is guessing. When sign-ins through remote access fail many times in a short
- * while, from any logins and any addresses, everything that comes through
+ * while, from several different addresses (one address alone can't do it:
+ * its own per-address and per-login limits deal with it), everything that comes through
  * remote access is refused for a while; the local network carries on as
  * usual. The pause doubles if it happens again within a day, and server
  * admins are emailed. A server admin can resume it on the server computer.
@@ -18,6 +19,28 @@ const KEY = "remote_pause";
 /** Failed (or locked) sign-ins through remote access, from anyone, that pause it. */
 export const PAUSE_AFTER_FAILURES = 20;
 export const PAUSE_WINDOW_MINUTES = 10;
+/**
+ * The failures must come from at least this many sources, so one client
+ * can't keep remote access off for everyone. A source is an IPv4 address or
+ * an IPv6 /64 (one connection usually has a whole /64). Failures with no
+ * address known count as one source.
+ */
+export const PAUSE_MIN_SOURCES = 5;
+
+/** The source a failure is counted under: an IPv4 address, or an IPv6 address's first 64 bits. */
+export function failureSource(address: string | null): string {
+  const value = (address ?? "").trim().toLowerCase();
+  if (!value) return "unknown";
+  const mapped = /^::ffff:(\d+\.\d+\.\d+\.\d+)$/.exec(value);
+  if (mapped) return mapped[1];
+  if (!value.includes(":")) return value;
+  // Expand "::" so the first four groups can be read.
+  const [head, tail = ""] = value.split("::");
+  const front = head ? head.split(":") : [];
+  const back = value.includes("::") ? (tail ? tail.split(":") : []) : [];
+  const groups = value.includes("::") ? [...front, ...Array(Math.max(0, 8 - front.length - back.length)).fill("0"), ...back] : front;
+  return `${groups.slice(0, 4).map((group) => group.replace(/^0+(?=.)/, "")).join(":")}::/64`;
+}
 const FIRST_PAUSE_MINUTES = 60;
 const LONGEST_PAUSE_MINUTES = 24 * 60;
 const CACHE_MS = 5000;
@@ -91,13 +114,15 @@ export function pauseEndText(until: string): string {
  */
 export async function noteRemoteFailure(now = new Date()): Promise<void> {
   if (await remotePausedUntil(now)) return;
-  const recent = await coreQuery<{ n: string }>(
-    `select count(*)::text as n from sign_in_events
-      where remote and outcome in ('failed', 'locked') and at > $1::timestamptz - ($2::int * interval '1 minute')`,
+  const recent = await coreQuery<{ address: string | null; n: string }>(
+    `select address, count(*)::text as n from sign_in_events
+      where remote and outcome in ('failed', 'locked') and at > $1::timestamptz - ($2::int * interval '1 minute')
+      group by address`,
     [now.toISOString(), PAUSE_WINDOW_MINUTES],
   );
-  const failures = Number(recent.rows[0].n);
+  const failures = recent.rows.reduce((sum, row) => sum + Number(row.n), 0);
   if (failures < PAUSE_AFTER_FAILURES) return;
+  if (new Set(recent.rows.map((row) => failureSource(row.address))).size < PAUSE_MIN_SOURCES) return;
   const value = await stored();
   // Only failures since the last pause ended count again, so one burst pauses once.
   if (value.pausedAt && value.until && Date.parse(value.until) > now.getTime() - PAUSE_WINDOW_MINUTES * 60_000) {
