@@ -4,7 +4,7 @@ import { ValidationError } from "@/lib/errors";
 import { formatDate } from "@/lib/format";
 import { add, dec, type Decimal, isPositive, mul, toFixedString, toPlainString, ZERO_DECIMAL } from "@/lib/money/decimal";
 import type { PayFrequency } from "@/lib/payroll/groups";
-import { annualEntitlement, divisorReduction, employedTwelveMonths, entitlementYear, type UnpaidLeave } from "@/lib/payroll/leave/annual";
+import { type AnniversaryRule, annualEntitlement, divisorReduction, employedTwelveMonths, entitlementYear, type UnpaidLeave } from "@/lib/payroll/leave/annual";
 import { addDays, addMonths, eachDay, laterOf } from "@/lib/payroll/leave/dates";
 import {
   averageDailyPay,
@@ -187,8 +187,8 @@ export async function loadEmployeeFacts(tx: OrgTx, employeeId: string, settings:
       order by coalesce(l.leave_from, l.holiday_date, r.period_start), r.run_number, l.line_number`,
     [employeeId],
   );
-  const unpaid = await tx.query<{ start_date: string; end_date: string; reason: string; agreed_to_count: boolean }>(
-    "select start_date::text, end_date::text, reason, agreed_to_count from payroll_unpaid_leave where employee_id::text = $1 and status = 'active' order by start_date",
+  const unpaid = await tx.query<{ start_date: string; end_date: string; reason: string; agreed_to_count: boolean; anniversary_rule: AnniversaryRule }>(
+    "select start_date::text, end_date::text, reason, agreed_to_count, anniversary_rule from payroll_unpaid_leave where employee_id::text = $1 and status = 'active' order by start_date",
     [employeeId],
   );
   const timesheets = await tx.query<{ week_start: string; work_date: string | null; hours: string | null }>(
@@ -256,6 +256,7 @@ export async function loadEmployeeFacts(tx: OrgTx, employeeId: string, settings:
       end: leave.end_date,
       statutory: leave.reason !== "other",
       agreedToCount: leave.agreed_to_count,
+      anniversaryRule: leave.anniversary_rule,
     })),
     periods: allPeriods,
     lines: lines.rows.map(toLeaveLine),

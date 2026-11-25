@@ -1102,20 +1102,35 @@ function UnpaidLeave({ organisationId, employeeId, records, onSaved }: { organis
       setError(errorMessage(cause));
     }
   };
+  const switchToCurrentRule = async (id: string) => {
+    setError(null);
+    try {
+      await api(`/api/payroll/leave/unpaid/${id}/use-current-rule`, { method: "POST", body: { organisationId } });
+      onSaved();
+    } catch (cause) {
+      setError(errorMessage(cause));
+    }
+  };
   return (
     <>
       <h3>Unpaid leave</h3>
       <p className={ui.muted}>
-        A single period of other unpaid leave longer than a week moves the anniversary by its whole length, unless a written agreement to count it is
-        attached (s 16(2), s 16(3)).
+        A single period of other unpaid leave longer than a week moves the anniversary by the days over one week (Employment NZ&apos;s guidance),
+        unless a written agreement to count it is attached (s 16(2), s 16(3)).
       </p>
       {error ? <Notice tone="error">{error}</Notice> : null}
       {records.length ? (
         <ul>
           {records.map((record) => (
             <li key={record.id}>
-              {formatDate(record.startDate)} to {formatDate(record.endDate)} ({record.reason}){record.movesAnniversary ? " · moves the anniversary" : ""}
+              {formatDate(record.startDate)} to {formatDate(record.endDate)} ({record.reason}){record.movesAnniversary ? ` · moves the anniversary ${record.movesAnniversaryBy} days` : ""}
               {record.status === "cancelled" ? " · cancelled" : ""}
+              {record.earlierRuleNote ? (
+                <Notice tone="warning">
+                  {record.earlierRuleNote}{" "}
+                  <Button size="small" variant="secondary" onClick={() => switchToCurrentRule(record.id)}>Use the current rule</Button>
+                </Notice>
+              ) : null}
             </li>
           ))}
         </ul>
