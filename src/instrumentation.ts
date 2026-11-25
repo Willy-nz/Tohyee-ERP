@@ -226,6 +226,12 @@ export async function register() {
     startRepeatingInvoiceScheduler();
   }
 
+  // Late payment fees and interest, for organisations that turned on the monthly run (LATE10).
+  if (process.env.TOHYEE_LATE_FEES_SCHEDULER !== "off") {
+    const { startLateFeeScheduler } = await import("@/lib/invoices/late-fee-scheduler");
+    startLateFeeScheduler();
+  }
+
   // Saved searches people asked to be emailed (off with TOHYEE_SAVED_SEARCH_EMAILS=off).
   {
     const { startSavedSearchEmails } = await import("@/lib/saved-searches/emails");

@@ -23684,3 +23684,65 @@ v1.1.0 is out.
   installs; when it's back on v1.1.0 the page says so. If it's still on
   v1.0.0 20 minutes after installing started, the page says the update didn't
   finish and names the installer's log.
+
+## Late payment fees and interest (LATE1-LATE12; 25 Nov 2026; following common practice, not yet reviewed)
+
+Tested in `tests/unit/late-fee-rules.test.ts` and
+`tests/integration/late-fees.test.ts`. New Zealand has no law that adds a
+fee or interest to an overdue bill: a business can charge one only if its
+terms of trade say so (and for consumers, credit and fair trading law
+limit what's fair). So it's off until an admin turns it on, and the screen
+says to check the terms first. GST: IRD treats a flat late payment fee the
+same way as the sale it's on (GST Act s 5(25)), and interest charged on an
+overdue account as an exempt supply.
+
+A made-up café supplier, GST registered, turns late fees on with a $25.00
+fee (before GST), interest at 12% a year, 7 days' grace and a $20.00
+minimum. Invoice INV-0040 to Hilltop Café is $1,150.00 (a $1,000.00 GST
+sale, $150.00 GST), due 31 October 2026.
+
+- **LATE1 Off until turned on.** Nothing is charged until an admin turns late
+  fees on, sets a fee, an interest rate or both, and chooses the income
+  accounts: the fee to a sales account (default Other revenue), the interest
+  to an other income account (default Interest income).
+- **LATE2 Grace.** On 7 November INV-0040 is 7 days late and isn't charged.
+  From 8 November it can be.
+- **LATE3 What's charged, and how.** On 30 November a person reviews what's
+  due and makes the charges (or the monthly run does, LATE10). Hilltop
+  gets a new invoice, INV-0051, dated 30 November, "Late payment on
+  INV-0040", due on Hilltop's payment terms (on the day if it has none).
+  INV-0040 itself isn't changed: an issued invoice stays as sent.
+- **LATE4 The fee.** INV-0051 has a $25.00 late payment fee on INV-0040, with
+  GST like the sale it's on: $25.00 + $3.75 GST, to Other revenue. The fee
+  is charged once for each overdue invoice.
+- **LATE5 GST follows the sale.** If the sale was zero-rated (an export), the
+  fee is zero-rated; if it was exempt, exempt. An invoice with lines at more
+  than one tax code has its fee split in the same shares as the lines'
+  amounts before GST, to the cent, with any odd cent on the largest. An
+  organisation that isn't registered for GST on the charge date charges
+  no GST, and nor does a fee on a sale that had none.
+- **LATE6 Interest.** Simple interest on what's still owing at the end of each
+  day, from the day after the due date: $1,150.00 x 12% / 365 x 30 days
+  (1-30 November) = $11.34, to Interest income, exempt from GST. Interest
+  isn't charged on a late payment invoice itself, nor on the fee.
+- **LATE7 Part payments.** Hilltop pays $650.00 on 10 November. Interest is
+  $1,150.00 for 1-9 November (9 days) and $500.00 for 10-30 November (21
+  days): ($10,350.00 + $10,500.00) x 12% / 365 = $6.85. A payment, a credit
+  note or an overpayment used on the invoice counts from its date; one
+  that's later voided or removed counts as never made from that date.
+- **LATE8 Next time.** At the next charge, on 31 December, interest runs from 1
+  December, on what's then still owing. No second fee.
+- **LATE9 Not twice, not lost.** A late payment invoice kept as a draft
+  still counts as charged. If it's deleted or voided, those days and that
+  fee can be charged again.
+- **LATE10 Monthly, if wanted.** An admin can have it run by itself on the 1st
+  of each month (the first hour after midnight the server's on), charging
+  up to that day. The invoices are drafts to check and approve, or approved
+  straight away if the admin chose that. A run that can't charge an
+  invoice (a locked period, say) says why and carries on with the rest.
+- **LATE11 Who isn't charged.** An admin can list customers who are never
+  charged (a key account, say). Invoices under the minimum, drafts, voided
+  invoices and late payment invoices aren't charged.
+- **LATE12 Other currencies.** An invoice in another currency is charged in
+  that currency, at the rate for the charge date, rounded to its smallest
+  unit.

@@ -62,7 +62,7 @@ const ROUTES: Array<[string, IllustratedIconName]> = [
   ["/operations/bank-accounts", "banking"], ["/operations/bank-rules", "funnel"],
   ["/operations/exchange-rates", "currency"], ["/operations/fx-revaluation", "currency"],
   ["/operations/customer-payments", "coins"], ["/operations/overpayments", "coins"], ["/operations/supplier-payments", "coins"],
-  ["/operations/repeating-invoices", "calendar"], ["/operations/repeating-bills", "calendar"],
+  ["/operations/repeating-invoices", "calendar"], ["/operations/late-fees", "clock"], ["/operations/repeating-bills", "calendar"],
   ["/operations/invoices?show=awaiting", "awaiting"], ["/operations/bills?show=awaiting", "awaiting"],
   ["/operations/purchases/approvals", "approval"], ["/operations/bills/inbox", "mail"],
   ["/operations/purchases", "purchases"], ["/operations/purchase-orders", "checklist"],

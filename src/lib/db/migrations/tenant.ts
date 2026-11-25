@@ -282,6 +282,7 @@ import { migration as m0304 } from "@/lib/db/migrations/tenant/0304-spreading-ta
 import { migration as m0305 } from "@/lib/db/migrations/tenant/0305-saved-searches";
 import { migration as m0306 } from "@/lib/db/migrations/tenant/0306-saved-search-home-and-email";
 import { migration as m0307 } from "@/lib/db/migrations/tenant/0307-weather-windy-from";
+import { migration as m0308 } from "@/lib/db/migrations/tenant/0308-late-fees";
 
 /**
  * Migrations applied to every organisation's own database. Each organisation
@@ -631,4 +632,5 @@ export const tenantMigrations: readonly Migration[] = [
   m0305,
   m0306,
   m0307,
+  m0308,
 ];

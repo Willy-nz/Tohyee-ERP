@@ -48,6 +48,7 @@ export const MENUS: Menu[] = [
             { href: "/operations/invoices?show=awaiting", label: "Awaiting payment" },
             { href: "/operations/credit-notes", label: "Credit notes" },
             { href: "/operations/repeating-invoices", label: "Repeating invoices" },
+            { href: "/operations/late-fees", label: "Late fees" },
           ]),
           ...section("Orders", [
             { href: "/operations/quotes", label: "Quotes" },
@@ -550,6 +551,7 @@ export const AREAS: Record<string, string[]> = {
     "/operations/to-send",
     "/operations/signing",
     "/operations/repeating-invoices",
+    "/operations/late-fees",
     "/operations/overpayments",
     "/operations/customer-payments",
     "/operations/projects",
