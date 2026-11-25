@@ -7,7 +7,7 @@ import { listInductions, listSignoffs, onSite } from "@/lib/safety/inductions";
 import { canRecordSafety, currentRecords } from "@/lib/safety/records";
 import { listTraining } from "@/lib/safety/register";
 import { openActions } from "@/lib/safety/reports";
-import { type HazardData, hazardState, reviewOverdue } from "@/lib/safety/shared";
+import { awaitingNotice, type HazardData, hazardState, type ReportData, reviewOverdue } from "@/lib/safety/shared";
 import { requireId } from "@/lib/validation";
 
 /*
@@ -49,7 +49,12 @@ export async function safetyToday(tx: OrgTx, farmIdInput: unknown) {
     : [];
   // Contractors on site who signed in through the gate link: self-declared, no login.
   const selfDeclared = manager ? (await onSite(tx, farmId)).here.filter((visit) => visit.data.signedHow === "link" && visit.data.audience === "contractor") : [];
+  // Reports that may need notifying to WorkSafe with no notice recorded: first on Today for those who keep the registers (OPF6).
+  const mayNeedNotifying = manager
+    ? (await currentRecords<ReportData>(tx, "report", { farmId })).filter((report) => report.farmId === farmId && report.change !== "withdrawn" && awaitingNotice(report.data))
+    : [];
   return {
+    mayNeedNotifying: mayNeedNotifying.map((report) => ({ id: report.recordId, title: report.data.title, happenedOn: report.happenedOn })),
     selfDeclaredOnSite: selfDeclared.map((visit) => ({ id: visit.recordId, name: visit.data.person.name, company: visit.data.person.company })),
     // Each action carries its report or hazard, so Today and Safety can open it.
     myActions: mine.map((action) => ({ id: action.recordId, title: action.data.title, due: action.data.due, state: action.state, reportId: action.data.reportId, hazardId: action.data.hazardId })),

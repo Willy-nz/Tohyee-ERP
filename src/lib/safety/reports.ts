@@ -1,12 +1,14 @@
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { parseIsoDate, parseOptionalIsoDate, todayIsoDate } from "@/lib/dates";
-import { ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
+import { ConflictError, ForbiddenError, NotFoundError, ValidationError } from "@/lib/errors";
 import { canSeeFarm } from "@/lib/farming/access";
 import { describeFiles, fileRefs, type SafetyFile } from "@/lib/safety/files";
+import { queueNotifiableAlert } from "@/lib/safety/notify";
 import { appendEntry, canSeeRestricted, currentRecord, currentRecords, requireSafetyRecorder, requireSafetyReporter } from "@/lib/safety/records";
 import {
   type ActionData,
   actionState,
+  awaitingNotice,
   type CurrentRecord,
   mayBeNotifiable,
   NOTIFIABLE_QUESTIONS,
@@ -160,6 +162,8 @@ export async function addReport(tx: OrgTx, input: ReportInput & { farmId?: unkno
   if (happenedOn > todayIsoDate()) throw new ValidationError("When it happened can't be after today.");
   const data = await reportData(tx, farmId, input, null);
   const report = await appendEntry<ReportData>(tx, { kind: "report", change: "created", farmId, happenedOn, data: { ...data }, operationId: input.operationId });
+  // The owners and admins hear of a report that may need notifying, not just the reporter (OPF6).
+  await queueNotifiableAlert(tx, { recordId: report.recordId, farmId, happenedOn, data });
   let details = null;
   if (input.details && typeof input.details === "object" && report.version === 1) {
     const already = await tx.query("select 1 from safety_entries where kind = 'report_details' and body::jsonb->>'reportId' = $1", [report.recordId]);
@@ -212,7 +216,7 @@ const REPORT_STEPS = ["update", "correct", "withdraw", "worksafe", "close"] as c
  * online, reference) or "close" (with why; only once every action is
  * checked and closed, and never by an AI or app).
  */
-export async function changeReport(tx: OrgTx, recordId: unknown, input: ReportInput & { step?: unknown; expectedVersion?: unknown; operationId?: unknown }) {
+export async function changeReport(tx: OrgTx, recordId: unknown, input: ReportInput & { step?: unknown; expectedVersion?: unknown; operationId?: unknown; closeWithoutNotice?: unknown }) {
   requireSafetyRecorder(tx);
   const current = await currentRecord<ReportData>(tx, "report", recordId);
   const step = input.step as (typeof REPORT_STEPS)[number];
@@ -233,7 +237,11 @@ export async function changeReport(tx: OrgTx, recordId: unknown, input: ReportIn
     const actions = await currentRecords<ActionData>(tx, "action", { farmId });
     const open = actions.filter((action) => action.data.reportId === current.recordId && !action.data.verified);
     if (open.length) throw new ValidationError(`${open.length} action${open.length === 1 ? " is" : "s are"} still to be checked and closed first.`);
-    data = { ...current.data, closed: { why } };
+    // A report that may need notifying, with no WorkSafe notice recorded, is closed only when the person says so (OPF6).
+    if (awaitingNotice(current.data) && input.closeWithoutNotice !== true) {
+      throw new ConflictError("This report may need notifying to WorkSafe, and no notice is recorded. Record when WorkSafe was told first, or close it anyway if it didn't need notifying.");
+    }
+    data = { ...current.data, closed: { why, ...(awaitingNotice(current.data) ? { withoutNotice: true } : {}) } };
   } else {
     data = await reportData(tx, farmId, fieldsFrom(current.data, input), current.data);
     if (step === "correct") change = "corrected";
@@ -242,7 +250,10 @@ export async function changeReport(tx: OrgTx, recordId: unknown, input: ReportIn
   delete data.why;
   if (why && step !== "close") data.why = why;
   const happenedOn = step === "correct" && input.happenedOn ? parseIsoDate(input.happenedOn, "When it happened") : current.happenedOn;
-  return appendEntry<ReportData>(tx, { kind: "report", recordId: current.recordId, expectedVersion: input.expectedVersion, change, farmId, happenedOn, data: { ...data }, operationId: input.operationId });
+  const saved = await appendEntry<ReportData>(tx, { kind: "report", recordId: current.recordId, expectedVersion: input.expectedVersion, change, farmId, happenedOn, data: { ...data }, operationId: input.operationId });
+  // An update or correction that now says it may need notifying tells the owners and admins too (once a report).
+  if (step === "update" || step === "correct") await queueNotifiableAlert(tx, { recordId: current.recordId, farmId, happenedOn, data });
+  return saved;
 }
 
 // Corrective actions -------------------------------------------------------------------------------

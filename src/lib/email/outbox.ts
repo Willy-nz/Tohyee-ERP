@@ -294,6 +294,8 @@ export async function processOrganisationOutbox(organisation: OrganisationRecord
   const signing = await sendNotices("signing_emails", organisation, people, options.now);
   // Reminders that someone's time-limited access ends soon.
   const access = await sendNotices("access_emails", organisation, people, options.now);
+  // A safety report that may need notifying to WorkSafe (OPF6).
+  const safety = await sendNotices("safety_emails", organisation, people, options.now);
   for (;;) {
     const now = options.now ?? new Date();
     const { rows, account, accountError } = await withOrganisationTransaction(
@@ -341,7 +343,7 @@ export async function processOrganisationOutbox(organisation: OrganisationRecord
     (tx) => tx.query<{ count: string }>("select count(*)::text as count from document_emails where status in ('queued', 'sending')"),
     { people },
   );
-  result.waiting = Number(waiting.rows[0].count) + approvals.waiting + rosters.waiting + signing.waiting + access.waiting;
+  result.waiting = Number(waiting.rows[0].count) + approvals.waiting + rosters.waiting + signing.waiting + access.waiting + safety.waiting;
   return result;
 }
 
@@ -418,7 +420,8 @@ async function scanAll(): Promise<void> {
            union all select 1 from approval_emails where status in ('queued', 'sending')
            union all select 1 from roster_emails where status in ('queued', 'sending')
            union all select 1 from signing_emails where status in ('queued', 'sending')
-           union all select 1 from access_emails where status in ('queued', 'sending') limit 1`,
+           union all select 1 from access_emails where status in ('queued', 'sending')
+           union all select 1 from safety_emails where status in ('queued', 'sending') limit 1`,
         ),
       );
       if ((waiting.rowCount ?? 0) > 0) pending.add(organisation.id);

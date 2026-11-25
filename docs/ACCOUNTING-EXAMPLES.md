@@ -23850,3 +23850,18 @@ as JV1-JV9), and a farm with two blocks, Home and Runoff.
   on 31 Jan 2026, so it can't be accepted now. Ask the business for a new
   quote." Nothing is posted. (Whether a business may choose to honour an
   expired quote anyway is left for the owner; today it copies the quote.)
+- **OPF6 A report that may need notifying isn't left with the reporter.** A
+  farm worker reports "Crushed in the yard" on Home farm and answers yes to
+  the hospital question. The organisation's owners and admins (not the
+  reporter) are each emailed once: the report's title, farm and date, and
+  WorkSafe's number (0800 030 040), never the restricted injury details.
+  Until someone records telling WorkSafe, or closes it, the report is first
+  on Today for the people who keep the safety registers ("WorkSafe?").
+  Closing it with no notice recorded asks first ("Close it anyway, because
+  it didn't need notifying?"), and the report keeps that it was closed with
+  no WorkSafe notice recorded. The hospital question now asks what s 23(1)(b)
+  of the Health and Safety at Work Act 2015 asks: whether the injury or
+  illness needed, or would usually need, admission for immediate treatment,
+  even if they didn't go; the serious-injury question names infections
+  caught through work, such as leptospirosis. Tohyee still never tells
+  WorkSafe itself, and doesn't decide whether an event is notifiable.
