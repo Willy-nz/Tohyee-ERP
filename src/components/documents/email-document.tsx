@@ -3,7 +3,7 @@
 import Link from "next/link";
 import { type FormEvent, useEffect, useState } from "react";
 import { useApiData } from "@/components/hooks";
-import { Badge, Button, Card, Field, Notice, ui } from "@/components/ui";
+import { Badge, Button, Card, Field, Notice, RefreshProblem, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
 import { api, errorMessage, newIdempotencyKey } from "@/lib/client/api";
 import type { DocumentEmail, PreparedEmail } from "@/lib/email/documents";
@@ -189,64 +189,67 @@ export function EmailHistory({ organisationId, kind, id, version, onChanged }: {
   const list = emails.data?.emails ?? [];
   if (list.length === 0) return <p className={ui.muted}>Not emailed yet.</p>;
   return (
-    <div className={ui.tableWrap}>
-      <table className={ui.table}>
-        <thead>
-          <tr>
-            <th>Status</th>
-            <th>To</th>
-            <th>Subject</th>
-            <th>Asked by</th>
-            <th>What happened</th>
-          </tr>
-        </thead>
-        <tbody>
-          {list.map((email) => (
-            <tr key={email.id}>
-              <td>
-                <EmailStatusBadge status={email.status} />
-              </td>
-              <td>
-                {email.to.join(", ")}
-                {email.cc.length > 0 ? <div className={ui.muted}>Cc {email.cc.join(", ")}</div> : null}
-              </td>
-              <td>
-                {email.subject}
-                <div className={ui.muted}>{email.attachmentName}</div>
-              </td>
-              <td>
-                {personName(email, "requestedBy")}
-                <div className={ui.muted}>{formatDateTime(email.createdAt)}</div>
-              </td>
-              <td>
-                {email.status === "sent" ? (
-                  <>
-                    Accepted by the email server {formatDateTime(email.finishedAt)}.
-                    <div className={ui.muted} style={{ wordBreak: "break-all" }}>
-                      Message id {email.messageId}
-                    </div>
-                    {email.lastError ? <div className={ui.muted}>{email.lastError}</div> : null}
-                  </>
-                ) : null}
-                {email.status === "failed" ? (
-                  <>
-                    <div>{email.lastError}</div>
-                    {can("bookkeeper") ? <RetryButton organisationId={organisationId} email={email} onQueued={onChanged} /> : null}
-                  </>
-                ) : null}
-                {email.status === "queued" ? (
-                  <>
-                    {email.attempts > 0 ? `Not sent yet (tried ${email.attempts} time${email.attempts === 1 ? "" : "s"}): ${email.lastError ?? ""} ` : ""}
-                    {email.nextAttemptAt && email.attempts > 0 ? `Trying again ${formatDateTime(email.nextAttemptAt)}.` : "Sending shortly."}
-                  </>
-                ) : null}
-                {email.status === "sending" ? "Sending now." : null}
-              </td>
+    <>
+      <RefreshProblem problem={emails.refreshError} loadedAt={emails.loadedAt} onRetry={reload} />
+      <div className={ui.tableWrap}>
+        <table className={ui.table}>
+          <thead>
+            <tr>
+              <th>Status</th>
+              <th>To</th>
+              <th>Subject</th>
+              <th>Asked by</th>
+              <th>What happened</th>
             </tr>
-          ))}
-        </tbody>
-      </table>
-    </div>
+          </thead>
+          <tbody>
+            {list.map((email) => (
+              <tr key={email.id}>
+                <td>
+                  <EmailStatusBadge status={email.status} />
+                </td>
+                <td>
+                  {email.to.join(", ")}
+                  {email.cc.length > 0 ? <div className={ui.muted}>Cc {email.cc.join(", ")}</div> : null}
+                </td>
+                <td>
+                  {email.subject}
+                  <div className={ui.muted}>{email.attachmentName}</div>
+                </td>
+                <td>
+                  {personName(email, "requestedBy")}
+                  <div className={ui.muted}>{formatDateTime(email.createdAt)}</div>
+                </td>
+                <td>
+                  {email.status === "sent" ? (
+                    <>
+                      Accepted by the email server {formatDateTime(email.finishedAt)}.
+                      <div className={ui.muted} style={{ wordBreak: "break-all" }}>
+                        Message id {email.messageId}
+                      </div>
+                      {email.lastError ? <div className={ui.muted}>{email.lastError}</div> : null}
+                    </>
+                  ) : null}
+                  {email.status === "failed" ? (
+                    <>
+                      <div>{email.lastError}</div>
+                      {can("bookkeeper") ? <RetryButton organisationId={organisationId} email={email} onQueued={onChanged} /> : null}
+                    </>
+                  ) : null}
+                  {email.status === "queued" ? (
+                    <>
+                      {email.attempts > 0 ? `Not sent yet (tried ${email.attempts} time${email.attempts === 1 ? "" : "s"}): ${email.lastError ?? ""} ` : ""}
+                      {email.nextAttemptAt && email.attempts > 0 ? `Trying again ${formatDateTime(email.nextAttemptAt)}.` : "Sending shortly."}
+                    </>
+                  ) : null}
+                  {email.status === "sending" ? "Sending now." : null}
+                </td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
+    </>
   );
 }
 

@@ -64,4 +64,10 @@ describe("starting dashboards", () => {
       ),
     ).toEqual({ open: 4, visitSoon: 2, noVisit: 1, servicesDue: 2 });
   });
+
+  it("Home's Jobs card counts a visit by its New Zealand day, whatever form the time comes in (OPF1)", () => {
+    const job = (name: string, nextVisit: string): JobSummary => ({ projectId: name, name, contactName: "Made-up Ltd", siteAddress: null, status: "in_progress", nextVisit, lastVisit: null });
+    // 8:00 on 27 Oct NZ time is still 26 Oct in UTC: it's a day past the seven, so not "soon".
+    expect(jobsAtAGlance([job("a", "2026-10-26T19:00:00.000Z"), job("b", "2026-10-25T19:00:00.000Z")], 0, "2026-10-20").visitSoon).toBe(1);
+  });
 });

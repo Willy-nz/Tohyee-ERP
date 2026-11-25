@@ -1,7 +1,7 @@
 "use client";
 
 import { IllustratedIcon, type IllustratedIconName } from "@/components/illustrated-icon";
-import { type ButtonHTMLAttributes, Children, cloneElement, isValidElement, type ReactElement, type ReactNode, useId } from "react";
+import { type ButtonHTMLAttributes, Children, cloneElement, isValidElement, type ReactElement, type ReactNode, useEffect, useId, useRef } from "react";
 import Link from "next/link";
 import styles from "./ui.module.css";
 import { PageHeadingArt } from "./destination-art";
@@ -201,6 +201,50 @@ export function Stat({ label, value }: { label: string; value: ReactNode }) {
     <div className={styles.stat}>
       <div className={styles.statLabel}>{label}</div>
       <div className={styles.statValue}>{value}</div>
+    </div>
+  );
+}
+
+/**
+ * One quiet line for a screen whose refresh failed while it still shows the
+ * last figures it loaded (useApiData's `refreshError`). Nothing when there's
+ * no problem.
+ */
+export function RefreshProblem({
+  problem,
+  loadedAt,
+  onRetry,
+}: {
+  problem: string | null;
+  loadedAt?: number | null;
+  onRetry: () => void;
+}) {
+  if (!problem) return null;
+  const time = loadedAt ? new Date(loadedAt).toLocaleTimeString("en-NZ", { hour: "numeric", minute: "2-digit" }) : null;
+  return (
+    <div className={`${styles.notice} ${styles.warning}`} role="status">
+      {`Couldn't refresh, so this shows the last figures${time ? ` (from ${time})` : ""}. `}
+      <Button variant="secondary" size="small" onClick={onRetry}>
+        Try again
+      </Button>
+    </div>
+  );
+}
+
+/**
+ * A form's save error. When it appears it's scrolled into view, so on a
+ * phone the person sees it even when it sits above a long form and they
+ * tapped Save at the bottom. Nothing when there's no error.
+ */
+export function FormError({ error }: { error: string | null | undefined }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) ref.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [error]);
+  if (!error) return null;
+  return (
+    <div ref={ref} style={{ scrollMarginTop: 72, scrollMarginBottom: 96 }}>
+      <Notice tone="error">{error}</Notice>
     </div>
   );
 }

@@ -16,7 +16,7 @@ import { dueFromTerms, useCustomerSetup } from "@/components/customers";
 import { NEW_CONTACT, QuickContact } from "@/components/quick-contact";
 import { customerDefault, SalespersonField, useSalespeople } from "@/components/salespeople";
 import { TrackingSelects, useTracking } from "@/components/tracking";
-import { Badge, Button, Field, Notice, Stat, ui } from "@/components/ui";
+import { Badge, Button, Field, Notice, Stat, ui, FormError } from "@/components/ui";
 import type { Account } from "@/lib/accounts/service";
 import { api, errorMessage, newIdempotencyKey } from "@/lib/client/api";
 import type { Contact } from "@/lib/contacts/service";
@@ -289,7 +289,7 @@ function InvoiceForm({
 
   return (
     <form onSubmit={(event) => void submit(event)} autoComplete="off" style={{ display: "grid", gap: 14 }}>
-      {error ? <Notice tone="error">{error}</Notice> : null}
+      <FormError error={error} />
       {customerOptions.length === 0 ? (
         <Notice tone="warning">
           There are no customers yet. Choose &ldquo;+ New customer…&rdquo; below, or add one in <Link href="/operations/contacts">Contacts</Link>.

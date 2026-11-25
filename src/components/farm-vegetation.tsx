@@ -372,31 +372,33 @@ export function TrendChart({ trend }: { trend: PaddockTrend }) {
       </p>
       <details className={styles.trendList}>
         <summary>All dates as a table</summary>
-        <table>
-          <thead>
-            <tr>
-              <th scope="col">Date</th>
-              <th scope="col">Greenness</th>
-              <th scope="col">Clear</th>
-              <th scope="col">View</th>
-              {shown.some((observation) => observation.modelledCover) ? <th scope="col">Modelled cover</th> : null}
-            </tr>
-          </thead>
-          <tbody>
-            {[...shown].reverse().map((observation) => (
-              <tr key={observation.id}>
-                <td>{nzDate(observation.acquiredAt)}</td>
-                <td>{ndviText(observation.meanNdvi)}</td>
-                <td>{observation.coveragePct === null ? "–" : `${Math.round(Number(observation.coveragePct))}%`}</td>
-                <td>
-                  {QUALITY_WORDS[observation.quality]}
-                  {observation.currentBoundary ? "" : " (earlier boundary)"}
-                </td>
-                {shown.some((entry) => entry.modelledCover) ? <td>{observation.modelledCover ? coverText(observation.modelledCover) : "–"}</td> : null}
+        <div className={ui.tableWrap}>
+          <table>
+            <thead>
+              <tr>
+                <th scope="col">Date</th>
+                <th scope="col">Greenness</th>
+                <th scope="col">Clear</th>
+                <th scope="col">View</th>
+                {shown.some((observation) => observation.modelledCover) ? <th scope="col">Modelled cover</th> : null}
               </tr>
-            ))}
-          </tbody>
-        </table>
+            </thead>
+            <tbody>
+              {[...shown].reverse().map((observation) => (
+                <tr key={observation.id}>
+                  <td>{nzDate(observation.acquiredAt)}</td>
+                  <td>{ndviText(observation.meanNdvi)}</td>
+                  <td>{observation.coveragePct === null ? "–" : `${Math.round(Number(observation.coveragePct))}%`}</td>
+                  <td>
+                    {QUALITY_WORDS[observation.quality]}
+                    {observation.currentBoundary ? "" : " (earlier boundary)"}
+                  </td>
+                  {shown.some((entry) => entry.modelledCover) ? <td>{observation.modelledCover ? coverText(observation.modelledCover) : "–"}</td> : null}
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </details>
     </figure>
   );
@@ -1237,36 +1239,38 @@ function ErrorRows({ validation }: { validation: Validation }) {
     ...(validation.otherFarms ? [{ label: "Fitted on your other farms, checked on this one", summary: validation.otherFarms }] : []),
   ];
   return (
-    <table className={ui.table}>
-      <thead>
-        <tr>
-          <th scope="col">Checked on</th>
-          <th scope="col" className={ui.num}>
-            Readings
-          </th>
-          <th scope="col" className={ui.num}>
-            Off by, on average
-          </th>
-          <th scope="col" className={ui.num}>
-            Reads high (+) or low (-)
-          </th>
-          <th scope="col" className={ui.num}>
-            9 in 10 within
-          </th>
-        </tr>
-      </thead>
-      <tbody>
-        {rows.map((row) => (
-          <tr key={row.label}>
-            <td style={{ whiteSpace: "pre" }}>{row.label}</td>
-            <td className={ui.num}>{row.summary.pairs}</td>
-            <td className={ui.num}>{row.summary.meanError.toLocaleString("en-NZ")}</td>
-            <td className={ui.num}>{(row.summary.bias > 0 ? "+" : "") + row.summary.bias.toLocaleString("en-NZ")}</td>
-            <td className={ui.num}>{row.summary.likelyWithin.toLocaleString("en-NZ")}</td>
+    <div className={ui.tableWrap}>
+      <table className={ui.table}>
+        <thead>
+          <tr>
+            <th scope="col">Checked on</th>
+            <th scope="col" className={ui.num}>
+              Readings
+            </th>
+            <th scope="col" className={ui.num}>
+              Off by, on average
+            </th>
+            <th scope="col" className={ui.num}>
+              Reads high (+) or low (-)
+            </th>
+            <th scope="col" className={ui.num}>
+              9 in 10 within
+            </th>
           </tr>
-        ))}
-      </tbody>
-    </table>
+        </thead>
+        <tbody>
+          {rows.map((row) => (
+            <tr key={row.label}>
+              <td style={{ whiteSpace: "pre" }}>{row.label}</td>
+              <td className={ui.num}>{row.summary.pairs}</td>
+              <td className={ui.num}>{row.summary.meanError.toLocaleString("en-NZ")}</td>
+              <td className={ui.num}>{(row.summary.bias > 0 ? "+" : "") + row.summary.bias.toLocaleString("en-NZ")}</td>
+              <td className={ui.num}>{row.summary.likelyWithin.toLocaleString("en-NZ")}</td>
+            </tr>
+          ))}
+        </tbody>
+      </table>
+    </div>
   );
 }
 
@@ -1283,33 +1287,35 @@ function WeatherRows({ validation }: { validation: Validation }) {
   }
   return (
     <>
-      <table className={ui.table}>
-        <caption style={{ textAlign: "left" }}>
-          With the weather in the 14 days before each picture ({weather.pairs} readings on {weather.dates} dates whose weather is known)
-        </caption>
-        <thead>
-          <tr>
-            <th scope="col">Uses</th>
-            <th scope="col" className={ui.num}>
-              Off by, on average
-            </th>
-            <th scope="col" className={ui.num}>
-              9 in 10 within
-            </th>
-          </tr>
-        </thead>
-        <tbody>
-          {[{ terms: "greenness" as const, withheldDates: weather.greennessOnly }, ...weather.options].map((option) => (
-            <tr key={option.terms}>
-              <td>
-                {TERMS_WORDS[option.terms]} {weather.best === option.terms ? <Badge tone="green">Best</Badge> : null}
-              </td>
-              <td className={ui.num}>{option.withheldDates.meanError.toLocaleString("en-NZ")}</td>
-              <td className={ui.num}>{option.withheldDates.likelyWithin.toLocaleString("en-NZ")}</td>
+      <div className={ui.tableWrap}>
+        <table className={ui.table}>
+          <caption style={{ textAlign: "left" }}>
+            With the weather in the 14 days before each picture ({weather.pairs} readings on {weather.dates} dates whose weather is known)
+          </caption>
+          <thead>
+            <tr>
+              <th scope="col">Uses</th>
+              <th scope="col" className={ui.num}>
+                Off by, on average
+              </th>
+              <th scope="col" className={ui.num}>
+                9 in 10 within
+              </th>
             </tr>
-          ))}
-        </tbody>
-      </table>
+          </thead>
+          <tbody>
+            {[{ terms: "greenness" as const, withheldDates: weather.greennessOnly }, ...weather.options].map((option) => (
+              <tr key={option.terms}>
+                <td>
+                  {TERMS_WORDS[option.terms]} {weather.best === option.terms ? <Badge tone="green">Best</Badge> : null}
+                </td>
+                <td className={ui.num}>{option.withheldDates.meanError.toLocaleString("en-NZ")}</td>
+                <td className={ui.num}>{option.withheldDates.likelyWithin.toLocaleString("en-NZ")}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+      </div>
       <p className={ui.muted} style={{ margin: 0 }}>
         {weather.best === "greenness"
           ? "The weather didn't make the estimates closer on dates they weren't fitted on, so it isn't used."

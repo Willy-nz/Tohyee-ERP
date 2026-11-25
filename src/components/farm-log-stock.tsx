@@ -11,6 +11,9 @@ import { shortDate } from "@/lib/farming/farm-words";
 import type { Mob } from "@/lib/farming/mobs";
 import { isBirthClass, paddockLabel } from "@/lib/farming/mob-rules";
 import type { PaddockStatus } from "@/lib/farming/paddock-status";
+import { isPositiveQuantity, parseTimeGiven, type StockUnit, unitsFor } from "@/lib/farming/treatment-rules";
+import type { ProductStock } from "@/lib/farming/treatments";
+import { logTreatmentPayload } from "@/lib/farming/log-treatment";
 import { todayInBrowser } from "@/lib/format";
 import styles from "./farm-workspace.module.css";
 
@@ -27,6 +30,12 @@ export type StockFlowKind = "move" | "births" | "deaths" | "treatment";
 
 const TITLES: Record<StockFlowKind, string> = { move: "Move a mob", births: "Births", deaths: "Deaths", treatment: "Treatment" };
 
+/*
+ * A treatment from Log asks what Mobs' treat flow asks (OPF4): the product
+ * from the cabinet or register (so its stock comes off), how much was used
+ * in the unit it's counted in, and the time given (so milk withholding
+ * counts from it).
+ */
 const STEPS: Record<StockFlowKind, string[]> = {
   move: ["mob", "paddock", "day", "review"],
   births: ["mob", "head", "day", "review"],
@@ -34,7 +43,7 @@ const STEPS: Record<StockFlowKind, string[]> = {
   treatment: ["mob", "product", "dose", "head", "withholding", "givenBy", "day", "review"],
 };
 
-type Answers = { mobId: string | null; paddockId: string | null; head: string; day: string; note: string; product: string; dose: string; meat: string; milk: string; givenBy: string };
+type Answers = { mobId: string | null; paddockId: string | null; head: string; day: string; note: string; product: string; chemicalRecordId: string | null; dose: string; quantity: string; unit: StockUnit; givenTime: string; meat: string; milk: string; givenBy: string };
 
 const NATURAL = new Intl.Collator("en-NZ", { numeric: true, sensitivity: "base" });
 const whole = (text: string, max: number) => (/^\d+$/.test(text) && Number(text) >= 0 && Number(text) <= max ? Number(text) : null);
@@ -44,10 +53,12 @@ export function StockLog({ organisationId, farm, kind, onClose }: FarmContext & 
   const { store, change, sync, stored } = useFarmDrafts(organisationId);
   const mobs = useApiData<{ mobs: Mob[] }>(`/api/farming/farms/${farm.id}/mobs`, { organisationId });
   const statuses = useApiData<{ paddocks: PaddockStatus[] }>(kind === "move" ? `/api/farming/farms/${farm.id}/paddock-status` : null, { organisationId, onDate: today });
+  // The farm's products with the unit each is counted in (kept in the offline pack).
+  const stock = useApiData<{ products: ProductStock[] }>(kind === "treatment" ? "/api/farming/product-stock" : null, { organisationId, farmId: farm.id });
   const steps = STEPS[kind];
   const [index, setIndex] = useState(0);
   const [saved, setSaved] = useState<string | null>(null);
-  const [answers, setAnswers] = useState<Answers>({ mobId: null, paddockId: null, head: "", day: today, note: "", product: "", dose: "", meat: "", milk: "", givenBy: "" });
+  const [answers, setAnswers] = useState<Answers>({ mobId: null, paddockId: null, head: "", day: today, note: "", product: "", chemicalRecordId: null, dose: "", quantity: "", unit: "mL", givenTime: "", meat: "", milk: "", givenBy: "" });
   const set = (patch: Partial<Answers>) => setAnswers((current) => ({ ...current, ...patch }));
   const next = () => setIndex((value) => Math.min(value + 1, steps.length - 1));
   const back = () => (index === 0 ? onClose() : setIndex((value) => value - 1));
@@ -60,6 +71,10 @@ export function StockLog({ organisationId, farm, kind, onClose }: FarmContext & 
   const paddocks = (statuses.data?.paddocks ?? []).filter((status) => status.paddockId !== mob?.paddock?.id).sort((a, b) => NATURAL.compare(a.name, b.name));
   const to = paddocks.find((status) => status.paddockId === answers.paddockId) ?? null;
   const head = whole(answers.head, 100000);
+  const products = (stock.data?.products ?? []).filter((product) => product.farmId === null || product.farmId === farm.id).sort((a, b) => NATURAL.compare(a.name, b.name));
+  const picked = products.find((product) => product.chemicalRecordId === answers.chemicalRecordId) ?? null;
+  const units = unitsFor(picked?.unit ?? null);
+  const givenTime = parseTimeGiven(answers.givenTime);
 
   if (saved) {
     const draft = store.drafts.find((entry) => entry.operationId === saved);
@@ -85,16 +100,7 @@ export function StockLog({ organisationId, farm, kind, onClose }: FarmContext & 
     }
     return {
       kind: "treatment",
-      payload: {
-        mobId: mob!.id,
-        head,
-        treatedOn: answers.day,
-        product: answers.product.trim(),
-        dose: answers.dose.trim(),
-        meatWithholdingDays: answers.meat === "" ? null : Number(answers.meat),
-        milkWithholdingHours: answers.milk === "" ? null : Number(answers.milk),
-        givenBy: answers.givenBy.trim(),
-      },
+      payload: logTreatmentPayload(mob!.id, head, answers),
       label: `${mob!.name} (${head}) treated with ${answers.product.trim()}, ${when}`,
     };
   };
@@ -156,8 +162,16 @@ export function StockLog({ organisationId, farm, kind, onClose }: FarmContext & 
     }
     case "day":
       return (
-        <Step {...frame} question="When?" onNext={next}>
+        <Step {...frame} question={kind === "treatment" ? "Which day, and what time?" : "When?"} onNext={next} nextDisabled={kind === "treatment" && givenTime === undefined}>
           <DayChoice value={answers.day} onChange={(day) => set({ day })} />
+          {kind === "treatment" ? (
+            <>
+              <Field label="Time given (if you know it)">
+                <input type="time" value={answers.givenTime} onChange={(event) => set({ givenTime: event.target.value })} />
+              </Field>
+              <p className={ui.muted}>With the time, milk withholding counts from it. Without it, from the end of the day, to be safe.</p>
+            </>
+          ) : null}
         </Step>
       );
     case "note":
@@ -171,17 +185,45 @@ export function StockLog({ organisationId, farm, kind, onClose }: FarmContext & 
     case "product":
       return (
         <Step {...frame} question="Which product?" onNext={next} nextDisabled={!answers.product.trim()}>
-          <Field label="Product, as on the label">
-            <input value={answers.product} maxLength={150} onChange={(event) => set({ product: event.target.value })} />
+          {products.length ? (
+            <Choices
+              options={products.map((product) => ({ value: product.chemicalRecordId, label: product.name, note: product.onHand === null ? undefined : `${product.onHand} ${product.unit ?? ""} on hand` }))}
+              value={answers.chemicalRecordId}
+              onPick={(chemicalRecordId) => {
+                const chosen = products.find((product) => product.chemicalRecordId === chemicalRecordId);
+                const fits = unitsFor(chosen?.unit ?? null);
+                set({ chemicalRecordId, product: chosen?.name ?? "", unit: fits.includes(answers.unit) ? answers.unit : fits[0] });
+                next();
+              }}
+            />
+          ) : null}
+          <Field label={products.length ? "Or another product, as on the label" : "Product, as on the label"}>
+            <input value={answers.chemicalRecordId ? "" : answers.product} maxLength={150} onChange={(event) => set({ product: event.target.value, chemicalRecordId: null })} />
           </Field>
+          <p className={ui.muted}>Pick it from the list to take it off the medicine cabinet. A product typed here is kept on the treatment only.</p>
         </Step>
       );
     case "dose":
       return (
-        <Step {...frame} question="What dose?" onNext={next} nextDisabled={!answers.dose.trim()}>
+        <Step {...frame} question="What dose, and how much was used?" onNext={next} nextDisabled={!answers.dose.trim() || (answers.quantity !== "" && !isPositiveQuantity(answers.quantity))}>
           <Field label="Dose, e.g. 10 mL each">
             <input value={answers.dose} maxLength={100} onChange={(event) => set({ dose: event.target.value })} />
           </Field>
+          <div className={ui.inlineForm}>
+            <Field label="Quantity used (all of it)">
+              <input inputMode="decimal" value={answers.quantity} onChange={(event) => set({ quantity: event.target.value.replace(/,/g, "") })} />
+            </Field>
+            <Field label="Unit" hint={picked?.unit ? `${picked.name} is counted in ${picked.unit}.` : undefined}>
+              <select value={answers.unit} onChange={(event) => set({ unit: event.target.value as StockUnit })}>
+                {units.map((unit) => (
+                  <option key={unit} value={unit}>
+                    {unit}
+                  </option>
+                ))}
+              </select>
+            </Field>
+          </div>
+          {answers.chemicalRecordId && !answers.quantity ? <p className={ui.muted}>Give the quantity used so it comes off the cabinet.</p> : null}
         </Step>
       );
     case "withholding": {
@@ -214,7 +256,9 @@ export function StockLog({ organisationId, farm, kind, onClose }: FarmContext & 
           <p>{draft?.label}</p>
           {kind === "treatment" ? (
             <p className={ui.muted}>
-              Dose {answers.dose.trim()}; withholding {answers.meat ? `meat ${answers.meat} days` : "no meat"}, {answers.milk ? `milk ${answers.milk} hours` : "no milk"}; given by {answers.givenBy.trim()}.
+              Dose {answers.dose.trim()}
+              {answers.quantity ? `, ${answers.quantity} ${answers.unit} used` : ""}
+              {givenTime ? ` at ${givenTime}` : ""}; withholding {answers.meat ? `meat ${answers.meat} days` : "no meat"}, {answers.milk ? `milk ${answers.milk} hours` : "no milk"}; given by {answers.givenBy.trim()}.
             </p>
           ) : null}
           <p className={ui.muted}>Saved on this phone first, and sent when there&apos;s signal.</p>

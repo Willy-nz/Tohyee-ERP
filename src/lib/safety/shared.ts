@@ -136,6 +136,8 @@ export function sentLaterText(phoneTime: string | null | undefined, reachedAt: s
  * list when they open Tohyee.
  */
 export const NOBODY_MESSAGED = "Tohyee doesn't send a message about this, and can't tell who has read it. Tell whoever needs to know.";
+/** After a report that may need notifying is recorded (OPF6). */
+export const NOTIFIABLE_EMAILED = "Tohyee emails the organisation's owners and admins that it may need notifying, if Tohyee's email is set up. Tohyee hasn't told WorkSafe.";
 export const ASSIGNED_NOT_TOLD = "Assigning an action doesn't send a message: it shows on that person's Today list when they open Tohyee. Nothing here shows they've seen it.";
 
 /** Entered more than a day after the date it happened: both dates show. */
@@ -515,15 +517,16 @@ export const SEVERITY_LABELS: Record<Severity, string> = { minor: "Minor", moder
 /**
  * The questions that prompt "this may need to be notified", in WorkSafe's
  * words from its quick guide "What events need to be notified?" (March
- * 2024). A yes shows the prompt; Tohyee never notifies anyone itself
+ * 2024); the hospital question follows s 23(1)(b) of the Act (OPF6). A yes shows the prompt; Tohyee never notifies anyone itself
  *. Not yet reviewed by the owner.
  */
 export const NOTIFIABLE_QUESTIONS = [
   { key: "death", text: "Did someone die?" },
-  { key: "hospital", text: "Was someone admitted to hospital for immediate treatment (as an inpatient, not just seen and sent home)?" },
+  // As s 23(1)(b) of the Health and Safety at Work Act 2015: "requires, or would usually require" admission, so it counts even if they didn't go (OPF6).
+  { key: "hospital", text: "Did someone's injury or illness need them to be admitted to hospital for immediate treatment, or would it usually need that, even if they didn't go or were sent home?" },
   {
     key: "seriousInjury",
-    text: "Was there a serious injury or illness: an amputation, serious head injury, serious eye injury, serious burn, skin torn away, spinal injury, loss of a bodily function, a serious cut, a serious infection, or medical treatment needed within 48 hours of being exposed to a substance?",
+    text: "Was there a serious injury or illness: an amputation, serious head injury, serious eye injury, serious burn, skin torn away, spinal injury, loss of a bodily function, a serious cut, a serious infection caught through work (including from animals, such as leptospirosis), or medical treatment needed within 48 hours of being exposed to a substance?",
   },
   {
     key: "dangerousIncident",
@@ -535,6 +538,11 @@ export type NotifiableAnswers = Partial<Record<NotifiableKey, boolean>>;
 
 export function mayBeNotifiable(answers: NotifiableAnswers | null | undefined): boolean {
   return Boolean(answers && Object.values(answers).some(Boolean));
+}
+
+/** Whether a report still needs someone to look at notifying (OPF6): it may be notifiable, nobody has recorded telling WorkSafe, and it's open. */
+export function awaitingNotice(data: { notifiable: NotifiableAnswers; workSafeNotified: WorkSafeNotice | null; closed: { why: string } | null }): boolean {
+  return mayBeNotifiable(data.notifiable) && !data.workSafeNotified && !data.closed;
 }
 
 export type WorkSafeNotice = { on: string; how: "phone" | "online"; reference: string | null };
@@ -556,7 +564,8 @@ export type ReportData = {
   /** Recorded by a person after they told WorkSafe (Tohyee doesn't). */
   workSafeNotified: WorkSafeNotice | null;
   /** Closed by a person, with why; only once every action is verified. */
-  closed: { why: string } | null;
+  /** `withoutNotice`: closed while it may have needed notifying and no WorkSafe notice was recorded, as the person chose (OPF6). */
+  closed: { why: string; withoutNotice?: boolean } | null;
   files: SafetyFileRef[];
   why?: string | null;
   /** Saved on a phone and sent later: the phone's time it was first saved. */

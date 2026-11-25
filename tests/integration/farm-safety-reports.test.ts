@@ -15,7 +15,8 @@ import { readSafetyFile, uploadSafetyFile } from "@/lib/safety/files";
 import { loadPackData, renderPack } from "@/lib/safety/pack";
 import { addAction, addReport, changeAction, changeReport, listReports, openActions, saveReportDetails } from "@/lib/safety/reports";
 import { checkSafetyHistory } from "@/lib/safety/records";
-import { ACTION_STATE_LABELS, actionState, reportStateText, sentLaterText } from "@/lib/safety/shared";
+import { ACTION_STATE_LABELS, actionState, NOTIFIABLE_QUESTIONS, reportStateText, sentLaterText } from "@/lib/safety/shared";
+import { safetyToday } from "@/lib/safety/today";
 import { apiRequest, createTestOrganisation, createTestUser, describeWithDatabase, inOrganisation, params, sessionCookieFor, startTestServer, type TestServer } from "../helpers/test-server";
 
 const ORG = "farm-safety-reports";
@@ -250,5 +251,41 @@ describeWithDatabase("farm safety reports and actions", () => {
     expect([...leadPack.keys()].filter((name) => name.startsWith("files/")).length).toBe(1);
     expect(verify(leadPack)).toContain("Everything in this pack checks out.");
     expect((await as(owner)((tx) => checkSafetyHistory(tx))).problems).toEqual([]);
+  });
+
+  it("OPF6 a report that may need notifying emails the owners and admins, shows first on Today, and closes without a notice only when asked", async () => {
+    const result = await as(staff)((tx) =>
+      addReport(tx, { farmId: w.home, type: "incident", title: "Crushed in the yard", severity: "serious", injured: true, notifiable: { hospital: true }, details: { injuredPerson: "Made-up Worker", injury: "Crushed leg" } }),
+    );
+    const id = result.report.recordId;
+    const emails = await as(owner)((tx) => tx.query<{ to_email: string; subject: string; body: string }>("select to_email, subject, body from safety_emails where report_record_id = $1 order by id", [id]));
+    // The owner (the organisation's only owner or admin), not the bookkeeper who reported it.
+    expect(emails.rows.map((row) => row.to_email)).toEqual(["reports-owner@example.com"]);
+    expect(emails.rows[0].subject).toBe("Safety: a report on Home farm may need notifying to WorkSafe");
+    expect(emails.rows[0].body).toContain('"Crushed in the yard"');
+    expect(emails.rows[0].body).toContain("0800 030 040");
+    // Never the restricted details.
+    expect(emails.rows[0].body).not.toContain("Made-up Worker");
+    expect(emails.rows[0].body).not.toContain("Crushed leg");
+    // An update doesn't email again.
+    await as(staff)((tx) => changeReport(tx, id, { step: "update", expectedVersion: 1, type: "incident", title: "Crushed in the yard", severity: "serious", injured: true, notifiable: { hospital: true, seriousInjury: true } }));
+    expect((await as(owner)((tx) => tx.query("select 1 from safety_emails where report_record_id = $1", [id]))).rowCount).toBe(1);
+    // First on Today for those who keep the registers.
+    const today = await as(lead)((tx) => safetyToday(tx, w.home));
+    expect(today.mayNeedNotifying.map((report) => report.title)).toContain("Crushed in the yard");
+    // Closing with no WorkSafe notice recorded needs the person to say so.
+    await expect(as(staff)((tx) => changeReport(tx, id, { step: "close", expectedVersion: 2, why: "Leg was only bruised" }))).rejects.toThrow(/may need notifying to WorkSafe, and no notice is recorded/);
+    const closed = await as(staff)((tx) => changeReport(tx, id, { step: "close", expectedVersion: 2, why: "Leg was only bruised", closeWithoutNotice: true }));
+    expect(closed.data.closed).toEqual({ why: "Leg was only bruised", withoutNotice: true });
+    expect((await as(lead)((tx) => safetyToday(tx, w.home))).mayNeedNotifying.map((report) => report.id)).not.toContain(id);
+    // A report not notifiable emails nobody.
+    const minor = await as(staff)((tx) => addReport(tx, { farmId: w.home, type: "hazard", title: "Loose gate", severity: "minor" }));
+    expect((await as(owner)((tx) => tx.query("select 1 from safety_emails where report_record_id = $1", [minor.report.recordId]))).rowCount).toBe(0);
+  });
+
+  it("OPF6 the hospital question asks what s 23 asks: needed, or would usually need, admitting", () => {
+    const hospital = NOTIFIABLE_QUESTIONS.find((question) => question.key === "hospital")!;
+    expect(hospital.text).toContain("would it usually need that, even if they didn't go");
+    expect(NOTIFIABLE_QUESTIONS.find((question) => question.key === "seriousInjury")!.text).toContain("leptospirosis");
   });
 });

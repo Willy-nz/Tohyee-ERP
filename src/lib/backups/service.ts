@@ -780,7 +780,8 @@ async function restoreFromCopy(actor: AdminActor, input: RestoreInput, file: str
           (await countIn(admin, "approval_emails", "status in ('queued', 'sending')")) +
           (await countIn(admin, "roster_emails", "status in ('queued', 'sending')")) +
           (await countIn(admin, "signing_emails", "status in ('queued', 'sending')")) +
-          (await countIn(admin, "access_emails", "status in ('queued', 'sending')")),
+          (await countIn(admin, "access_emails", "status in ('queued', 'sending')")) +
+          (await countIn(admin, "safety_emails", "status in ('queued', 'sending')")),
         attachments: await countIn(admin, "record_attachments"),
         journals: await countIn(admin, "ledger_journals"),
       };

@@ -119,6 +119,7 @@ export function Ir10Card({ organisationId, report, ir10, onSaved }: { organisati
       {IR10_SECTIONS.map((section) => (
         <div key={section.title}>
           <h3>{section.title}</h3>
+          <div className={ui.tableWrap}>
           <table className={ui.reportTable}>
             <tbody>
               {Array.from({ length: section.to - section.from + 1 }, (_, index) => section.from + index).map((number) => (
@@ -131,6 +132,7 @@ export function Ir10Card({ organisationId, report, ir10, onSaved }: { organisati
               ))}
             </tbody>
           </table>
+          </div>
         </div>
       ))}
       <ul className={ui.muted}>
@@ -152,6 +154,7 @@ export function TaxReturnCard({ title, source, order, labels, result, residualBo
   return (
     <Card title={title}>
       <Notice tone="warning">From {source}, read by Claude and not yet reviewed by an accountant. Check every box before filing.</Notice>
+      <div className={ui.tableWrap}>
       <table className={ui.reportTable}>
         <tbody>
           {order.map((box) => (
@@ -175,6 +178,7 @@ export function TaxReturnCard({ title, source, order, labels, result, residualBo
           </tr>
         </tbody>
       </table>
+      </div>
       <ul>
         {result.notes.map((note) => (
           <li key={note} className={ui.muted}>
@@ -222,6 +226,7 @@ export function IcaCard({ organisationId, ica, onSaved }: { organisationId: stri
           {ica.debitBalance.onTimeBy.date !== ica.debitBalance.dueDate ? ` (on time by ${formatDate(ica.debitBalance.onTimeBy.date)})` : ""}.
         </Notice>
       ) : null}
+      <div className={ui.tableWrap}>
       <table className={ui.reportTable}>
         <tbody>
           <tr>
@@ -265,8 +270,10 @@ export function IcaCard({ organisationId, ica, onSaved }: { organisationId: stri
           </tr>
         </tbody>
       </table>
+      </div>
       <details>
         <summary>IR4 annual imputation return (page 7) boxes</summary>
+        <div className={ui.tableWrap}>
         <table className={ui.reportTable}>
           <tbody>
             {(
@@ -297,6 +304,7 @@ export function IcaCard({ organisationId, ica, onSaved }: { organisationId: stri
             ))}
           </tbody>
         </table>
+        </div>
       </details>
       <form className={ui.inlineForm} onSubmit={add}>
         <Field label="Date">

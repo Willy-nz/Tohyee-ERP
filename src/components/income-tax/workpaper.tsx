@@ -230,6 +230,7 @@ export function Workpaper({ organisationId, report, onSaved }: { organisationId:
           </table>
         </div>
       )}
+      <div className={ui.tableWrap}>
       <table className={ui.reportTable}>
         <tbody>
           <tr className={ui.reportTotal}>
@@ -337,6 +338,7 @@ export function Workpaper({ organisationId, report, onSaved }: { organisationId:
           ) : null}
         </tbody>
       </table>
+      </div>
       <LeaveAddBackPanel organisationId={organisationId} report={report} onSaved={onSaved} />
       <form className={ui.inlineForm} onSubmit={add}>
         <Field label="Other adjustment" hint="For example, holiday pay not paid within 63 days. Positive adds to taxable income; negative takes off.">

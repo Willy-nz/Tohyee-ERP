@@ -35,7 +35,7 @@ import { paddockHistory } from "@/lib/farming/soil";
 import { recentFarmWeather } from "@/lib/farming/weather-history";
 import { vegetationOverview } from "@/lib/farming/vegetation/service";
 import { forecastVsGauge, getFarmForecast } from "@/lib/weather/service";
-import { parseIsoDate } from "@/lib/dates";
+import { parseIsoDate, todayIsoDate } from "@/lib/dates";
 
 /*
  * AI tools that record day-to-day field work:
@@ -635,7 +635,7 @@ export const FARM_DETAIL_READ_TOOLS: AiTool[] = [
     description: "Each of a farm's paddocks on a date (default today): the mob in it now, when it was last grazed, its latest cover, and the first day it's safe to graze after spraying.",
     level: "read",
     inputSchema: schema({ farmId: FARM_ID, onDate: DATE }),
-    run: async (tx, args) => ({ paddocks: await paddockStatuses(tx, { farmId: await farmFor(tx, args.farmId), onDate: args.onDate ?? new Date().toISOString().slice(0, 10) }) }),
+    run: async (tx, args) => ({ paddocks: await paddockStatuses(tx, { farmId: await farmFor(tx, args.farmId), onDate: args.onDate ?? todayIsoDate() }) }),
   },
   {
     name: "rain_gauge_summary",

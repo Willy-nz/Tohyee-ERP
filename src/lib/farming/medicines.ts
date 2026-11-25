@@ -6,7 +6,8 @@ import { requireFarmAccess } from "@/lib/farming/access";
 import { expiryState, isMedicineKind, MEDICINE_KINDS, type MedicineBadge, type MedicineKind, soonestExpiry, STARTER_LISTS, stockBadge } from "@/lib/farming/medicine-rules";
 import { requireFarming } from "@/lib/farming/paddocks";
 import { STOCK_UNITS, toBase } from "@/lib/farming/treatment-rules";
-import { type ProductUse, productStock } from "@/lib/farming/treatments";
+import { countedUnit, type ProductUse, productStock, stockAlreadyRecorded, stockOperationId, unitsText } from "@/lib/farming/treatments";
+import { requestHash } from "@/lib/idempotency";
 import { cmp, dec, parseDecimalInput, toPlainString } from "@/lib/money/decimal";
 import { currentRecord, currentRecords, requireSafetyRecorder } from "@/lib/safety/records";
 import { addChemical, changeChemical } from "@/lib/safety/register";
@@ -123,6 +124,12 @@ export async function addMedicine(tx: OrgTx, input: Record<string, unknown>): Pr
   } else {
     farmId = await farmFor(tx, input.farmId);
     const unit = input.unit ? requireOneOf(input.unit, "Unit", STOCK_UNITS) : MEDICINE_KINDS[kind].unit;
+    // Two products of one name on a farm can't be told apart (a move picks one by name), so a second is refused.
+    const name = typeof input.name === "string" ? input.name.trim().toLowerCase() : "";
+    const sameName = (await currentRecords<ChemicalData>(tx, "chemical", { farmId })).find((record) => record.farmId === farmId && !record.data.removed && record.data.name.trim().toLowerCase() === name);
+    // A resend of the add that made it (same operation id) isn't a second one.
+    const replay = typeof input.operationId === "string" && input.operationId !== "" && Boolean((await tx.query("select 1 from safety_entries where operation_id = $1", [input.operationId])).rowCount);
+    if (sameName && !replay) throw new ValidationError(`${sameName.data.name} is already in this farm's chemical register. Pick it from the list instead.`);
     const created = await addChemical(tx, { farmId, name: input.name, unit, location: input.location, operationId: input.operationId });
     chemicalRecordId = created.recordId;
   }
@@ -217,6 +224,9 @@ export async function moveMedicine(tx: OrgTx, input: Record<string, unknown>): P
   const quantity = parseDecimalInput(input.quantity, "Quantity", { maxScale: 3 });
   const unit = requireOneOf(input.unit, "Unit", STOCK_UNITS);
   const note = optionalString(input.note, "Note", { maxLength: 200 });
+  const operationId = stockOperationId(input.operationId);
+  const hash = requestHash("medicine_move", { chemicalRecordId: chemical.recordId, toFarmId, movedOn, quantity, unit, note });
+  if (await stockAlreadyRecorded(tx, operationId, hash)) return cabinet(tx, { farmId: fromFarmId });
   const slots = await cabinet(tx, { farmId: fromFarmId });
   const slot = slots.find((entry) => entry.chemicalRecordId === chemical.recordId);
   const base = toBase(quantity, unit);
@@ -229,6 +239,11 @@ export async function moveMedicine(tx: OrgTx, input: Record<string, unknown>): P
   let toRecordId: string;
   if (theirs) {
     toRecordId = theirs.recordId;
+    // It's added to their count, so it must be in the unit theirs is counted in (OPF2).
+    const theirUnit = await countedUnit(tx, toRecordId);
+    if (theirUnit !== null && theirUnit !== slot.unit) {
+      throw new ValidationError(`${theirs.data.name} on the other farm is counted in ${theirUnit}, and this is counted in ${slot.unit}, so it can't be added to it. Count both in ${unitsText(theirUnit)} first, or rename one of them.`);
+    }
     const inCabinet = await tx.query("select 1 from farm_medicines where chemical_record_id = $1", [toRecordId]);
     if (!inCabinet.rowCount) await putInCabinet(tx, toRecordId, toFarmId, slot.kind);
   } else {
@@ -238,9 +253,11 @@ export async function moveMedicine(tx: OrgTx, input: Record<string, unknown>): P
     await putInCabinet(tx, toRecordId, toFarmId, slot.kind);
   }
   const expiresOn = slot.expiresOn;
-  const insert = "insert into farm_product_stock (chemical_record_id, farm_id, movement_type, moved_on, quantity, unit, expires_on, note, created_by_email, moved_farm_id) values ($1, $2, $3, $4, $5::numeric, $6, $7, $8, $9, $10)";
-  await tx.query(insert, [chemical.recordId, fromFarmId, "moved_out", movedOn, quantity, unit, null, note, tx.actor.email, toFarmId]);
-  await tx.query(insert, [toRecordId, toFarmId, "moved_in", movedOn, quantity, unit, expiresOn, note, tx.actor.email, fromFarmId]);
+  const insert =
+    "insert into farm_product_stock (chemical_record_id, farm_id, movement_type, moved_on, quantity, unit, expires_on, note, created_by_email, moved_farm_id, operation_id, request_hash) values ($1, $2, $3, $4, $5::numeric, $6, $7, $8, $9, $10, $11, $12)";
+  // The operation id goes on the moved_out row only, so a resend finds the move once.
+  await tx.query(insert, [chemical.recordId, fromFarmId, "moved_out", movedOn, quantity, unit, null, note, tx.actor.email, toFarmId, operationId, operationId ? hash : null]);
+  await tx.query(insert, [toRecordId, toFarmId, "moved_in", movedOn, quantity, unit, expiresOn, note, tx.actor.email, fromFarmId, null, null]);
   await writeAuditEvent(tx, { eventType: "farming.medicine_moved", entityType: "chemical", entityId: chemical.recordId, details: { toFarmId, toRecordId, quantity, unit, movedOn } });
   return slots.length ? cabinet(tx, { farmId: fromFarmId }) : [];
 }

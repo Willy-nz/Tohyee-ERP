@@ -3,6 +3,7 @@
 import { useEffect, useState } from "react";
 import { DateInput } from "@/components/date-input";
 import { EnteredLine, newOperationId, SafetyHistory } from "@/components/farm-safety";
+import { useConfirm } from "@/components/confirm-dialog";
 import { useApiData } from "@/components/hooks";
 import { Badge, Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
 import { type PickedFile, pickSafetyFile, QueuedWork, submitThroughQueue, useOfflineQueue, waitForFiles } from "@/components/offline-queue";
@@ -21,6 +22,7 @@ import {
   type ActionData,
   actionState,
   ASSIGNED_NOT_TOLD,
+  awaitingNotice,
   type CurrentRecord,
   FIXED_NUMBERS,
   mayBeNotifiable,
@@ -28,6 +30,7 @@ import {
   notifiableKeepText,
   type NotifiableAnswers,
   NOBODY_MESSAGED,
+  NOTIFIABLE_EMAILED,
   type Position,
   REPORT_TYPE_LABELS,
   REPORTED_ACCOUNT,
@@ -341,7 +344,7 @@ export function ReportForm({ organisationId, farm, type, paddocks, people, onCan
     try {
       const outcome = await submitThroughQueue(queue, { operationId, kind: "safety.report", label: `${REPORT_TYPE_LABELS[type]}: ${form.title}`, farmId: farm.id, farmName: farm.name, request: { method: "POST", path: "/api/farming/safety/reports", body, refs } });
       memory.clear(key);
-      if (outcome.state === "synced") onDone({ tone: "success", text: `Recorded for ${farm.name}. ${NOBODY_MESSAGED}${notifiable ? " Tohyee hasn't told WorkSafe." : ""}`, notifiable });
+      if (outcome.state === "synced") onDone({ tone: "success", text: `Recorded for ${farm.name}. ${notifiable ? NOTIFIABLE_EMAILED : NOBODY_MESSAGED}`, notifiable });
       else if (outcome.state === "waiting") onDone({ tone: "warning", text: `Saved on this device, waiting to send. Nobody has been told yet. It goes by itself when Tohyee can be reached.${notifiable ? " Tohyee never tells WorkSafe." : ""}`, notifiable });
       else onDone({ tone: "warning", text: "This device's storage wouldn't keep it. Keep Tohyee open until it shows Synced below, or write it down.", notifiable });
     } catch (caught) {
@@ -619,6 +622,7 @@ function ReportDetail({ organisationId, report, access, people, paddockNames, on
   const [action, setAction] = useState({ title: "", assignedToUserId: "", assignedToName: "", due: "" });
   const [operationId, setOperationId] = useState(newOperationId);
   const { busy, error, run } = useRun();
+  const confirm = useConfirm();
   const live = report.state !== "closed" && report.state !== "withdrawn";
   const send = (path: string, body: Record<string, unknown>) =>
     void run(
@@ -652,7 +656,7 @@ function ReportDetail({ organisationId, report, access, people, paddockNames, on
             ["Where", [report.data.where, report.data.paddockIds.map((id) => paddockNames.get(id) ?? id).join(", "), report.data.point ? "marked on the map" : null].filter(Boolean).join(" · ")],
             ["Done straight away", report.data.immediateAction],
             ["WorkSafe told", report.data.workSafeNotified ? `${formatDate(report.data.workSafeNotified.on)} by ${report.data.workSafeNotified.how}${report.data.workSafeNotified.reference ? `, reference ${report.data.workSafeNotified.reference}` : ""}` : null],
-            ["Closed", report.data.closed?.why ?? null],
+            ["Closed", report.data.closed ? `${report.data.closed.why}${report.data.closed.withoutNotice ? " (closed with no WorkSafe notice recorded)" : ""}` : null],
           ] as Array<[string, string | null]>
         )
           .filter(([, value]) => value)
@@ -756,7 +760,17 @@ function ReportDetail({ organisationId, report, access, people, paddockNames, on
         </form>
       ) : null}
       {step === "close" || step === "withdraw" ? (
-        <form onSubmit={(event) => { event.preventDefault(); send(`/api/farming/safety/reports/${report.recordId}`, { step, expectedVersion: report.version, why: form.why }); }}>
+        <form
+          onSubmit={(event) => {
+            event.preventDefault();
+            void (async () => {
+              // Closing one that may need notifying, with no WorkSafe notice recorded, is the person's choice: asked first (OPF6).
+              const withoutNotice = step === "close" && awaitingNotice(report.data);
+              if (withoutNotice && !(await confirm("This report may need notifying to WorkSafe, and no notice is recorded. Close it anyway, because it didn't need notifying?"))) return;
+              send(`/api/farming/safety/reports/${report.recordId}`, { step, expectedVersion: report.version, why: form.why, ...(withoutNotice ? { closeWithoutNotice: true } : {}) });
+            })();
+          }}
+        >
           <Field label={step === "close" ? "Why it's closed (what was put right)" : "Why it's withdrawn"}>
             <textarea value={form.why} required rows={2} maxLength={1000} onChange={(event) => setForm({ ...form, why: event.target.value })} />
           </Field>

@@ -5,6 +5,7 @@ import { dueDateFromTerms } from "@/lib/customers/service";
 import { parseIsoDate, parseOptionalIsoDate, todayIsoDate } from "@/lib/dates";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { ConflictError, NotFoundError, ValidationError } from "@/lib/errors";
+import { formatDate } from "@/lib/format";
 import { assertSameRequest, requestHash } from "@/lib/idempotency";
 import { AMOUNTS_MODES, type AmountsMode } from "@/lib/invoices/amounts";
 import {
@@ -769,6 +770,10 @@ async function closeOpenSigning(tx: OrgTx, quoteId: string, how: "accepted" | "d
 export async function acceptQuoteBySigning(tx: OrgTx, quoteIdInput: string, signing: { requestId: string; signerName: string; signerEmail: string }): Promise<void> {
   const current = await lockQuote(tx, requireId(quoteIdInput, "quoteId"));
   if (current.status !== "finalised") throw new ConflictError(`${quoteLabel(current)} has been ${current.status === "draft" ? "changed" : current.status} since it was sent, so it can't be accepted now. Ask the business for a new quote.`);
+  // A quote is accepted only while it's valid: after its expiry date the price may not stand (OPF5).
+  if (current.expiryDate && current.expiryDate < todayIsoDate()) {
+    throw new ConflictError(`${quoteLabel(current)} expired on ${formatDate(current.expiryDate)}, so it can't be accepted now. Ask the business for a new quote.`);
+  }
   await tx.query(
     `update quotes set status = 'accepted', accepted_signing_request_id = $2, close_command_source = 'signing', close_idempotency_key = $3,
             close_request_hash = $4, closed_by_user_id = null, closed_by_email = $5, closed_at = now(), updated_at = now()

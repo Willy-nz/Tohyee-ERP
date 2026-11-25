@@ -9,6 +9,7 @@ import { Button, Card, Notice } from "@/components/ui";
 import { api } from "@/lib/client/api";
 import type { Quote } from "@/lib/quotes/service";
 import { LEGAL_NOTE, type SigningRequestView } from "@/lib/signing/shared";
+import { formatDate, todayInBrowser } from "@/lib/format";
 import { pdfHref } from "@/components/documents/email-document";
 
 type Data = { requests: SigningRequestView[]; email: { ready: boolean; reason: string | null }; suggested: { name: string; email: string } };
@@ -60,6 +61,9 @@ export function QuoteSigning({ organisationId, quote, canSend, onChanged }: { or
           }}
           onCancel={() => setSending(false)}
         />
+      ) : quote.status === "finalised" && canSend && !open && quote.expiryDate && quote.expiryDate < todayInBrowser() ? (
+        // A quote past its expiry date isn't sent to accept (OPF5): the server refuses it too.
+        <p style={{ margin: 0 }}>This quote expired on {formatDate(quote.expiryDate)}, so it can&apos;t be sent to accept. Copy it to make a new quote with a new expiry date.</p>
       ) : quote.status === "finalised" && canSend && !open ? (
         <>
           {!email.ready ? <Notice tone="warning">{email.reason}</Notice> : null}

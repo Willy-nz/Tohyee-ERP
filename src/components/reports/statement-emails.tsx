@@ -5,7 +5,7 @@ import { useEffect, useState } from "react";
 import { Money } from "@/components/books";
 import { EmailStatusBadge, type StatementQuery } from "@/components/documents/email-document";
 import { useApiData } from "@/components/hooks";
-import { Button, Card, Notice, ui } from "@/components/ui";
+import { Button, Card, Notice, RefreshProblem, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
 import { api, errorMessage, newIdempotencyKey } from "@/lib/client/api";
 import type { StatementRun, StatementRunPreview } from "@/lib/email/documents";
@@ -122,6 +122,7 @@ export function StatementRunCard({ organisationId, statement }: { organisationId
         )
       ) : null}
       {run.error ? <Notice tone="error">{run.error}</Notice> : null}
+      <RefreshProblem problem={run.refreshError} loadedAt={run.loadedAt} onRetry={reload} />
       {run.data ? (
         <div className={ui.tableWrap}>
           <table className={ui.table}>

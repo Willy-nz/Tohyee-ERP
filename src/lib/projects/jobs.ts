@@ -9,6 +9,16 @@ import { optionalId, optionalSource, optionalString, requireArray, requireId, re
 import { listMembers } from "@/lib/organisations/members";
 import { createTimeEntry, requireMember } from "./service";
 
+/**
+ * A timestamp column as a UTC ISO string ("2026-10-14T19:00:00.000Z"),
+ * whatever time zone the PostgreSQL server or session is in, so times read
+ * back compare and parse the same everywhere (::text follows the server's
+ * time zone, and some phone browsers can't read its format).
+ */
+function utc(column: string): string {
+  return `to_char(${column} at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS.MS"Z"')`;
+}
+
 /*
  * Jobs and visits inside Projects (examples JV1-JV9). A job is a project with a site. Its visits are on a
  * calendar for Tohyee users; Start and Finish fill in the hours, which the
@@ -144,8 +154,8 @@ export type JobSummary = {
 export async function listJobs(tx: OrgTx): Promise<JobSummary[]> {
   const rows = await tx.query<{ id: string; name: string; contact_name: string; site_address: string | null; status: string; next_visit: string | null; last_visit: string | null }>(
     `select p.id::text, p.name, c.name as contact_name, p.site_address, p.status,
-            (select min(v.starts_at)::text from project_visits v where v.project_id = p.id and v.status in ('scheduled', 'started') ) as next_visit,
-            (select max(v.finished_at)::text from project_visits v where v.project_id = p.id and v.status = 'finished') as last_visit
+            (select ${utc("min(v.starts_at)")} from project_visits v where v.project_id = p.id and v.status in ('scheduled', 'started') ) as next_visit,
+            (select ${utc("max(v.finished_at)")} from project_visits v where v.project_id = p.id and v.status = 'finished') as last_visit
        from projects p join contacts c on c.id = p.contact_id
       where p.is_job order by p.status, coalesce((select min(v.starts_at) from project_visits v where v.project_id = p.id and v.status in ('scheduled', 'started')), 'infinity'), p.name`,
   );
@@ -163,8 +173,9 @@ export async function listJobs(tx: OrgTx): Promise<JobSummary[]> {
 // Visits ----------------------------------------------------------------------------
 
 const VISIT_COLUMNS = `v.id::text, v.project_id::text, p.name as project_name, c.name as contact_name, p.site_address, v.task_id::text, t.name as task_name,
-  v.user_id::text, v.user_email, v.starts_at::text, v.ends_at::text, v.notes, v.status, v.started_at::text, v.finished_at::text,
-  v.finished_with_open_checks, v.signed_by, v.signed_at::text, v.time_entry_id::text, p.checklist_items`;
+  v.user_id::text, v.user_email, ${utc("v.starts_at")} as starts_at, ${utc("v.ends_at")} as ends_at, v.notes, v.status,
+  ${utc("v.started_at")} as started_at, ${utc("v.finished_at")} as finished_at,
+  v.finished_with_open_checks, v.signed_by, ${utc("v.signed_at")} as signed_at, v.time_entry_id::text, p.checklist_items`;
 const VISIT_JOINS = `from project_visits v join projects p on p.id = v.project_id join contacts c on c.id = p.contact_id join project_tasks t on t.id = v.task_id`;
 
 type VisitRow = {
@@ -194,11 +205,11 @@ async function toVisits(tx: OrgTx, rows: VisitRow[]): Promise<Visit[]> {
   if (rows.length === 0) return [];
   const ids = rows.map((row) => row.id);
   const checks = await tx.query<{ visit_id: string; item: string; ticked_by_email: string; ticked_at: string }>(
-    "select visit_id::text, item, ticked_by_email, ticked_at::text from project_visit_checks where visit_id = any($1::bigint[])",
+    `select visit_id::text, item, ticked_by_email, ${utc("ticked_at")} as ticked_at from project_visit_checks where visit_id = any($1::bigint[])`,
     [ids],
   );
   const clashes = await tx.query<{ id: string; other_start: string; other_end: string }>(
-    `select v.id::text, min(o.starts_at)::text as other_start, max(o.ends_at)::text as other_end
+    `select v.id::text, ${utc("min(o.starts_at)")} as other_start, ${utc("max(o.ends_at)")} as other_end
        from project_visits v join project_visits o on o.user_id = v.user_id and o.id <> v.id and o.status <> 'cancelled'
                                                   and o.starts_at < v.ends_at and o.ends_at > v.starts_at
       where v.id = any($1::bigint[]) and v.status <> 'cancelled' group by v.id`,
@@ -366,7 +377,8 @@ export async function finishVisit(tx: OrgTx, role: Role, idInput: unknown, input
   assertCanWork(visit, tx, role);
   if (visit.status !== "started") throw new ConflictError("Start the visit before finishing it.");
   const at = input.at === undefined || input.at === null ? new Date().toISOString() : parseInstant(input.at, "The finish time");
-  if (at <= visit.startedAt!) throw new ValidationError("A visit finishes after it starts.");
+  // Compared as instants: the strings can be written in different time zones (JV3).
+  if (Date.parse(at) <= Date.parse(visit.startedAt!)) throw new ValidationError("A visit finishes after it starts.");
   const open = visit.checks.filter((check) => !check.tickedAt).map((check) => check.item);
   if (open.length > 0 && input.finishAnyway !== true) {
     throw new ConflictError(`Not ticked yet: ${open.join(", ")}. Finish anyway?`);
@@ -406,6 +418,8 @@ export async function tickVisitCheck(tx: OrgTx, role: Role, idInput: unknown, in
   const visit = await getVisit(tx, idInput);
   assertCanWork(visit, tx, role);
   if (visit.status === "cancelled") throw new ConflictError("This visit was cancelled.");
+  // The visit keeps whether it finished with items open, so its checklist stays as it was at Finish.
+  if (visit.status === "finished") throw new ConflictError("This visit is finished, so its checklist can't change. Add a note instead.");
   const item = requireString(input.item, "item", { maxLength: 200 });
   if (!visit.checks.some((check) => check.item === item)) throw new ValidationError(`"${item}" isn't on this job's checklist.`);
   if (input.ticked === false) {
@@ -421,8 +435,13 @@ export async function tickVisitCheck(tx: OrgTx, role: Role, idInput: unknown, in
 export async function signVisit(tx: OrgTx, role: Role, idInput: unknown, input: { signedBy: unknown }): Promise<Visit> {
   const visit = await getVisit(tx, idInput);
   assertCanWork(visit, tx, role);
+  if (visit.status === "cancelled") throw new ConflictError("This visit was cancelled, so it can't be signed for.");
+  if (visit.status === "scheduled") throw new ConflictError("Start the visit before it's signed for.");
+  if (visit.signedBy) throw new ConflictError(`This visit was already signed for by ${visit.signedBy}.`);
   const signedBy = requireString(input.signedBy, "Who signed", { maxLength: 200 });
-  await tx.query("update project_visits set signed_by = $2, signed_at = now() where id = $1", [visit.id, signedBy]);
+  // "signed_by is null" too, so two signings sent at once can't both land.
+  const signed = await tx.query("update project_visits set signed_by = $2, signed_at = now() where id = $1 and signed_by is null", [visit.id, signedBy]);
+  if (signed.rowCount === 0) throw new ConflictError("This visit was already signed for.");
   await writeAuditEvent(tx, { eventType: "project.visit_signed", entityType: "project", entityId: visit.projectId, details: { visitId: visit.id, signedBy } });
   return getVisit(tx, visit.id);
 }
@@ -525,7 +544,7 @@ export async function serviceReminders(tx: OrgTx, input: { today?: unknown } = {
   const today = input.today ? parseIsoDate(input.today, "today") : isoDateAt(new Date());
   const rows = await tx.query<{ id: string; name: string; contact_name: string; interval: number; last_visit: string }>(
     `select p.id::text, p.name, c.name as contact_name, p.service_interval_months as interval,
-            (select max(v.finished_at) from project_visits v where v.project_id = p.id and v.status = 'finished')::text as last_visit
+            ${utc("(select max(v.finished_at) from project_visits v where v.project_id = p.id and v.status = 'finished')")} as last_visit
        from projects p join contacts c on c.id = p.contact_id
       where p.is_job and p.service_interval_months is not null
         and not exists (select 1 from project_visits v where v.project_id = p.id and v.status in ('scheduled', 'started')

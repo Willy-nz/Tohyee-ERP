@@ -103,18 +103,20 @@ export function EmailTemplatesPage({ organisationId }: { organisationId: string 
         )}
       </Card>
       <Card title="Merge fields" description="Type these in a subject or message; they're filled in for each person. One with nothing to fill in is left blank.">
-        <table className={ui.table}>
-          <tbody>
-            {Object.entries(data.data?.mergeFields ?? {}).map(([field, label]) => (
-              <tr key={field}>
-                <td>
-                  <code>{`{{${field}}}`}</code>
-                </td>
-                <td>{label}</td>
-              </tr>
-            ))}
-          </tbody>
-        </table>
+        <div className={ui.tableWrap}>
+          <table className={ui.table}>
+            <tbody>
+              {Object.entries(data.data?.mergeFields ?? {}).map(([field, label]) => (
+                <tr key={field}>
+                  <td>
+                    <code>{`{{${field}}}`}</code>
+                  </td>
+                  <td>{label}</td>
+                </tr>
+              ))}
+            </tbody>
+          </table>
+        </div>
       </Card>
     </>
   );

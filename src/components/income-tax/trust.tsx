@@ -45,6 +45,7 @@ export function BeneficiariesCard({ organisationId }: { organisationId: string }
       {error || loaded.error ? <Notice tone="error">{error ?? loaded.error}</Notice> : null}
       {list.length === 0 && loaded.data ? <Empty>No beneficiaries yet.</Empty> : null}
       {list.length ? (
+        <div className={ui.tableWrap}>
         <table className={ui.table}>
           <thead>
             <tr>
@@ -80,6 +81,7 @@ export function BeneficiariesCard({ organisationId }: { organisationId: string }
             ))}
           </tbody>
         </table>
+        </div>
       ) : null}
       {editing ? (
         <BeneficiaryForm
@@ -293,6 +295,7 @@ function IncomeForm({
         <Empty>Add the trust&apos;s beneficiaries under Tax settings first.</Empty>
       ) : (
         <form onSubmit={save}>
+          <div className={ui.tableWrap}>
           <table className={ui.table}>
             <thead>
               <tr>
@@ -362,6 +365,7 @@ function IncomeForm({
               })}
             </tbody>
           </table>
+          </div>
           <div className={ui.actions}>
             <Button type="submit">Save</Button>
           </div>
@@ -373,6 +377,7 @@ function IncomeForm({
           {note}
         </Notice>
       ))}
+      <div className={ui.tableWrap}>
       <table className={ui.table}>
         <tbody>
           <tr>
@@ -433,6 +438,7 @@ function IncomeForm({
           </tr>
         </tbody>
       </table>
+      </div>
       {ret ? <CreditsTable ret={ret} /> : null}
     </Card>
   );
@@ -463,6 +469,7 @@ function CreditsTable({ ret }: { ret: TrustReturn }) {
   ];
   if (rows.every(([, key]) => ret.totalCredits[key] === "0.00")) return null;
   return (
+    <div className={ui.tableWrap}>
     <table className={ui.table}>
       <thead>
         <tr>
@@ -489,6 +496,7 @@ function CreditsTable({ ret }: { ret: TrustReturn }) {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }
 
@@ -521,6 +529,7 @@ export function Ir6Card({ incomeYear, ir6 }: { incomeYear: number; ir6: Ir6Figur
 
 function BoxTable({ boxes }: { boxes: Ir6Box[] }) {
   return (
+    <div className={ui.tableWrap}>
     <table className={ui.table}>
       <tbody>
         {boxes.map((box) => (
@@ -535,5 +544,6 @@ function BoxTable({ boxes }: { boxes: Ir6Box[] }) {
         ))}
       </tbody>
     </table>
+    </div>
   );
 }

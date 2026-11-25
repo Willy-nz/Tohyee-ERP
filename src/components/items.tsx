@@ -355,24 +355,26 @@ function ItemForm({
       {showUnits && item ? (
         <Card title="Units" description={`Each unit is a fixed number of ${item.baseUnit}. Its size can't change once saved; archive it and add another.`}>
           {item.units.length > 0 ? (
-            <table className={ui.table}>
-              <tbody>
-                {item.units.map((unit) => (
-                  <tr key={unit.id}>
-                    <td>{unit.name}</td>
-                    <td className={ui.num}>
-                      {unit.factor} {item.baseUnit}
-                    </td>
-                    <td>{unit.isActive ? <Badge tone="green">Active</Badge> : <Badge>Archived</Badge>}</td>
-                    <td className={ui.num}>
-                      <Button size="small" variant="secondary" onClick={() => void toggleUnit(unit.id, !unit.isActive)}>
-                        {unit.isActive ? "Archive" : "Restore"}
-                      </Button>
-                    </td>
-                  </tr>
-                ))}
-              </tbody>
-            </table>
+            <div className={ui.tableWrap}>
+              <table className={ui.table}>
+                <tbody>
+                  {item.units.map((unit) => (
+                    <tr key={unit.id}>
+                      <td>{unit.name}</td>
+                      <td className={ui.num}>
+                        {unit.factor} {item.baseUnit}
+                      </td>
+                      <td>{unit.isActive ? <Badge tone="green">Active</Badge> : <Badge>Archived</Badge>}</td>
+                      <td className={ui.num}>
+                        <Button size="small" variant="secondary" onClick={() => void toggleUnit(unit.id, !unit.isActive)}>
+                          {unit.isActive ? "Archive" : "Restore"}
+                        </Button>
+                      </td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : null}
           {advanced ? (
             <div className={ui.actions} style={{ alignItems: "end" }}>

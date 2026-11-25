@@ -151,26 +151,28 @@ function VoidPanel({ organisationId, journalIds, onDone, onCancel }: { organisat
               Take {stuck.length === 1 ? "it" : "them"} out to void the rest.
             </Notice>
           ) : null}
-          <table className={ui.table}>
-            <thead>
-              <tr>
-                <th>Account</th>
-                <th className={ui.num}>Debit</th>
-                <th className={ui.num}>Credit</th>
-              </tr>
-            </thead>
-            <tbody>
-              {plan.effect.map((line) => (
-                <tr key={line.accountCode}>
-                  <td>
-                    {line.accountCode} {line.accountName}
-                  </td>
-                  <td className={ui.num}>{line.debit === "0.00" ? "" : formatMoney(line.debit)}</td>
-                  <td className={ui.num}>{line.credit === "0.00" ? "" : formatMoney(line.credit)}</td>
+          <div className={ui.tableWrap}>
+            <table className={ui.table}>
+              <thead>
+                <tr>
+                  <th>Account</th>
+                  <th className={ui.num}>Debit</th>
+                  <th className={ui.num}>Credit</th>
                 </tr>
-              ))}
-            </tbody>
-          </table>
+              </thead>
+              <tbody>
+                {plan.effect.map((line) => (
+                  <tr key={line.accountCode}>
+                    <td>
+                      {line.accountCode} {line.accountName}
+                    </td>
+                    <td className={ui.num}>{line.debit === "0.00" ? "" : formatMoney(line.debit)}</td>
+                    <td className={ui.num}>{line.credit === "0.00" ? "" : formatMoney(line.credit)}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
         </>
       ) : (
         <p className={ui.muted}>Working out what it does…</p>

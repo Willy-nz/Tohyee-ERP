@@ -168,6 +168,8 @@ export async function recordTreatment(tx: OrgTx, input: Record<string, unknown>)
   if (input.chemicalRecordId) {
     if (typeof input.chemicalRecordId !== "string" || !UUID.test(input.chemicalRecordId)) throw new ValidationError("Choose a product from the chemical register.");
     const chemical = await currentRecord<ChemicalData>(tx, "chemical", input.chemicalRecordId);
+    // Stock comes off the product the treatment names, so it must be this farm's (or kept for every farm).
+    if (chemical.farmId && chemical.farmId !== farmId) throw new ValidationError(`${chemical.data.name} is kept on another farm. Choose this farm's product, or move some here first.`);
     chemicalRecordId = chemical.recordId;
     product = product ?? chemical.data.name.slice(0, 150);
   }
@@ -365,14 +367,16 @@ export async function productStock(tx: OrgTx, input: { farmId?: unknown } = {}):
         return rest;
       });
     const stockMoves = history.filter((entry) => entry.kind !== "treatment" && entry.kind !== "spray");
-    const baseUnit = stockMoves.length ? toBase("1", stockMoves[stockMoves.length - 1].unit)?.unit ?? stockMoves[stockMoves.length - 1].unit : (record.data.unit ? (toBase("1", record.data.unit)?.unit ?? null) : null);
+    // The unit it's counted in is set by its first stock entry (OPF2), so one entry in another unit can't re-base it.
+    const baseUnit = stockMoves.length ? stockBaseUnit(stockMoves[0].unit) : record.data.unit ? (toBase("1", record.data.unit)?.unit ?? null) : null;
     let onHand: Decimal | null = null;
     let lastCountedOn: string | null = null;
     const notCounted: ProductUse[] = [];
     for (const entry of history) {
       const base = toBase(entry.quantity, entry.unit);
       if (!base || base.unit !== baseUnit) {
-        if (entry.kind === "treatment" || entry.kind === "spray") notCounted.push(entry);
+        // Listed, never dropped quietly: an older stock entry in another unit shows here too.
+        notCounted.push(entry);
         continue;
       }
       const amount = dec(base.quantity);
@@ -395,6 +399,52 @@ export async function productStock(tx: OrgTx, input: { farmId?: unknown } = {}):
   });
 }
 
+/** A unit's base (L, kg, doses, each), or the unit itself when Tohyee doesn't know it. */
+function stockBaseUnit(unit: string): string {
+  return toBase("1", unit)?.unit ?? unit;
+}
+
+/**
+ * The unit a product's stock is counted in (OPF2): the base of its first
+ * stock entry, or null before it has one (then the first entry sets it).
+ */
+export async function countedUnit(tx: OrgTx, chemicalRecordId: string): Promise<string | null> {
+  const first = await tx.query<{ unit: string }>("select unit from farm_product_stock where chemical_record_id = $1 order by moved_on, id limit 1", [chemicalRecordId]);
+  return first.rows[0] ? stockBaseUnit(first.rows[0].unit) : null;
+}
+
+/** Words for the units a product counted in `base` can be entered in. */
+export function unitsText(base: string): string {
+  return base === "L" ? "L or mL" : base === "kg" ? "kg or g" : base;
+}
+
+/**
+ * Refuses a stock entry whose unit can't be added to the product's count
+ * (OPF2): "Teat sealant is counted in each. Enter it in each."
+ */
+export async function requireCountedUnit(tx: OrgTx, chemicalRecordId: string, name: string, unit: string): Promise<void> {
+  const counted = await countedUnit(tx, chemicalRecordId);
+  if (counted !== null && stockBaseUnit(unit) !== counted) {
+    throw new ValidationError(`${name} is counted in ${counted}. Enter it in ${unitsText(counted)}.`);
+  }
+}
+
+/** A stock entry's operation id (OPF3): a UUID, or null when none was sent. */
+export function stockOperationId(input: unknown): string | null {
+  if (input === undefined || input === null || input === "") return null;
+  if (typeof input !== "string" || !UUID.test(input)) throw new ValidationError("operationId must be a UUID.");
+  return input.toLowerCase();
+}
+
+/** True when this operation was already recorded with the same details; refuses one sent with different details. */
+export async function stockAlreadyRecorded(tx: OrgTx, operationId: string | null, hash: string): Promise<boolean> {
+  if (!operationId) return false;
+  const earlier = await tx.query<{ request_hash: string | null; created_by_email: string }>("select request_hash, created_by_email from farm_product_stock where operation_id = $1", [operationId]);
+  if (!earlier.rows[0]) return false;
+  if (earlier.rows[0].request_hash !== hash || earlier.rows[0].created_by_email !== tx.actor.email) throw new ConflictError("This was already sent with different details. Nothing was changed.");
+  return true;
+}
+
 /** Records product received, counted, thrown out (TRT7) or used without a treatment (MED4). Bookkeepers and farm staff. */
 export async function recordProductStock(tx: OrgTx, input: Record<string, unknown>): Promise<ProductStock[]> {
   await requireFarming(tx);
@@ -407,9 +457,13 @@ export async function recordProductStock(tx: OrgTx, input: Record<string, unknow
   const batch = optionalString(input.batch, "Batch", { maxLength: 60 });
   const expiresOn = input.expiresOn ? parseIsoDate(input.expiresOn, "Expiry date") : null;
   const note = optionalString(input.note, "Note", { maxLength: 200 });
+  const operationId = stockOperationId(input.operationId);
+  const hash = requestHash("product_stock", { chemicalRecordId: chemical.recordId, movementType, movedOn, quantity, unit, batch, expiresOn, note });
+  if (await stockAlreadyRecorded(tx, operationId, hash)) return productStock(tx, {});
+  await requireCountedUnit(tx, chemical.recordId, chemical.data.name, unit);
   await tx.query(
-    "insert into farm_product_stock (chemical_record_id, farm_id, movement_type, moved_on, quantity, unit, batch, expires_on, note, created_by_email) values ($1, $2, $3, $4, $5::numeric, $6, $7, $8, $9, $10)",
-    [chemical.recordId, chemical.farmId, movementType, movedOn, quantity, unit, batch, expiresOn, note, tx.actor.email],
+    "insert into farm_product_stock (chemical_record_id, farm_id, movement_type, moved_on, quantity, unit, batch, expires_on, note, created_by_email, operation_id, request_hash) values ($1, $2, $3, $4, $5::numeric, $6, $7, $8, $9, $10, $11, $12)",
+    [chemical.recordId, chemical.farmId, movementType, movedOn, quantity, unit, batch, expiresOn, note, tx.actor.email, operationId, operationId ? hash : null],
   );
   await writeAuditEvent(tx, { eventType: "farming.product_stock_recorded", entityType: "chemical", entityId: chemical.recordId, details: { movementType, movedOn, quantity, unit } });
   return productStock(tx, {});

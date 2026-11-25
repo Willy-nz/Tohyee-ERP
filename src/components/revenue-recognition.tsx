@@ -167,28 +167,30 @@ function ApplyToInvoiced({ organisationId, connectionId }: { organisationId: str
             {open ? "Hide them" : "See them"}
           </button>
           {open ? (
-            <table className={ui.table} style={{ marginTop: 8 }}>
-              <thead>
-                <tr>
-                  <th>Order</th>
-                  <th>Invoice</th>
-                  <th>Date</th>
-                  <th>Shopify says</th>
-                  <th className={ui.num}>Total</th>
-                </tr>
-              </thead>
-              <tbody>
-                {waiting.map((order) => (
-                  <tr key={order.orderId}>
-                    <td>{order.name ?? order.orderId}</td>
-                    <td>{order.invoiceNumber}</td>
-                    <td>{order.invoiceDate}</td>
-                    <td>{(order.shopifyStatus ?? "").toLowerCase().replace(/_/g, " ")}</td>
-                    <td className={ui.num}>{order.total}</td>
+            <div className={ui.tableWrap}>
+              <table className={ui.table} style={{ marginTop: 8 }}>
+                <thead>
+                  <tr>
+                    <th>Order</th>
+                    <th>Invoice</th>
+                    <th>Date</th>
+                    <th>Shopify says</th>
+                    <th className={ui.num}>Total</th>
                   </tr>
-                ))}
-              </tbody>
-            </table>
+                </thead>
+                <tbody>
+                  {waiting.map((order) => (
+                    <tr key={order.orderId}>
+                      <td>{order.name ?? order.orderId}</td>
+                      <td>{order.invoiceNumber}</td>
+                      <td>{order.invoiceDate}</td>
+                      <td>{(order.shopifyStatus ?? "").toLowerCase().replace(/_/g, " ")}</td>
+                      <td className={ui.num}>{order.total}</td>
+                    </tr>
+                  ))}
+                </tbody>
+              </table>
+            </div>
           ) : null}
           <div style={{ marginTop: 8 }}>
             <button type="button" className={`${ui.button} ${ui.secondary}`} disabled={busy} onClick={() => void apply()}>

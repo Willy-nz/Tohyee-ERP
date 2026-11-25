@@ -305,20 +305,22 @@ export function AnnualStatementsReport({ organisationId }: { organisationId: str
       return (
         <>
           <h3 className={ui.statementTitle}>{heading("contents", page.title)}</h3>
-          <table className={`${ui.table} ${ui.statement}`} style={{ marginTop: 16 }}>
-            <tbody>
-              {pages.slice(2).map((entry, index) => (
-                <tr key={entry.key} className={ui.reportSection}>
-                  <td>
-                    <button type="button" className={ui.linkButton} onClick={() => go(index + 2)}>
-                      {entry.title}
-                    </button>
-                  </td>
-                  <td className={ui.num}>{index + 3}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
+          <div className={ui.tableWrap}>
+            <table className={`${ui.table} ${ui.statement}`} style={{ marginTop: 16 }}>
+              <tbody>
+                {pages.slice(2).map((entry, index) => (
+                  <tr key={entry.key} className={ui.reportSection}>
+                    <td>
+                      <button type="button" className={ui.linkButton} onClick={() => go(index + 2)}>
+                        {entry.title}
+                      </button>
+                    </td>
+                    <td className={ui.num}>{index + 3}</td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
           <p className={ui.muted}>Made from the pages after it. In the PDF, a page that runs onto a second sheet moves the numbers after it on.</p>
         </>
       );

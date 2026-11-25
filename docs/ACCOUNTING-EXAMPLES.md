@@ -23923,6 +23923,77 @@ they put right themselves (void, remove and redo, exclude).
   that currency, at the rate for the charge date, rounded to its smallest
   unit.
 
+## Operations and farm fixes (OPF1-OPF6; 25 Nov 2026; following common practice, not yet reviewed)
+
+Made-up examples. A job for "Harbour Bakery" (Wilfred is the staff member,
+as JV1-JV9), and a farm with two blocks, Home and Runoff.
+
+- **OPF1 Visit times don't depend on the server's time zone.** Wilfred
+  starts a visit at 8:00 on Thu 15 Oct 2026 (NZ daylight time) and finishes
+  at 11:30. That's **210 minutes**, confirmed as 3 h 30 m dated 15 Oct,
+  whether the PostgreSQL server runs in UTC or in New Zealand time. A finish
+  at or before the start is refused ("A visit finishes after it starts"), in
+  the morning and the afternoon alike. Visit times are read back as UTC
+  instants (for example 2026-10-14T19:00:00.000Z), and Home's Jobs card
+  counts a visit by its New Zealand day. The person on site signs once the
+  visit has started or finished, and only once: a cancelled or not-yet-
+  started visit can't be signed for, and a second signature is refused
+  ("already signed for by Mere"). Once a visit is finished its checklist
+  stays as it was at Finish, so "finished with items open" stays true;
+  anything done later goes in a note. Nothing is posted.
+- **OPF2 One unit per product's count.** Teat sealant is counted in "each":
+  48 received, then counted at 40. "Received 2 L" is refused: "Teat sealant
+  is counted in each. Enter it in each." On hand stays 40 each, and a later
+  treatment of 8 each brings it to **32 each**. A product counted in litres
+  takes L or mL (5 L received, 500 mL used: **4.5 L**); one in kg takes kg
+  or g. The first stock entry sets the unit (a later entry in another unit
+  can't re-base it). An older entry in another unit, saved before this
+  check, isn't dropped: it's listed as not in the amount on hand, and a
+  count sets it right. Small amounts aren't rounded away: 0.4 mL is
+  0.0004 L. Moving 1 L of oral drench from Home onto Runoff's "Oral drench",
+  counted in kg, is refused: one count can't add litres to kilograms.
+  A treatment on Home can't take stock off a product kept on Runoff.
+  Records only; nothing is posted.
+- **OPF3 Sent twice, recorded once.** "Received 5 L" sent from a phone, and
+  sent again because the reply was lost, is one entry: on hand 5 L, not
+  10 L. The same for a move of 2 L to Runoff: Home 3 L, Runoff 2 L. The
+  same id sent with different details is refused and nothing changes. Two
+  entries sent without an id (two real deliveries) are two entries. Adding
+  "Oral drench" to Home's cabinet when Home's register already has one is
+  refused; a resend of the same add is the same product. Medicine stock
+  entries and moves go through the device's queue like other farm work, and
+  the Medicines page opens with no signal.
+- **OPF4 Treatments from Log take stock off.** On Log, a treatment of 200
+  head with Oral drench picked from the cabinet, 4 L used, given at 7:30,
+  takes 4 L off the cabinet (5 L to **1 L**) and counts milk withholding
+  from 7:30, the same as recording it on Mobs. A product typed instead of
+  picked is kept on the treatment only, as before.
+- **OPF5 An expired quote isn't accepted by signing.** A quote dated 5 Jan
+  2026, valid until 31 Jan 2026, can't be sent to accept online after 31 Jan:
+  "QU-0007 expired on 31 Jan 2026. Copy it to make a new quote with a new
+  expiry date, then send that." A quote valid for 5 more days is sent with a
+  link that works for 6 days (to the end of its last day), not the usual
+  30; one with no expiry date keeps the usual 30. If a link sent earlier is
+  signed after the expiry date, signing doesn't accept the quote: "expired
+  on 31 Jan 2026, so it can't be accepted now. Ask the business for a new
+  quote." Nothing is posted. (Whether a business may choose to honour an
+  expired quote anyway is left for the owner; today it copies the quote.)
+- **OPF6 A report that may need notifying isn't left with the reporter.** A
+  farm worker reports "Crushed in the yard" on Home farm and answers yes to
+  the hospital question. The organisation's owners and admins (not the
+  reporter) are each emailed once: the report's title, farm and date, and
+  WorkSafe's number (0800 030 040), never the restricted injury details.
+  Until someone records telling WorkSafe, or closes it, the report is first
+  on Today for the people who keep the safety registers ("WorkSafe?").
+  Closing it with no notice recorded asks first ("Close it anyway, because
+  it didn't need notifying?"), and the report keeps that it was closed with
+  no WorkSafe notice recorded. The hospital question now asks what s 23(1)(b)
+  of the Health and Safety at Work Act 2015 asks: whether the injury or
+  illness needed, or would usually need, admission for immediate treatment,
+  even if they didn't go; the serious-injury question names infections
+  caught through work, such as leptospirosis. Tohyee still never tells
+  WorkSafe itself, and doesn't decide whether an event is notifiable.
+
 ## Tax and payroll fixes (TXF1-TXF9; 25 Nov 2026; following common practice, not yet reviewed)
 
 Fixes from a review of the tax and payroll code. Each rule was checked

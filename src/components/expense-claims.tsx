@@ -12,7 +12,7 @@ import { useApiData } from "@/components/hooks";
 import { RdLineTags } from "@/components/rd";
 import { RecordExtrasPanel } from "@/components/records/record-extras";
 import { TrackingSelects, TrackingTagsText, useTracking } from "@/components/tracking";
-import { Badge, Button, Card, Empty, Field, Notice, Stat, ui } from "@/components/ui";
+import { Badge, Button, Card, Empty, Field, Notice, Stat, ui, FormError } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
 import type { Account } from "@/lib/accounts/service";
 import { billLineAccountProblem } from "@/lib/bills/accounts";
@@ -188,7 +188,7 @@ export function ExpenseClaimEditor({
 
   return (
     <form onSubmit={(event) => void save(event)}>
-      {error ? <Notice tone="error">{error}</Notice> : null}
+      <FormError error={error} />
       <Field label="What it's for">
         <input placeholder="June market trip" value={description} maxLength={500} onChange={(event) => setDescription(event.target.value)} />
       </Field>
@@ -487,7 +487,7 @@ function ClaimActions({ organisationId, claim, onChanged }: { organisationId: st
 
   return (
     <Card title="Actions">
-      {error ? <Notice tone="error">{error}</Notice> : null}
+      <FormError error={error} />
       {claim.status === "draft" || claim.status === "submitted" ? (
         <DocumentApprovalPanel
           organisationId={organisationId}
@@ -620,7 +620,7 @@ function PaymentRows({ organisationId, claim, onChanged }: { organisationId: str
   }
   return (
     <Card title="Payments">
-      {error ? <Notice tone="error">{error}</Notice> : null}
+      <FormError error={error} />
       <div className={ui.tableWrap}>
         <table className={`${ui.table} ${ui.stackOnPhone}`}>
           <thead>
@@ -676,7 +676,7 @@ function TierChoice({
   const [error, setError] = useState<string | null>(null);
   return (
     <div>
-      {error ? <Notice tone="error">{error}</Notice> : null}
+      <FormError error={error} />
       <select
         aria-label={`Mileage line ${lineOrder} tier`}
         value={tier ?? ""}

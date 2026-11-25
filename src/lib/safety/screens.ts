@@ -118,6 +118,8 @@ export type SafetyTodayData = {
   reviewsDue: Array<{ id: string; title: string; reviewDue: string | null }>;
   importantHazards: Array<{ id: string; title: string; noGo: boolean }>;
   notCheckedToday: Array<{ id: string; name: string }>;
+  /** Reports that may need notifying to WorkSafe with no notice recorded (OPF6); for those who keep the registers. */
+  mayNeedNotifying?: Array<{ id: string; title: string; happenedOn: string | null }>;
 };
 
 export type NeedsDoingTone = "red" | "amber" | "blue" | "neutral";
@@ -148,6 +150,10 @@ function actionHref(action: ActionRef, farmId: string): string {
 export function needsDoing(today: SafetyTodayData, farmId: string): NeedsDoingItem[] {
   const items: NeedsDoingItem[] = [];
   const mine = new Set(today.myActions.map((action) => action.id));
+  // First: a report that may need notifying to WorkSafe, until a notice is recorded or it's closed (OPF6).
+  for (const report of today.mayNeedNotifying ?? []) {
+    items.push({ key: `n${report.id}`, badge: "WorkSafe?", tone: "red", text: report.title, note: `may need notifying to WorkSafe (0800 030 040)${report.happenedOn ? `, ${formatDate(report.happenedOn)}` : ""}`, href: safetyHref({ farmId, screen: "reports", report: report.id }) });
+  }
   for (const item of today.outOfUse) items.push({ key: `u${item.id}`, badge: "Out of use", tone: "red", text: `${item.name}: don't use it`, note: null, href: safetyHref({ farmId, screen: "equipment", equipment: item.id }) });
   for (const action of today.myActions.filter((each) => each.state === "overdue")) items.push({ key: `a${action.id}`, badge: "Overdue", tone: "red", text: action.title, note: action.due ? `was due ${formatDate(action.due)}` : null, href: actionHref(action, farmId) });
   for (const induction of today.toSign) items.push({ key: `s${induction.id}`, badge: "Sign", tone: "amber", text: induction.title, note: induction.reason, href: safetyHref({ farmId, screen: "people", induction: induction.id }) });
