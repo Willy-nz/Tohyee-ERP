@@ -15,7 +15,12 @@
 param(
   [Parameter(Mandatory = $true)][string]$InstallDir,
   # Where to write what the installer's last page shows (optional).
-  [string]$ResultFile = ''
+  [string]$ResultFile = '',
+  # The version being installed (for update-status\status.json).
+  [string]$Version = '',
+  # Tests only (installer/windows/test-install.ps1): fail on purpose at this
+  # point, to prove an update that fails there is undone. 'before-start'.
+  [string]$TestFailAt = ''
 )
 
 $ErrorActionPreference = 'Stop'
@@ -23,6 +28,16 @@ $DataRoot = Join-Path $env:ProgramData 'Tohyee'
 $LogDir = Join-Path $DataRoot 'logs'
 New-Item -ItemType Directory -Force -Path $DataRoot, $LogDir | Out-Null
 Start-Transcript -Path (Join-Path $LogDir 'setup.log') -Append | Out-Null
+
+# Update safety (update-guard.ps1, UPD10-UPD13): records how far setup got.
+$Guard = Join-Path $PSScriptRoot 'update-guard.ps1'
+$PowerShellExe = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+function Invoke-Guard([string[]]$Arguments) {
+  # Its output goes to the log (Out-Host), so only the exit code is returned.
+  & $PowerShellExe -NoProfile -ExecutionPolicy Bypass -File $Guard @Arguments | Out-Host
+  return $LASTEXITCODE
+}
+$startedNew = $false
 
 try {
   $PgBin = Join-Path $InstallDir 'pgsql\bin'
@@ -153,6 +168,10 @@ try {
     Invoke-Checked (Join-Path $PgBin 'pg_ctl.exe') @('register', '-N', 'TohyeePostgres', '-U', 'NT AUTHORITY\NetworkService', '-D', $PgData, '-S', 'auto', '-w')
   }
   Set-Service -Name 'TohyeePostgres' -StartupType Automatic
+  # If PostgreSQL ever stops by itself, Windows starts it again (it recovers
+  # from its own log as it starts); before, it stayed down until a restart.
+  $pgFailure = Start-Process -FilePath 'sc.exe' -ArgumentList 'failure TohyeePostgres reset= 3600 actions= restart/10000/restart/30000/restart/60000' -Wait -PassThru -NoNewWindow
+  if ($pgFailure.ExitCode -ne 0) { Write-Host "Couldn't set TohyeePostgres to restart if it stops (sc.exe exit code $($pgFailure.ExitCode))." }
   if ((Get-Service 'TohyeePostgres').Status -ne 'Running') { Start-Service 'TohyeePostgres' }
 
   $ready = $false
@@ -234,7 +253,7 @@ try {
   <executable>$(X $NodeExe)</executable>
   <arguments>server.js</arguments>
   <workingdirectory>$(X $AppDir)</workingdirectory>
-  <startmode>Automatic</startmode>
+  <startmode>Manual</startmode>
   <depend>TohyeePostgres</depend>
   <onfailure action="restart" delay="10 sec"/>
   <resetfailure>1 hour</resetfailure>
@@ -268,8 +287,11 @@ $addressServiceEnv</service>
   [System.IO.File]::WriteAllText((Join-Path $ServiceDir 'TohyeeServer.xml'), $xml)
 
   Write-Host 'Installing and starting the Tohyee service.'
+  # Installed as Manual, and only set to start by itself once the new version
+  # is about to start (below): if the computer restarts before then, the old
+  # version can still be put back (update-guard.ps1 Recover) without this one
+  # having started and upgraded the databases first.
   Invoke-Checked $serviceExe @('install')
-  Invoke-Checked 'sc.exe' @('config', 'Tohyee', 'start=', 'delayed-auto')
 
   # The service runs as its own virtual account,
   # NT SERVICE\Tohyee, not as SYSTEM, so a flaw in Tohyee or cloudflared
@@ -303,14 +325,15 @@ $addressServiceEnv</service>
   New-Item -ItemType Directory -Force -Path $updateStatusDir, (Join-Path $DataRoot 'update-download') | Out-Null
   Invoke-Checked 'icacls.exe' @($updateStatusDir, '/grant', "$($account):(OI)(CI)RX", '/T', '/Q')
   # Folders already chosen in Tohyee (a OneDrive backup folder, say), from before this change.
+  # Not on a first install: Tohyee hasn't started yet, so there are none (and no table to read).
   $env:PGPASSWORD = $settings['POSTGRES_PASSWORD']
-  $chosen = & $psql -h localhost -p $pgPort -U tohyee -d tohyee -tA -F '|' -c @"
+  if ($firstInstall) { $chosen = @() } else { $chosen = & $psql -h localhost -p $pgPort -U tohyee -d tohyee -tA -F '|' -c @"
 select 'M', value->>'folder' from server_settings where key = 'backups' and coalesce(value->>'folder', '') <> ''
 union all
 select 'RX', f.value from server_settings s, jsonb_each_text(coalesce(s.value->'folders', '{}'::jsonb)) f
  where s.key in ('analytics_folders', 'bank_file_folders') and f.value <> ''
 "@
-  if ($LASTEXITCODE -ne 0) { Write-Host 'Could not read the folders chosen in Tohyee; choose them again in the server app if backups or imports fail.'; $chosen = @() }
+  if ($LASTEXITCODE -ne 0) { Write-Host 'Could not read the folders chosen in Tohyee; choose them again in the server app if backups or imports fail.'; $chosen = @() } }
   foreach ($line in @($chosen | ForEach-Object { "$_".Trim() } | Where-Object { $_ })) {
     $rights, $folder = $line.Split('|', 2)
     if (-not (Test-Path -LiteralPath $folder -PathType Container)) { Write-Host "Skipping $folder (not found)."; continue }
@@ -337,26 +360,58 @@ select 'RX', f.value from server_settings s, jsonb_each_text(coalesce(s.value->'
     -Description 'Installs a Tohyee update a server admin asked for in Tohyee (Update now). Checks GitHub and the SHA-256 itself.' | Out-Null
   Write-Host 'The Tohyee updater is set up (scheduled task \Tohyee\Tohyee updater).'
 
+  # --- Update recovery (scheduled task, SYSTEM, at start-up) ------------------------
+  # If the computer restarts in the middle of an update, before the new
+  # version has started, this puts the old version back and starts it
+  # (update-guard.ps1 Recover). Its copy lives in the data folder, which only
+  # Administrators and SYSTEM can change, because the program folder is the
+  # one being replaced.
+  $guardDir = Join-Path $DataRoot 'updater'
+  New-Item -ItemType Directory -Force -Path $guardDir | Out-Null
+  Copy-Item -Force $Guard (Join-Path $guardDir 'update-guard.ps1')
+  $recoverAction = New-ScheduledTaskAction -Execute $powershell `
+    -Argument "-NoProfile -NonInteractive -ExecutionPolicy Bypass -File ""$(Join-Path $guardDir 'update-guard.ps1')"" -Mode Recover"
+  $recoverSettings = New-ScheduledTaskSettingsSet -ExecutionTimeLimit (New-TimeSpan -Minutes 30) -AllowStartIfOnBatteries -DontStopIfGoingOnBatteries -Hidden
+  Register-ScheduledTask -TaskName 'Tohyee update recovery' -TaskPath '\Tohyee\' -Action $recoverAction `
+    -Trigger (New-ScheduledTaskTrigger -AtStartup) -Principal $updaterPrincipal -Settings $recoverSettings -Force `
+    -Description 'Puts the previous Tohyee back if the computer restarted in the middle of an update.' | Out-Null
+
+  if ($TestFailAt -eq 'before-start') { throw 'Failing on purpose before the new version starts (test).' }
+
+  # The point of no return: from here the new version starts and may upgrade
+  # the databases, which the old version then can't open. So from here a
+  # failure is reported with what to do, and the old program isn't put back.
+  if ((Invoke-Guard @('-Mode', 'Mark', '-Stage', 'started-new')) -ne 0) { throw "Couldn't record the update's progress (update-guard.ps1)." }
+  $startedNew = $true
+  Invoke-Checked 'sc.exe' @('config', 'Tohyee', 'start=', 'delayed-auto')
   Invoke-Checked $serviceExe @('start')
 
+  # Up to 10 minutes: the first start after an update upgrades every
+  # organisation's database, which can take a while with many of them.
   $url = "http://localhost:$($settings['TOHYEE_PORT'])"
   $ready = $false
-  for ($i = 0; $i -lt 90; $i++) {
+  for ($i = 0; $i -lt 300; $i++) {
     try {
       $response = Invoke-WebRequest -Uri "$url/api/health" -UseBasicParsing -TimeoutSec 5
       if ($response.StatusCode -eq 200) { $ready = $true; break }
     } catch { }
     Start-Sleep -Seconds 2
   }
-  if (-not $ready) { throw "Tohyee did not answer at $url within 3 minutes. See $LogDir." }
+  if (-not $ready) { throw "Tohyee did not answer at $url within 10 minutes. It may still be upgrading the databases: its logs are in $LogDir." }
   Write-Host "Tohyee is running at $url"
+  # Done: the old copy can go, and Update now says "installed".
+  Invoke-Guard @('-Mode', 'Finish', '-InstallDir', $InstallDir, '-Version', $Version) | Out-Null
 
   # Tells the installer's last page what to show.
   $status = if ($firstInstall) { "first-install`r`n$($settings['SETUP_TOKEN'])`r`n$url" } else { "update`r`n`r`n$url" }
   if ($ResultFile) { [System.IO.File]::WriteAllText($ResultFile, $status) }
   exit 0
 } catch {
-  Write-Host "SETUP FAILED: $($_.Exception.Message)"
+  $reason = $_.Exception.Message
+  Write-Host "SETUP FAILED: $reason"
+  # Before the new version started, the installer puts the old one back
+  # (update-guard.ps1 Restore, from Tohyee.iss). After, say what to do.
+  if ($startedNew) { try { Invoke-Guard @('-Mode', 'Fail', '-Message', $reason) | Out-Null } catch { } }
   exit 1
 } finally {
   Stop-Transcript | Out-Null
