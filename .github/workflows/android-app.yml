@@ -347,6 +347,7 @@ jobs:
     runs-on: ubuntu-latest
     permissions:
       contents: write
+      packages: write
     steps:
       - name: Get the signed APK
         if: needs.sign.outputs.signed == 'true'
@@ -368,7 +369,7 @@ jobs:
           GH_REPO: ${{ github.repository }}
         run: |
           gh release view "${GITHUB_REF_NAME}" >/dev/null 2>&1 || \
-            gh release create "${GITHUB_REF_NAME}" --title "${GITHUB_REF_NAME}" --generate-notes || \
+            gh release create "${GITHUB_REF_NAME}" --latest=false --title "${GITHUB_REF_NAME}" --generate-notes || \
             { sleep 30; gh release view "${GITHUB_REF_NAME}" >/dev/null; }
 
       - name: Attach the APK
@@ -378,3 +379,28 @@ jobs:
         run: |
           ls -l dist/android
           gh release upload "${GITHUB_REF_NAME}" dist/android/*.apk dist/android/*.apk.sha256
+
+      # Only the promote script: nothing that npm or Gradle would run.
+      - name: Checkout the promote script
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: scripts/promote-release.sh
+          sparse-checkout-cone-mode: false
+          path: promote
+
+      - name: Log in to GitHub Container Registry (to move :latest)
+        uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0
+        with:
+          registry: ghcr.io
+          username: ${{ github.actor }}
+          password: ${{ secrets.GITHUB_TOKEN }}
+
+      # The release was made with --latest=false. Whichever build attaches the
+      # last file makes it the latest, and moves Docker's :latest with it.
+      - name: Make it the latest release once every file is there
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: bash promote/scripts/promote-release.sh
