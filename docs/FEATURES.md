@@ -538,6 +538,13 @@ that something happened.
   approved. Not yet: reserving stock, deliveries, line discounts, editing an
   approved order, closing single lines, printing or emailing orders, and CRM
   or Shopify orders.
+- **Late fees** (Sales; LATE1-LATE12, following common practice, not yet
+  reviewed): an option an admin turns on, after checking their terms of
+  trade. A flat fee (once per overdue invoice, GST like the sale) and simple
+  daily interest (exempt), after days of grace and over a minimum, each
+  overdue invoice charged on a new invoice of its own. Shown first, made
+  when someone presses the button or by itself on the 1st of each month;
+  drafts or approved, as chosen. Customers can be left out.
 - **Repeating invoices** (Sales; RI1-RI10, not yet approved): a template
   with invoice lines, every N weeks or months from a start date to an
   optional end date, due by payment terms or N days, and each invoice saved
