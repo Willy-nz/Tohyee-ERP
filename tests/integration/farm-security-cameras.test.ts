@@ -1,3 +1,4 @@
+import net from "node:net";
 import { execFileSync } from "node:child_process";
 import { existsSync, mkdtempSync, readdirSync, rmSync } from "node:fs";
 import { tmpdir } from "node:os";
@@ -211,6 +212,31 @@ describeWithDatabase("farm security cameras", () => {
     await expect(upload(receiver, login.gate, [], false)).rejects.toMatchObject({ code: 530 });
     // A receiver that allows plain FTP (for a camera on the same network) takes it.
     expect(await upload(plainReceiver, login.shed, [{ name: "Shed_00_20261101080000.jpg", bytes: jpeg2 }], false)).toEqual(["226"]);
+  });
+
+  it("commands sent in the clear right after AUTH TLS are never run: the connection ends", async () => {
+    const said = await new Promise<string>((resolve, reject) => {
+      const socket = net.connect(receiver.port, "127.0.0.1");
+      let text = "";
+      socket.setEncoding("utf8");
+      socket.on("data", (chunk: string) => {
+        text += chunk;
+        // After the greeting, AUTH TLS and a command in the same packet.
+        if (text.startsWith("220") && !text.includes("AUTH-SENT")) {
+          text += "AUTH-SENT";
+          socket.write("AUTH TLS\r\nUSER made-up.camera\r\n");
+        }
+      });
+      socket.on("close", () => resolve(text));
+      socket.on("error", reject);
+      setTimeout(() => {
+        socket.destroy();
+        resolve(text);
+      }, 3000);
+    });
+    expect(said).toContain("503 Send nothing after AUTH TLS");
+    expect(said).not.toContain("234");
+    expect(said).not.toContain("331");
   });
 
   it("uploads go only to the camera whose login it is, and stop when the login goes", async () => {
