@@ -23892,3 +23892,9 @@ Tested in `tests/integration/sales-platform-negative-stock-sent.test.ts`,
   reads again the 25 held orders read longest ago and notes when it read
   them, so two syncs read all 30 (before, the same 25 oldest were read
   every time, and a fulfilment on the others could be missed).
+- **SPF11 A 0.00 line in an MT940 or CAMT statement.** A statement with a
+  115.00 credit and a 0.00 card check: the 0.00 line moves no money, so it's
+  skipped, as OFX and QIF already do. The preview says 1 new line and the
+  import adds 115.00. In a folder or mailbox feed, a file that fails to
+  import in any unexpected way is now recorded as a failed file with a
+  plain reason, and the feed goes on to the next file (BF rules).
