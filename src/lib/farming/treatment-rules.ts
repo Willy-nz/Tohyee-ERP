@@ -124,11 +124,22 @@ const BASE: Readonly<Record<string, { base: string; per: string }>> = {
   each: { base: "each", per: "1" },
 };
 
-/** A quantity in its unit's base (L, kg, doses, each); null for a unit Tohyee doesn't know. */
+/**
+ * A quantity in its unit's base (L, kg, doses, each); null for a unit Tohyee
+ * doesn't know. Six places, so any amount entered (up to three places of mL
+ * or g) converts exactly: 0.4 mL is 0.0004 L, not nothing.
+ */
 export function toBase(quantity: string, unit: string): { quantity: string; unit: string } | null {
   const entry = BASE[unit];
   if (!entry) return null;
-  return { quantity: toPlainString(divide(dec(quantity), dec(entry.per), 3)), unit: entry.base };
+  return { quantity: toPlainString(divide(dec(quantity), dec(entry.per), 6)), unit: entry.base };
+}
+
+/** The units a product counted in `base` can be entered in (OPF2): L or mL for litres, kg or g for kilograms. All of them before it has a unit. */
+export function unitsFor(base: string | null): StockUnit[] {
+  if (base === null) return [...STOCK_UNITS];
+  const fits = STOCK_UNITS.filter((unit) => BASE[unit].base === base);
+  return fits.length ? fits : [...STOCK_UNITS];
 }
 
 export function isPositiveQuantity(text: string): boolean {

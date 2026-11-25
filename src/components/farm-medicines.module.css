@@ -258,7 +258,8 @@
 .badges > * {
   max-width: 100%;
   white-space: normal;
-  font-size: 0.67rem;
+  /* 12px at least: read outdoors, and by older eyes. */
+  font-size: 0.75rem;
   line-height: 1.2;
   text-align: center;
 }
@@ -307,11 +308,13 @@
   .marquee { align-items: flex-start; }
   .machineStats { width: 100%; }
   .machineStats span { padding: 4px 8px; }
-  .shelves { grid-template-columns: repeat(3, minmax(0, 1fr)); gap: 6px; }
-  .slot { min-height: 0; padding: 18px 3px 10px; }
+  /* Two to a row on a phone, so names and amounts are big enough to read outdoors (14px). */
+  .shelves { grid-template-columns: repeat(2, minmax(0, 1fr)); gap: 8px; }
+  .slot { min-height: 0; padding: 20px 6px 10px; }
   .picture { width: 100%; height: 84px; padding: 2px; }
   .stockLabel { display: none; }
-  .name { font-size: 0.74rem; }
+  .name { font-size: 0.875rem; }
+  .price { font-size: 0.875rem; }
   .glassTop span:last-child { display: none; }
   .machineFooterLabel:last-child { display: none; }
 }

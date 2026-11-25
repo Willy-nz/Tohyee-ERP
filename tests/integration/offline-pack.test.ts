@@ -138,6 +138,7 @@ describeWithDatabase("offline farm packs", () => {
       `/api/farming/farms/${w.home}/stocking`,
       `/api/farming/farms/${w.home}/treatments`,
       "/api/farming/product-stock",
+      "/api/farming/medicines",
       `/api/farming/farms/${w.home}/supplements`,
       `/api/farming/farms/${w.home}/pasture/readings`,
       `/api/farming/paddocks/${w.paddock}/pasture`,

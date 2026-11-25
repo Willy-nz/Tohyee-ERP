@@ -18,6 +18,7 @@ import { GET as rotationGet } from "@/app/api/farming/farms/[farmId]/rotation/ro
 import { GET as breedingGet } from "@/app/api/farming/mobs/[mobId]/breeding/route";
 import { GET as treatmentsGet } from "@/app/api/farming/farms/[farmId]/treatments/route";
 import { GET as productStockGet } from "@/app/api/farming/product-stock/route";
+import { GET as medicinesGet } from "@/app/api/farming/medicines/route";
 import { GET as mobGet } from "@/app/api/farming/mobs/[mobId]/route";
 import { GET as animalsGet } from "@/app/api/farming/farms/[farmId]/animals/route";
 import { GET as bcsScalesGet } from "@/app/api/farming/farms/[farmId]/bcs-scales/route";
@@ -274,9 +275,10 @@ export async function buildSection(request: Request, input: { organisationId: st
       // The farm timeline as it opens.
       await r.read(timelineGet, `/api/farming/farms/${farm}/timeline`, f, { kinds: "mob,grazing,treatment,breeding,spray" });
       await r.read(stockingGet, `/api/farming/farms/${farm}/stocking`, f, {});
-      // Treatments (withholding is on each mob) and product stock.
+      // Treatments (withholding is on each mob), product stock and the medicine cabinet.
       await r.read(treatmentsGet, `/api/farming/farms/${farm}/treatments`, f, {});
       await r.read(productStockGet, "/api/farming/product-stock", {}, { farmId: farm });
+      await r.read(medicinesGet, "/api/farming/medicines", {}, { farmId: farm });
       await readHistory(r, supplementsGet, `/api/farming/farms/${farm}/supplements`, f, "supplements", since);
       await readHistory(r, readingsGet, `/api/farming/farms/${farm}/pasture/readings`, f, "readings", since);
       // Each paddock's card: its readings and grazings, trimmed to the months kept.

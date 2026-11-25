@@ -6,6 +6,8 @@ import { addMedicine, addStarterList, cabinet, moveMedicine, removeMedicine, upd
 import { createMob } from "@/lib/farming/mobs";
 import { addPaddock, saveFarm, setFarmingEnabled } from "@/lib/farming/paddocks";
 import { productStock, recordProductStock, recordTreatment } from "@/lib/farming/treatments";
+import { randomUUID } from "node:crypto";
+import { logTreatmentPayload } from "@/lib/farming/log-treatment";
 import { currentRecords } from "@/lib/safety/records";
 import { addChemical } from "@/lib/safety/register";
 import type { ChemicalData } from "@/lib/safety/shared";
@@ -110,5 +112,108 @@ describeWithDatabase("farm medicine cabinet", () => {
     expect(await w.as((tx) => removeMedicine(tx, { chemicalRecordId: slot.chemicalRecordId }))).toEqual([]);
     // Still in the register and product stock.
     expect((await w.as((tx) => productStock(tx, { farmId: w.home.id }))).map((product) => product.name)).toEqual(["Clostridial 5-in-1"]);
+  });
+
+  it("OPF2 a stock entry in another unit is refused, so the count isn't re-based or dropped", async () => {
+    const w = await setup();
+    const sealant = (await w.as((tx) => addMedicine(tx, { farmId: w.home.id, kind: "teat_sealant", name: "Teat sealant" })))[0];
+    await w.as((tx) => recordProductStock(tx, { chemicalRecordId: sealant.chemicalRecordId, movementType: "received", movedOn: "2026-11-01", quantity: "48", unit: "each" }));
+    await w.as((tx) => recordProductStock(tx, { chemicalRecordId: sealant.chemicalRecordId, movementType: "counted", movedOn: "2026-11-10", quantity: "40", unit: "each" }));
+    await expect(w.as((tx) => recordProductStock(tx, { chemicalRecordId: sealant.chemicalRecordId, movementType: "received", movedOn: "2026-11-12", quantity: "2", unit: "L" }))).rejects.toThrow(
+      "Teat sealant is counted in each. Enter it in each.",
+    );
+    // A tube treatment still comes off.
+    await w.as((tx) => recordTreatment(tx, { farmId: w.home.id, mobId: w.cows.id, chemicalRecordId: sealant.chemicalRecordId, treatedOn: "2026-11-15", quantity: "8", quantityUnit: "each", dose: "1 per quarter", givenBy: "Sam", head: 2 }));
+    const slot = (await w.as((tx) => cabinet(tx, { farmId: w.home.id, today: "2026-11-21" })))[0];
+    expect([slot.onHand, slot.unit, slot.notCounted.length]).toEqual(["32", "each", 0]);
+    // mL adds to litres.
+    const drench = (await w.as((tx) => addMedicine(tx, { farmId: w.home.id, kind: "oral_drench", name: "Oral drench" }))).find((entry) => entry.name === "Oral drench")!;
+    await w.as((tx) => recordProductStock(tx, { chemicalRecordId: drench.chemicalRecordId, movementType: "received", movedOn: "2026-11-01", quantity: "5", unit: "L" }));
+    await w.as((tx) => recordProductStock(tx, { chemicalRecordId: drench.chemicalRecordId, movementType: "used", movedOn: "2026-11-02", quantity: "500", unit: "mL" }));
+    await expect(w.as((tx) => recordProductStock(tx, { chemicalRecordId: drench.chemicalRecordId, movementType: "used", movedOn: "2026-11-03", quantity: "1", unit: "kg" }))).rejects.toThrow("Enter it in L or mL.");
+    const slots = await w.as((tx) => cabinet(tx, { farmId: w.home.id, today: "2026-11-21" }));
+    expect(slots.find((entry) => entry.name === "Oral drench")).toMatchObject({ onHand: "4.5", unit: "L" });
+  });
+
+  it("OPF2 a move onto the other farm's same-named product counted in another unit is refused", async () => {
+    const w = await setup();
+    const drench = (await w.as((tx) => addMedicine(tx, { farmId: w.home.id, kind: "oral_drench", name: "Oral drench" })))[0];
+    await w.as((tx) => recordProductStock(tx, { chemicalRecordId: drench.chemicalRecordId, movementType: "received", movedOn: "2026-11-01", quantity: "5", unit: "L" }));
+    const theirs = (await w.as((tx) => addMedicine(tx, { farmId: w.runoff.id, kind: "oral_drench", name: "Oral drench", unit: "kg" })))[0];
+    await w.as((tx) => recordProductStock(tx, { chemicalRecordId: theirs.chemicalRecordId, movementType: "counted", movedOn: "2026-11-05", quantity: "10", unit: "kg" }));
+    await expect(w.as((tx) => moveMedicine(tx, { chemicalRecordId: drench.chemicalRecordId, toFarmId: w.runoff.id, quantity: "1", unit: "L", movedOn: "2026-11-10" }))).rejects.toThrow("is counted in kg");
+    const runoff = (await w.as((tx) => cabinet(tx, { farmId: w.runoff.id, today: "2026-11-21" })))[0];
+    expect([runoff.onHand, runoff.unit]).toEqual(["10", "kg"]);
+    const home = (await w.as((tx) => cabinet(tx, { farmId: w.home.id, today: "2026-11-21" })))[0];
+    expect(home.onHand).toBe("5");
+  });
+
+  it("OPF2 an older entry in another unit is listed as not counted, not dropped, and the first entry's unit stays", async () => {
+    const w = await setup();
+    const sealant = (await w.as((tx) => addMedicine(tx, { farmId: w.home.id, kind: "teat_sealant", name: "Teat sealant" })))[0];
+    await w.as((tx) => recordProductStock(tx, { chemicalRecordId: sealant.chemicalRecordId, movementType: "counted", movedOn: "2026-11-10", quantity: "40", unit: "each" }));
+    // As if saved before units were checked: put in directly.
+    await w.as((tx) =>
+      tx.query("insert into farm_product_stock (chemical_record_id, farm_id, movement_type, moved_on, quantity, unit, created_by_email) values ($1, $2, 'received', '2026-11-12', 2, 'L', 'someone@example.com')", [sealant.chemicalRecordId, w.home.id]),
+    );
+    const slot = (await w.as((tx) => cabinet(tx, { farmId: w.home.id, today: "2026-11-21" })))[0];
+    expect([slot.onHand, slot.unit]).toEqual(["40", "each"]);
+    expect(slot.notCounted.map((entry) => [entry.kind, entry.quantity, entry.unit])).toEqual([["received", "2", "L"]]);
+  });
+
+  it("OPF3 the same stock entry or move sent twice with its operation id is recorded once", async () => {
+    const w = await setup();
+    const drench = (await w.as((tx) => addMedicine(tx, { farmId: w.home.id, kind: "oral_drench", name: "Oral drench" })))[0];
+    const received = { chemicalRecordId: drench.chemicalRecordId, movementType: "received", movedOn: "2026-11-01", quantity: "5", unit: "L", operationId: randomUUID() };
+    await w.as((tx) => recordProductStock(tx, received));
+    await w.as((tx) => recordProductStock(tx, received));
+    let slot = (await w.as((tx) => cabinet(tx, { farmId: w.home.id, today: "2026-11-21" })))[0];
+    expect(slot.onHand).toBe("5");
+    await expect(w.as((tx) => recordProductStock(tx, { ...received, quantity: "6" }))).rejects.toThrow("already sent with different details");
+    const move = { chemicalRecordId: drench.chemicalRecordId, toFarmId: w.runoff.id, quantity: "2", unit: "L", movedOn: "2026-11-10", operationId: randomUUID() };
+    await w.as((tx) => moveMedicine(tx, move));
+    await w.as((tx) => moveMedicine(tx, move));
+    slot = (await w.as((tx) => cabinet(tx, { farmId: w.home.id, today: "2026-11-21" })))[0];
+    const runoff = (await w.as((tx) => cabinet(tx, { farmId: w.runoff.id, today: "2026-11-21" })))[0];
+    expect([slot.onHand, runoff.onHand]).toEqual(["3", "2"]);
+    // Without an id, two sends are two entries (two deliveries can be real).
+    await w.as((tx) => recordProductStock(tx, { ...received, operationId: undefined }));
+    await w.as((tx) => recordProductStock(tx, { ...received, operationId: undefined }));
+    slot = (await w.as((tx) => cabinet(tx, { farmId: w.home.id, today: "2026-11-21" })))[0];
+    expect(slot.onHand).toBe("13");
+  });
+
+  it("OPF3 a second product of the same name isn't added; a resend of the same add is the same product", async () => {
+    const w = await setup();
+    const operationId = randomUUID();
+    await w.as((tx) => addMedicine(tx, { farmId: w.home.id, kind: "oral_drench", name: "Oral drench", operationId }));
+    const again = await w.as((tx) => addMedicine(tx, { farmId: w.home.id, kind: "oral_drench", name: "Oral drench", operationId }));
+    expect(again.map((slot) => slot.name)).toEqual(["Oral drench"]);
+    await expect(w.as((tx) => addMedicine(tx, { farmId: w.home.id, kind: "oral_drench", name: " oral DRENCH " }))).rejects.toThrow("already in this farm's chemical register");
+    // Another farm can have its own.
+    await w.as((tx) => addMedicine(tx, { farmId: w.runoff.id, kind: "oral_drench", name: "Oral drench" }));
+  });
+
+  it("OPF2 a treatment can't take stock off another farm's product", async () => {
+    const w = await setup();
+    const theirs = (await w.as((tx) => addMedicine(tx, { farmId: w.runoff.id, kind: "oral_drench", name: "Runoff drench" })))[0];
+    await w.as((tx) => recordProductStock(tx, { chemicalRecordId: theirs.chemicalRecordId, movementType: "received", movedOn: "2026-11-01", quantity: "5", unit: "L" }));
+    await expect(
+      w.as((tx) => recordTreatment(tx, { farmId: w.home.id, mobId: w.cows.id, chemicalRecordId: theirs.chemicalRecordId, treatedOn: "2026-11-05", quantity: "1", quantityUnit: "L", dose: "x", givenBy: "Sam", head: 10 })),
+    ).rejects.toThrow("kept on another farm");
+    const runoff = (await w.as((tx) => cabinet(tx, { farmId: w.runoff.id, today: "2026-11-21" })))[0];
+    expect(runoff.onHand).toBe("5");
+  });
+
+  it("OPF4 a treatment from Log, with the product picked from the cabinet, takes its stock off", async () => {
+    const w = await setup();
+    const drench = (await w.as((tx) => addMedicine(tx, { farmId: w.home.id, kind: "oral_drench", name: "Oral drench" })))[0];
+    await w.as((tx) => recordProductStock(tx, { chemicalRecordId: drench.chemicalRecordId, movementType: "received", movedOn: "2026-11-01", quantity: "5", unit: "L" }));
+    const payload = logTreatmentPayload(w.cows.id, 200, { day: "2026-11-05", product: "Oral drench", chemicalRecordId: drench.chemicalRecordId, dose: "20 mL a head", quantity: "4", unit: "L", givenTime: "07:30", meat: "14", milk: "", givenBy: "Sam" });
+    const { treatment } = await w.as((tx) => recordTreatment(tx, { ...payload, farmId: w.home.id, operationId: randomUUID() }));
+    expect(treatment).toMatchObject({ chemicalRecordId: drench.chemicalRecordId, quantity: "4", quantityUnit: "L", givenTime: "07:30" });
+    const slot = (await w.as((tx) => cabinet(tx, { farmId: w.home.id, today: "2026-11-21" })))[0];
+    expect(slot.onHand).toBe("1");
+    expect(slot.history.some((entry) => entry.kind === "treatment")).toBe(true);
   });
 });

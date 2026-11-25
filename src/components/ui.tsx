@@ -1,7 +1,7 @@
 "use client";
 
 import { IllustratedIcon, type IllustratedIconName } from "@/components/illustrated-icon";
-import { type ButtonHTMLAttributes, Children, cloneElement, isValidElement, type ReactElement, type ReactNode, useId } from "react";
+import { type ButtonHTMLAttributes, Children, cloneElement, isValidElement, type ReactElement, type ReactNode, useEffect, useId, useRef } from "react";
 import Link from "next/link";
 import styles from "./ui.module.css";
 import { PageHeadingArt } from "./destination-art";
@@ -227,6 +227,24 @@ export function RefreshProblem({
       <Button variant="secondary" size="small" onClick={onRetry}>
         Try again
       </Button>
+    </div>
+  );
+}
+
+/**
+ * A form's save error. When it appears it's scrolled into view, so on a
+ * phone the person sees it even when it sits above a long form and they
+ * tapped Save at the bottom. Nothing when there's no error.
+ */
+export function FormError({ error }: { error: string | null | undefined }) {
+  const ref = useRef<HTMLDivElement>(null);
+  useEffect(() => {
+    if (error) ref.current?.scrollIntoView?.({ block: "nearest", behavior: "smooth" });
+  }, [error]);
+  if (!error) return null;
+  return (
+    <div ref={ref} style={{ scrollMarginTop: 72, scrollMarginBottom: 96 }}>
+      <Notice tone="error">{error}</Notice>
     </div>
   );
 }

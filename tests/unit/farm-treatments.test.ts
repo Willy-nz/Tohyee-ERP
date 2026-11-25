@@ -1,5 +1,5 @@
 import { describe, expect, it } from "vitest";
-import { laterDate, meatSafeOn, milkBasisText, milkSafeFrom, parseTimeGiven, safeText, toBase, withholdingText } from "@/lib/farming/treatment-rules";
+import { laterDate, meatSafeOn, milkBasisText, milkSafeFrom, parseTimeGiven, safeText, toBase, unitsFor, withholdingText } from "@/lib/farming/treatment-rules";
 
 describe("withholding (TRT1-TRT2)", () => {
   it("counts meat days from the treatment day and milk hours from the end of it", () => {
@@ -34,5 +34,15 @@ describe("withholding (TRT1-TRT2)", () => {
     expect(toBase("1.5", "t")).toEqual({ quantity: "1500", unit: "kg" });
     expect(toBase("3", "doses")).toEqual({ quantity: "3", unit: "doses" });
     expect(toBase("3", "bottles")).toBeNull();
+    // Small amounts aren't rounded away (OPF2).
+    expect(toBase("0.4", "mL")).toEqual({ quantity: "0.0004", unit: "L" });
+    expect(toBase("12.345", "g")).toEqual({ quantity: "0.012345", unit: "kg" });
+  });
+
+  it("offers only the units a product's count can take (OPF2)", () => {
+    expect(unitsFor("L")).toEqual(["L", "mL"]);
+    expect(unitsFor("kg")).toEqual(["kg", "g"]);
+    expect(unitsFor("each")).toEqual(["each"]);
+    expect(unitsFor(null)).toEqual(["L", "mL", "kg", "g", "doses", "each"]);
   });
 });

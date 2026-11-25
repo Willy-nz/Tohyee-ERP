@@ -8,13 +8,13 @@ import type { FarmContext } from "@/components/farm-workspace";
 import { useApiData } from "@/components/hooks";
 import { InfoTip } from "@/components/info-tip";
 import { submitThroughQueue, useOfflineQueue } from "@/components/offline-queue";
-import { Button, Card, Field, Notice, ui } from "@/components/ui";
+import { Button, Card, Field, FormError, Notice, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
 import { DateInput } from "@/components/date-input";
 import { api, errorMessage } from "@/lib/client/api";
 import { shortDate } from "@/lib/farming/farm-words";
 import type { Mob } from "@/lib/farming/mobs";
-import { isPositiveQuantity, LABEL_NOTE, meatSafeOn, milkBasisText, milkSafeFrom, parseTimeGiven, safeText, STOCK_UNITS, type StockUnit, timeText } from "@/lib/farming/treatment-rules";
+import { isPositiveQuantity, LABEL_NOTE, meatSafeOn, milkBasisText, milkSafeFrom, parseTimeGiven, safeText, type StockUnit, timeText, unitsFor } from "@/lib/farming/treatment-rules";
 import type { ProductStock, SprayWithholding, Treatment } from "@/lib/farming/treatments";
 import { formatDate, todayInBrowser } from "@/lib/format";
 import { newOperationId } from "@/lib/offline/queue";
@@ -38,6 +38,8 @@ export function TreatFlow({ organisationId, farm, mob, onClose }: Pick<FarmConte
   const { user } = useWorkspace();
   const { queue } = useOfflineQueue(organisationId);
   const chemicals = useApiData<{ chemicals: Array<CurrentRecord<ChemicalData>> }>("/api/farming/safety/chemicals", { organisationId, farmId: farm.id });
+  // The unit each product is counted in, so "Quantity used" starts in it (OPF2).
+  const stock = useApiData<{ products: ProductStock[] }>("/api/farming/product-stock", { organisationId, farmId: farm.id });
   const [index, setIndex] = useState(0);
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -47,7 +49,10 @@ export function TreatFlow({ organisationId, farm, mob, onClose }: Pick<FarmConte
   const next = () => setIndex((value) => Math.min(value + 1, STEPS.length - 1));
   const back = () => (index === 0 ? onClose(null) : setIndex((value) => value - 1));
   const frame = { title: `Treat · ${mob.name}`, step: index + 1, steps: STEPS.length, onBack: back };
-  const products = (chemicals.data?.chemicals ?? []).filter((record) => !record.data.removed);
+  // This farm's products and those kept for every farm: a treatment takes stock off the product it names.
+  const products = (chemicals.data?.chemicals ?? []).filter((record) => !record.data.removed && (record.farmId === null || record.farmId === farm.id));
+  const countedIn = (chemicalRecordId: string | null) => (chemicalRecordId ? (stock.data?.products.find((product) => product.chemicalRecordId === chemicalRecordId)?.unit ?? null) : null);
+  const units = unitsFor(countedIn(answers.chemicalRecordId));
   const whole = (text: string) => text === "" || /^\d{1,5}$/.test(text);
   const head = Number(answers.head);
 
@@ -91,7 +96,11 @@ export function TreatFlow({ organisationId, farm, mob, onClose }: Pick<FarmConte
             <Choices
               options={products.map((record) => ({ value: record.recordId, label: record.data.name, note: record.data.location ?? undefined }))}
               value={answers.chemicalRecordId}
-              onPick={(chemicalRecordId) => (set({ chemicalRecordId, product: products.find((record) => record.recordId === chemicalRecordId)?.data.name ?? "" }), next())}
+              onPick={(chemicalRecordId) => {
+                const fits = unitsFor(countedIn(chemicalRecordId));
+                set({ chemicalRecordId, product: products.find((record) => record.recordId === chemicalRecordId)?.data.name ?? "", unit: fits.includes(answers.unit) ? answers.unit : fits[0] });
+                next();
+              }}
             />
           ) : null}
           <Field label={products.length ? "Or another product" : "Product"}>
@@ -114,7 +123,7 @@ export function TreatFlow({ organisationId, farm, mob, onClose }: Pick<FarmConte
             </Field>
             <Field label="Unit">
               <select value={answers.unit} onChange={(event) => set({ unit: event.target.value as StockUnit })}>
-                {STOCK_UNITS.map((unit) => (
+                {units.map((unit) => (
                   <option key={unit} value={unit}>
                     {unit}
                   </option>
@@ -149,7 +158,7 @@ export function TreatFlow({ organisationId, farm, mob, onClose }: Pick<FarmConte
             </Field>
           </div>
           <p className={ui.muted}>
-            Milk is in hours, as most labels give it. <InfoTip label="Milk withholding">The time of treatment isn&apos;t kept, so the hours are counted from the end of the treatment day. A label in milkings: count 12 hours a milking for twice-a-day milking.</InfoTip>
+            Milk is in hours, as most labels give it. <InfoTip label="Milk withholding">If you don&apos;t give the time it was given (a later step), the hours are counted from the end of the treatment day, to be safe. A label in milkings: count 12 hours a milking for twice-a-day milking.</InfoTip>
           </p>
         </Step>
       );
@@ -200,7 +209,7 @@ export function TreatFlow({ organisationId, farm, mob, onClose }: Pick<FarmConte
       ];
       return (
         <Step {...frame} question="Check and save" onNext={() => void save()} nextLabel={busy ? "Saving…" : "Save"} nextDisabled={busy}>
-          {error ? <Notice tone="error">Not saved: {error}</Notice> : null}
+          <FormError error={error ? `Not saved: ${error}` : null} />
           <dl className={styles.facts}>
             {lines.map(([label, value]) => (
               <div key={label} style={{ display: "contents" }}>
@@ -287,16 +296,30 @@ export function ProductStockCard({ organisationId, farmId, version }: { organisa
   const [open, setOpen] = useState<string | null>(null);
   const [form, setForm] = useState({ movementType: "received" as "received" | "counted" | "disposed", quantity: "", unit: "L" as StockUnit, batch: "", movedOn: todayInBrowser() });
   const [error, setError] = useState<string | null>(null);
+  const [busy, setBusy] = useState(false);
+  // One id per entry until it's saved, so a resend after a lost reply records it once (OPF3).
+  const [operationId, setOperationId] = useState(() => newOperationId());
   const products = stock.data?.products ?? [];
+  // Once a product has a stock entry, only units that add to its count are offered (OPF2).
+  const unitsOf = (product: ProductStock) => unitsFor(product.history.some((entry) => entry.kind !== "treatment" && entry.kind !== "spray") ? product.unit : null);
+  const change = (patch: Partial<typeof form>) => {
+    setForm((current) => ({ ...current, ...patch }));
+    setOperationId(newOperationId());
+  };
   const save = async (product: ProductStock) => {
+    if (busy) return;
+    setBusy(true);
     setError(null);
     try {
-      await api("/api/farming/product-stock", { method: "POST", body: { organisationId, chemicalRecordId: product.chemicalRecordId, ...form, batch: form.batch || null } });
+      await api("/api/farming/product-stock", { method: "POST", body: { organisationId, chemicalRecordId: product.chemicalRecordId, ...form, batch: form.batch || null, operationId } });
       setOpen(null);
       setForm({ ...form, quantity: "", batch: "" });
+      setOperationId(newOperationId());
       stock.reload();
     } catch (caught) {
       setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
     }
   };
   return (
@@ -316,12 +339,11 @@ export function ProductStockCard({ organisationId, farmId, version }: { organisa
           rows={products.map((product) => ({
             key: product.chemicalRecordId,
             title: product.name,
-            parts: [product.onHand === null ? "No stock recorded" : `${product.onHand} ${product.unit ?? ""} on hand`, product.lastCountedOn ? `counted ${formatDate(product.lastCountedOn)}` : "", product.notCounted.length ? `${product.notCounted.length} uses in other units` : ""],
+            parts: [product.onHand === null ? "No stock recorded" : `${product.onHand} ${product.unit ?? ""} on hand`, product.lastCountedOn ? `counted ${formatDate(product.lastCountedOn)}` : "", product.notCounted.length ? `${product.notCounted.length} in another unit, not counted` : ""],
             details: (
               <div style={{ display: "grid", gap: 8 }}>
                 {open === product.chemicalRecordId ? (
                   <>
-                    {error ? <Notice tone="error">{error}</Notice> : null}
                     <Choices
                       options={[
                         { value: "received", label: "Received" },
@@ -329,28 +351,29 @@ export function ProductStockCard({ organisationId, farmId, version }: { organisa
                         { value: "disposed", label: "Thrown out" },
                       ]}
                       value={form.movementType}
-                      onPick={(movementType) => setForm({ ...form, movementType })}
+                      onPick={(movementType) => change({ movementType })}
                     />
                     <div className={ui.inlineForm}>
                       <Field label={form.movementType === "counted" ? "How much is there" : "How much"}>
-                        <input inputMode="decimal" value={form.quantity} onChange={(event) => setForm({ ...form, quantity: event.target.value })} />
+                        <input inputMode="decimal" value={form.quantity} onChange={(event) => change({ quantity: event.target.value })} />
                       </Field>
                       <Field label="Unit">
-                        <select value={form.unit} onChange={(event) => setForm({ ...form, unit: event.target.value as StockUnit })}>
-                          {STOCK_UNITS.map((unit) => (
+                        <select value={form.unit} onChange={(event) => change({ unit: event.target.value as StockUnit })}>
+                          {unitsOf(product).map((unit) => (
                             <option key={unit}>{unit}</option>
                           ))}
                         </select>
                       </Field>
                       <Field label="Batch">
-                        <input value={form.batch} maxLength={60} onChange={(event) => setForm({ ...form, batch: event.target.value })} />
+                        <input value={form.batch} maxLength={60} onChange={(event) => change({ batch: event.target.value })} />
                       </Field>
                       <Field label="Date">
-                        <DateInput value={form.movedOn} onChange={(event) => setForm({ ...form, movedOn: event.target.value })} />
+                        <DateInput value={form.movedOn} onChange={(event) => change({ movedOn: event.target.value })} />
                       </Field>
                     </div>
-                    <Button disabled={!/^\d+(\.\d{1,3})?$/.test(form.quantity)} onClick={() => void save(product)}>
-                      Save
+                    <FormError error={error} />
+                    <Button disabled={busy || !/^\d+(\.\d{1,3})?$/.test(form.quantity)} onClick={() => void save(product)}>
+                      {busy ? "Saving…" : "Save"}
                     </Button>
                   </>
                 ) : null}
@@ -367,7 +390,7 @@ export function ProductStockCard({ organisationId, farmId, version }: { organisa
               </div>
             ),
             actions: canRecord && open !== product.chemicalRecordId ? (
-              <Button variant="secondary" onClick={() => (setOpen(product.chemicalRecordId), setForm({ ...form, unit: (STOCK_UNITS as readonly string[]).includes(product.unit ?? "") ? (product.unit as StockUnit) : "L" }))}>
+              <Button variant="secondary" onClick={() => (setOpen(product.chemicalRecordId), change({ unit: unitsOf(product).includes(product.unit as StockUnit) ? (product.unit as StockUnit) : unitsOf(product)[0] }))}>
                 Record stock
               </Button>
             ) : undefined,

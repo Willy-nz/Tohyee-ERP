@@ -23794,3 +23794,49 @@ sale, $150.00 GST), due 31 October 2026.
 - **LATE12 Other currencies.** An invoice in another currency is charged in
   that currency, at the rate for the charge date, rounded to its smallest
   unit.
+
+## Operations and farm fixes (OPF1-OPF4; 25 Nov 2026; following common practice, not yet reviewed)
+
+Made-up examples. A job for "Harbour Bakery" (Wilfred is the staff member,
+as JV1-JV9), and a farm with two blocks, Home and Runoff.
+
+- **OPF1 Visit times don't depend on the server's time zone.** Wilfred
+  starts a visit at 8:00 on Thu 15 Oct 2026 (NZ daylight time) and finishes
+  at 11:30. That's **210 minutes**, confirmed as 3 h 30 m dated 15 Oct,
+  whether the PostgreSQL server runs in UTC or in New Zealand time. A finish
+  at or before the start is refused ("A visit finishes after it starts"), in
+  the morning and the afternoon alike. Visit times are read back as UTC
+  instants (for example 2026-10-14T19:00:00.000Z), and Home's Jobs card
+  counts a visit by its New Zealand day. The person on site signs once the
+  visit has started or finished, and only once: a cancelled or not-yet-
+  started visit can't be signed for, and a second signature is refused
+  ("already signed for by Mere"). Once a visit is finished its checklist
+  stays as it was at Finish, so "finished with items open" stays true;
+  anything done later goes in a note. Nothing is posted.
+- **OPF2 One unit per product's count.** Teat sealant is counted in "each":
+  48 received, then counted at 40. "Received 2 L" is refused: "Teat sealant
+  is counted in each. Enter it in each." On hand stays 40 each, and a later
+  treatment of 8 each brings it to **32 each**. A product counted in litres
+  takes L or mL (5 L received, 500 mL used: **4.5 L**); one in kg takes kg
+  or g. The first stock entry sets the unit (a later entry in another unit
+  can't re-base it). An older entry in another unit, saved before this
+  check, isn't dropped: it's listed as not in the amount on hand, and a
+  count sets it right. Small amounts aren't rounded away: 0.4 mL is
+  0.0004 L. Moving 1 L of oral drench from Home onto Runoff's "Oral drench",
+  counted in kg, is refused: one count can't add litres to kilograms.
+  A treatment on Home can't take stock off a product kept on Runoff.
+  Records only; nothing is posted.
+- **OPF3 Sent twice, recorded once.** "Received 5 L" sent from a phone, and
+  sent again because the reply was lost, is one entry: on hand 5 L, not
+  10 L. The same for a move of 2 L to Runoff: Home 3 L, Runoff 2 L. The
+  same id sent with different details is refused and nothing changes. Two
+  entries sent without an id (two real deliveries) are two entries. Adding
+  "Oral drench" to Home's cabinet when Home's register already has one is
+  refused; a resend of the same add is the same product. Medicine stock
+  entries and moves go through the device's queue like other farm work, and
+  the Medicines page opens with no signal.
+- **OPF4 Treatments from Log take stock off.** On Log, a treatment of 200
+  head with Oral drench picked from the cabinet, 4 L used, given at 7:30,
+  takes 4 L off the cabinet (5 L to **1 L**) and counts milk withholding
+  from 7:30, the same as recording it on Mobs. A product typed instead of
+  picked is kept on the treatment only, as before.
