@@ -1,4 +1,3 @@
-import { assertOrganisationMayReach } from "@/lib/network/organisation-reach";
 import { createWriteStream } from "node:fs";
 import http from "node:http";
 import type { Duplex } from "node:stream";
@@ -40,12 +39,20 @@ export class BoxError extends Error {
 const TIMEOUT_MS = 15_000;
 const DOWNLOAD_IDLE_MS = 60_000;
 
+let addressCheck: ((host: string) => Promise<string[]>) | null = null;
+
+/** Set by Tohyee (src/lib/camera-postbox/service.ts): where a post box may be, giving the addresses to connect to. */
+export function setBoxAddressCheck(check: ((host: string) => Promise<string[]>) | null): void {
+  addressCheck = check;
+}
+
 /** A connection to the post box that checks its certificate (pinned or by name) before anything is written. For `http.request`'s createConnection. */
 export function connector(target: BoxTarget) {
   return (_options: unknown, done: (error: Error | null, socket?: Duplex) => void) => {
-    // An organisation's own pairing code says where to connect: checked like any address it gives (L7),
-    // and the connection goes to the address that was checked.
-    assertOrganisationMayReach(target.address, "a camera post box").then(
+    // Tohyee checks where an organisation's pairing code points (setBoxAddressCheck), and connects to the
+    // address it checked. The post box program itself, checking its own health, has no check.
+    if (!addressCheck) return open(target.address, done);
+    addressCheck(target.address).then(
       (addresses) => open(addresses[0], done),
       (error: Error) => done(new BoxError(error.message, "unreachable")),
     );
