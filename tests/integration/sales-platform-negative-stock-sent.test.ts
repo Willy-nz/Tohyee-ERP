@@ -95,7 +95,7 @@ describeWithDatabase("SPF1: sales when sent follows Allow negative stock", () =>
     const giftBox = (await as((tx) => tx.query<{ id: string; item_type: string }>("select id, item_type from items where code = 'GIFTBOX'"))).rows[0];
     expect(giftBox.item_type).toBe("stock");
     await as((tx) => updateItem(tx, giftBox.id, { purchasePrice: "20.00" }));
-    return { as, state, sync, connectionId: connection.id };
+    return { as, state, sync, connectionId: connection.id, store: fakeShopifyStore(state) };
   }
 
   it("control: without sales when sent the invoice takes stock below zero, as the setting says", async () => {
@@ -168,5 +168,34 @@ describeWithDatabase("SPF1: sales when sent follows Allow negative stock", () =>
     // What was sent still counts as sales on the day it was sent.
     const sent = await w.as((tx) => tx.query<{ posting_date: string }>("select posting_date::text from ledger_journals where origin = 'sales_when_sent'"));
     expect(sent.rows).toEqual([{ posting_date: "2026-11-03" }]);
+  });
+
+  it("SPF8: every held order is read again in turn, not just the oldest 25", async () => {
+    const w = await setup(true);
+    for (let n = 0; n < 30; n += 1) {
+      w.state.orders.push(
+        order({
+          id: 7001 + n,
+          name: `#${1001 + n}`,
+          // Each changed a minute after the one before, so Shopify's "changed since" search returns only the newest.
+          updatedAt: new Date(Date.parse("2026-10-31T20:01:00Z") + n * 60_000).toISOString(),
+          lines: [{ id: 8001 + n, name: "Impression kit", sku: "KIT", quantity: 1, variantId: 3001, originalTotal: "115.00", tax: GST("15.00") }],
+          transactions: [{ id: 9701 + n, kind: "SALE", amount: "115.00", processedAt: "2026-10-31T20:00:00Z" }],
+        }),
+      );
+    }
+    await w.sync("2026-11-01T02:00:00Z");
+    const held = await w.as((tx) => tx.query("select distinct order_external_id from sales_platform_held_lines where not closed"));
+    expect(held.rowCount).toBe(30);
+    const read = new Set<string>();
+    setSalesPlatformFetchForTests(async (input: string, init?: RequestInit) => {
+      const found = /gid:\/\/shopify\/Order\/(\d+)/.exec(String(init?.body ?? ""));
+      if (found) read.add(found[1]);
+      return w.store(input, init);
+    });
+    await w.sync("2026-11-01T02:15:00Z");
+    await w.sync("2026-11-01T02:30:00Z");
+    // Two syncs of 25 reach all 30.
+    expect(read.size).toBe(30);
   });
 });

@@ -23887,3 +23887,8 @@ Tested in `tests/integration/sales-platform-negative-stock-sent.test.ts`,
   refusing Tohyee's login pauses it after three syncs in a row (SPR15); an
   outage fails the syncs but they keep running, and the first sync that
   works clears the failures.
+- **SPF8 Every held order is read again in turn.** A made-to-order shop has
+  30 paid orders held under Sales when sent, none changed since. Each sync
+  reads again the 25 held orders read longest ago and notes when it read
+  them, so two syncs read all 30 (before, the same 25 oldest were read
+  every time, and a fulfilment on the others could be missed).

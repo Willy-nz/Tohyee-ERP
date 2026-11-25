@@ -129,14 +129,25 @@ export async function closeHeld(tx: OrgTx, connectionId: string, orderId: string
   await tx.query("update sales_platform_held_lines set closed = true, updated_at = now() where connection_id = $1 and order_external_id = $2", [connectionId, orderId]);
 }
 
-/** Orders a sync reads again because they still hold something to be sent. */
+/**
+ * Orders a sync reads again because they still hold something to be sent:
+ * the ones read longest ago first (SPF8), and each is stamped as read, so
+ * every held order gets its turn, 25 a sync.
+ */
 export async function ordersHeld(tx: OrgTx, connectionId: string, limit = 25): Promise<string[]> {
   const result = await tx.query<{ order_external_id: string }>(
     `select order_external_id from sales_platform_held_lines where connection_id = $1 and not closed
-      group by order_external_id order by min(updated_at) limit $2`,
+      group by order_external_id order by max(last_read_at) nulls first, min(updated_at), order_external_id limit $2`,
     [connectionId, limit],
   );
-  return result.rows.map((row) => row.order_external_id);
+  const ids = result.rows.map((row) => row.order_external_id);
+  if (ids.length > 0) {
+    await tx.query("update sales_platform_held_lines set last_read_at = now() where connection_id = $1 and not closed and order_external_id = any($2::text[])", [
+      connectionId,
+      ids,
+    ]);
+  }
+  return ids;
 }
 
 type Move = { from: string; to: string; amount: Decimal; description: string };
