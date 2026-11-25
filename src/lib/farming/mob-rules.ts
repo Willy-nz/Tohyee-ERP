@@ -1,4 +1,5 @@
 import { cmp, dec, divide, sub, toFixedString, ZERO_DECIMAL } from "@/lib/money/decimal";
+import { type Withholding, withholdingText } from "@/lib/farming/treatment-rules";
 import { className, findClass, KIND_NAMES, LIVESTOCK_CLASSES, LIVESTOCK_KINDS, type LivestockKind } from "@/lib/livestock/classes";
 
 /*
@@ -6,7 +7,7 @@ import { className, findClass, KIND_NAMES, LIVESTOCK_CLASSES, LIVESTOCK_KINDS, t
  * no server imports.
  */
 
-export const MOB_EVENT_TYPES = ["created", "moved", "split_out", "split_in", "merged_out", "merged_in", "sold", "died", "born", "bought", "reclass", "weighed", "counted", "closed", "animals_out", "animals_in", "reversed"] as const;
+export const MOB_EVENT_TYPES = ["created", "moved", "split_out", "split_in", "merged_out", "merged_in", "sold", "died", "born", "bought", "reclass", "weighed", "counted", "closed", "animals_out", "animals_in", "reversed", "farm_out", "farm_in"] as const;
 export type MobEventType = (typeof MOB_EVENT_TYPES)[number];
 
 export const MOB_EVENT_LABELS: Record<MobEventType, string> = {
@@ -27,6 +28,8 @@ export const MOB_EVENT_LABELS: Record<MobEventType, string> = {
   animals_out: "Tagged animals moved to",
   animals_in: "Tagged animals moved from",
   reversed: "Reversed",
+  farm_out: "Moved to another farm",
+  farm_in: "Came from another farm",
 };
 
 /** What can be done to a mob, in the order the screen offers them. */
@@ -64,6 +67,27 @@ export const MOVEMENT_FOR_ACTION: Partial<Record<MobAction, "sale" | "purchase" 
 
 /** Actions the phone can keep and send later (the offline queue). */
 export const OFFLINE_ACTIONS: readonly MobAction[] = ["move", "weigh", "deaths", "births", "count"];
+
+// Moving to another farm (OPF7-OPF13) ----------------------------------------------------------
+
+/** A new mob made on the other farm: "Milkers from Home" (at most 100 characters). */
+export function farmMoveName(mobName: string, fromFarmName: string): string {
+  const suffix = ` from ${fromFarmName}`;
+  return `${mobName.slice(0, Math.max(1, 100 - suffix.length))}${suffix}`.slice(0, 100);
+}
+
+/** The warning before moving animals that are within a withholding period (OPF10): allowed, and it goes with them. */
+export function farmMoveWarning(withholding: Withholding | null, onDate: string, toFarmName: string, date: (iso: string) => string = (iso) => iso): string | null {
+  const text = withholdingText(withholding, onDate, date);
+  return text ? `These animals are within a withholding period (${text.replace(/^Withholding: /, "").replace(/; /g, ", ")}). It goes with them to ${toFarmName}.` : null;
+}
+
+/** Kinds NAIT covers. Tohyee doesn't decide whether a move needs recording there (OPF13). */
+const NAIT_KINDS: readonly string[] = ["dairy_cattle", "beef_cattle", "deer_red", "deer_other"];
+
+export function naitReminder(kind: string): string | null {
+  return NAIT_KINDS.includes(kind) ? "Tohyee doesn't tell NAIT. If this move needs recording in NAIT, record it with OSPRI." : null;
+}
 
 export const CREATED_HOW = ["on_farm", "bought", "born"] as const;
 export type CreatedHow = (typeof CREATED_HOW)[number];
