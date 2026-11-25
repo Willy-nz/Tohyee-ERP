@@ -18,7 +18,10 @@ import { ir3Return, type Ir3Return } from "@/lib/tax/income/ir3";
 import { ir4Return, type Ir4Return } from "@/lib/tax/income/ir4";
 import { buildIr10, type Ir10 } from "@/lib/tax/income/ir10";
 import { allocationsFor, appliesToNumber, PAYMENT_REVERSED_SQL, type TaxAllocation } from "@/lib/tax/income/allocations";
-import { type InterestPeriod, requirements, underpaymentInterest } from "@/lib/tax/income/uomi";
+import { type InterestPeriod, underpaymentInterest } from "@/lib/tax/income/uomi";
+import { AIM_NOTE, provisionalForYear } from "@/lib/tax/income/provisional-build";
+import type { ProvisionalOptionSetting } from "@/lib/tax/income/provisional-option-store";
+import { optionRequirements, type ProvisionalOption } from "@/lib/tax/income/provisional-options";
 import {
   EXPENSE_TREATMENTS,
   endOfYearTaxDue,
@@ -567,6 +570,8 @@ export type IncomeTaxReport =
         soFar: { asAt: string; amount: string; periods: InterestPeriod[] };
         /** If the remaining instalments and end-of-year tax are paid on their dates; null without an end-of-year date. */
         ifPaidOnTime: string | null;
+        option: ProvisionalOption;
+        notWorkedOut: string | null;
         usesLatestRateForFuture: boolean;
         ratesKnownTo: string;
       };
@@ -591,6 +596,8 @@ export type IncomeTaxReport =
       lastYear: { incomeYear: number; rit: string | null; typed: boolean; filedOn: string | null };
       twoYearsAgo: { incomeYear: number; rit: string | null };
       provisional: ProvisionalSchedule;
+      /** The option chosen for the year, with its ratio or estimates (TXF14-TXF17). */
+      provisionalOption: ProvisionalOptionSetting;
       endOfYear: { rit: string; provisional: string; amount: string; dueDate: string | null; onTimeBy: OnTimeBy | null; agentExtension: boolean };
       dueDates: DueDate[];
       notes: string[];
@@ -762,7 +769,7 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
   const twoYearsAgo = twoTyped.rows[0]?.assessed_rit ?? null;
   const settingsRow = await tx.query<{ gst_period_months: number | null }>("select gst_period_months from organisation_settings where id = true");
   const instalmentCount = settingsRow.rows[0]?.gst_period_months === 6 ? 2 : 3;
-  const provisional = standardSchedule({
+  const standard = standardSchedule({
     year: incomeYear,
     instalmentCount,
     lastYear,
@@ -773,6 +780,8 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
     endMonth,
     extensionOfTime: settings.agentExtension,
   });
+  // The option chosen for the year (TXF14-TXF17): standard unless a person chose another.
+  const { setting: provisionalOption, schedule: provisional } = await provisionalForYear(tx, { incomeYear, endMonth, today, instalmentCount, standard, payments: payments.map(ruleItem), type });
 
   // End-of-year tax: this year's RIT less provisional tax (the instalments, or what's been paid if more) (ITX9).
   const paid = sumPayments(payments);
@@ -797,7 +806,7 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
   }
   if (provisional.kind === "schedule") {
     for (const instalment of provisional.instalments) {
-      dueDates.push({ key: `instalment-${instalment.number}`, label: `Provisional tax instalment ${instalment.number} for the ${incomeYear} income year`, dueDate: instalment.dueDate, onTimeBy: instalment.onTimeBy, amount: instalment.amount, estimate: instalment.estimate });
+      dueDates.push({ key: `instalment-${instalment.number}`, label: `Provisional tax instalment ${instalment.number} for the ${incomeYear} income year`, dueDate: instalment.dueDate, onTimeBy: instalment.onTimeBy, amount: instalment.notKnownYet ? null : instalment.amount, estimate: instalment.estimate });
     }
   }
   if (endDue) dueDates.push({ key: `end-${incomeYear}`, label: `End-of-year tax for the ${incomeYear} income year`, dueDate: endDue, onTimeBy: onTimeBy(endDue), amount: endOfYear.amount, estimate: true });
@@ -805,12 +814,16 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
 
   // Use-of-money interest, an estimate (ITX44-ITX48): on IRD's RIT once typed, Tohyee's figure before then.
   const interestRit = typed.assessedRit !== null ? dec(typed.assessedRit) : dec(paper.rit);
-  const due = requirements({
-    rit: interestRit,
-    // Each instalment's own share: a caught-up shortfall is already required by its own earlier date (ITX6).
-    instalments: provisional.kind === "schedule" ? provisional.instalments.map((entry) => ({ due: entry.onTimeBy.date, amount: dec(entry.ownAmount) })) : null,
-    endOfYearDue: endOfYear.onTimeBy?.date ?? null,
-  });
+  // Under each option (TXF15-TXF17); null for AIM, where Tohyee works nothing out.
+  const due =
+    optionRequirements({
+      option: provisionalOption.option,
+      rit: interestRit,
+      instalmentDates: provisional.kind === "schedule" ? provisional.instalments.map((entry) => entry.onTimeBy.date) : [],
+      // Each instalment's own share: a caught-up shortfall is already required by its own earlier date (ITX6).
+      standardInstalments: provisional.kind === "schedule" ? provisional.instalments.map((entry) => ({ due: entry.onTimeBy.date, amount: dec(entry.ownAmount) })) : null,
+      endOfYearDue: endOfYear.onTimeBy?.date ?? null,
+    }) ?? [];
   // Interest counts what's confirmed or evidenced as paid towards this year, from IRD's effective date (the bank date
   // until that's known). Payments awaiting reconciliation and forecast assumptions aren't counted.
   const paidSoFar = cappedAllocations(payments.map(ruleItem))
@@ -818,7 +831,7 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
     .map((entry) => ({ date: effectiveDate(entry.payment), amount: entry.amount }));
   const soFar = underpaymentInterest({ requirements: due, payments: paidSoFar.filter((payment) => payment.date <= today), asAt: today, today });
   let ifPaidOnTime: string | null = null;
-  if (endOfYear.onTimeBy) {
+  if (endOfYear.onTimeBy && provisionalOption.option !== "aim") {
     const endDate = endOfYear.onTimeBy.date;
     // The cash still needed by each later instalment, paid on its date.
     const scheduled: Array<{ date: string; amount: Decimal }> = [];
@@ -844,6 +857,9 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
     ifPaidOnTime,
     usesLatestRateForFuture: true,
     ratesKnownTo: soFar.ratesKnownTo,
+    option: provisionalOption.option,
+    /** Why there's no estimate (AIM through other software, TXF17), or null. */
+    notWorkedOut: provisionalOption.option === "aim" ? AIM_NOTE : null,
   };
 
   // The IR10 once the income year has ended and the figures are all actuals (ITX24).
@@ -911,7 +927,11 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
     notes.push("Type the trust's credits in full: Tohyee takes off the share passed to beneficiaries with their income.");
   }
   if (type === "individual") notes.push("The ACC earners' levy, independent earner tax credit, Working for Families and student loan repayments aren't worked out.");
-  notes.push(
+  if (provisionalOption.option === "estimation") {
+    notes.push("On the estimation option IRD charges interest on the difference between what's paid by each instalment date and an equal share of the year's actual RIT, even when the estimate was paid in full; there's no $60,000 rule. The interest shown is an estimate; IRD works out what it charges.");
+  } else if (provisionalOption.option === "ratio") {
+    notes.push("On the ratio option, with the instalments paid in full and on time, IRD charges interest only on what's unpaid after the end-of-year tax date, and pays none on an overpayment. The interest shown is an estimate; IRD works out what it charges.");
+  } else if (provisionalOption.option === "standard") notes.push(
     cmp(dec(paper.rit), INTEREST_THRESHOLD) < 0
       ? "With RIT under 60,000.00 on the standard option, IRD charges or pays interest only from the day after the end-of-year tax date. The interest shown is an estimate; IRD works out what it charges."
       : "With RIT of 60,000.00 or more, IRD can charge interest from the day after the last instalment on any shortfall (and earlier if an instalment is paid late or short). The interest shown is an estimate; IRD works out what it charges.",
@@ -965,6 +985,7 @@ export async function buildIncomeTax(tx: OrgTx, input: { incomeYear?: unknown; t
     lastYear: { incomeYear: lastYearNumber, rit: lastYear ? money(lastYear.amount) : null, typed: lastYear?.typed ?? false, filedOn: lastTyped.returnFiledOn },
     twoYearsAgo: { incomeYear: incomeYear - 2, rit: twoYearsAgo },
     provisional,
+    provisionalOption,
     endOfYear,
     dueDates,
     notes,

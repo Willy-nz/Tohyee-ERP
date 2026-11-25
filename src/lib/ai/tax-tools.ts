@@ -4,6 +4,7 @@ import { IDEMPOTENCY, idempotencyKey } from "@/lib/ai/write-tools";
 import { roleAtLeast } from "@/lib/auth/roles";
 import { ForbiddenError } from "@/lib/errors";
 import { getIrdDocument, getIrdDocumentContent, listIrdDocuments, listProposals, proposeIrdFigures } from "@/lib/tax/income/ird-documents";
+import { getProvisionalOption } from "@/lib/tax/income/provisional-option-store";
 import { getIncomeTaxYear, listPayments, requireIncomeYear } from "@/lib/tax/income/service";
 
 /*
@@ -59,12 +60,13 @@ export const TAX_READ_TOOLS: readonly AiTool[] = [
     title: "Typed income tax figures",
     level: "read",
     minRole: "admin",
-    description: "What's typed for an income year (the 2026 income year is 1 April 2025 to 31 March 2026): IRD's assessed RIT and filing date, losses brought forward, tax credits, other income, and payments to IRD towards that year. Owners and admins only.",
+    description:
+      "What's typed for an income year (the 2026 income year is 1 April 2025 to 31 March 2026): IRD's assessed RIT and filing date, losses brought forward, tax credits, other income, payments to IRD towards that year, and the year's provisional tax option (standard, estimation with its estimates, ratio with IRD's ratio, or AIM through other software, where Tohyee works out no instalments or interest). Don't assume the standard option. Owners and admins only.",
     inputSchema: schema({ incomeYear: { type: "integer", minimum: 2025, maximum: 2100 } }, ["incomeYear"]),
     async run(tx, args, context) {
       requireTaxRole(context);
       const incomeYear = requireIncomeYear(args.incomeYear);
-      return { figures: await getIncomeTaxYear(tx, incomeYear), payments: await listPayments(tx, incomeYear) };
+      return { figures: await getIncomeTaxYear(tx, incomeYear), payments: await listPayments(tx, incomeYear), provisionalOption: await getProvisionalOption(tx, incomeYear) };
     },
   },
 ];
