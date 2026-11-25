@@ -228,6 +228,7 @@ export const AI_TOOL_PLAIN_WORDS: readonly { name: string; level: AiAccessLevel;
   { name: "change_mob_class", level: "post", words: "Change a mob's class" },
   { name: "split_mob", level: "post", words: "Split some of a mob into a new mob" },
   { name: "merge_mobs", level: "post", words: "Merge a mob into another" },
+  { name: "move_mob_to_farm", level: "post", words: "Move stock to another of your farms (a move, not a sale)" },
   { name: "undo_mob_event", level: "full", words: "Reverse a mob's sale, death, birth, purchase or class change" },
   { name: "void_livestock_movement", level: "full", words: "Void a movement in the books' livestock head count" },
   { name: "record_livestock_movement", level: "post", words: "Record a movement in the books' livestock head count" },

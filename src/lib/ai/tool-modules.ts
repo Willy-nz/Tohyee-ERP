@@ -178,6 +178,7 @@ export const FARMING_TOOLS: readonly string[] = [
   "change_mob_class",
   "split_mob",
   "merge_mobs",
+  "move_mob_to_farm",
   "undo_mob_event",
   "record_pasture_reading",
   "record_grazing",
