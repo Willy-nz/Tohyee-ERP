@@ -6,6 +6,9 @@ import type { AuthContext } from "@/lib/auth/guard";
 import { coreQuery } from "@/lib/db/transactions";
 import { ConflictError, ForbiddenError, UnavailableError } from "@/lib/errors";
 import { prepareUpdate, updateSummary, type UpdateSummary } from "@/lib/updates/updates";
+import { parseUpdaterStatus as parseStatus, updaterBusy, type UpdaterStatus } from "@/lib/updates/updater-status";
+
+export { INSTALL_OVERDUE_AFTER_MS, type UpdaterStatus } from "@/lib/updates/updater-status";
 
 /**
  * Update now in Tohyee (UPD1-UPD6): a server admin updates a Windows server
@@ -24,24 +27,13 @@ import { prepareUpdate, updateSummary, type UpdateSummary } from "@/lib/updates/
  * install the latest official release a little early.
  *
  * The updater writes how it's going to TOHYEE_UPDATE_STATUS_DIR (a folder
- * Tohyee can only read); the server start after the update records the new
- * version as usual.
+ * Tohyee can only read), and the installer writes how it ended (installed,
+ * or failed with what was done about it). What that means now is worked out
+ * in updater-status.ts (UPD7-UPD9): an install isn't "busy" forever.
  */
 
 /** A request the updater hasn't picked up after this long is treated as stuck. */
 export const REQUEST_STUCK_AFTER_MS = 10 * 60 * 1000;
-
-export type UpdaterStatus = {
-  state: "downloading" | "installing" | "failed" | "skipped";
-  version: string | null;
-  message: string | null;
-  at: string | null;
-  /** Installing for over 20 minutes without this server coming back on that version. */
-  overdue: boolean;
-};
-
-/** How long an install can take before the page says it didn't finish. */
-export const INSTALL_OVERDUE_AFTER_MS = 20 * 60 * 1000;
 
 export type RemoteUpdateState = UpdateSummary & {
   /** False when this server wasn't installed with the Windows installer (or is an older one without the updater). */
@@ -88,38 +80,28 @@ async function readRequest(dir: string, now: Date): Promise<RemoteUpdateState["p
   }
 }
 
-/** The updater's status file, cleaned up: only known states and short text. */
-export function parseUpdaterStatus(text: string, now: Date = new Date(), currentVersion: string = packageJson.version): UpdaterStatus | null {
-  let parsed: Record<string, unknown>;
-  try {
-    parsed = JSON.parse(text.replace(/^﻿/, "")) as Record<string, unknown>;
-  } catch {
-    return null;
-  }
-  const states = ["downloading", "installing", "failed", "skipped"] as const;
-  const state = states.find((known) => known === parsed.state);
-  if (!state) return null;
-  const short = (value: unknown, max: number) => (typeof value === "string" && value.trim() ? value.trim().slice(0, max) : null);
-  const given = short(parsed.version, 20);
-  const version = given && VERSION.test(given) ? given : null;
-  const at = short(parsed.at, 40);
-  const started = at ? new Date(at).getTime() : Number.NaN;
-  return {
-    state,
-    version,
-    message: short(parsed.message, 500),
-    at,
-    overdue: state === "installing" && version !== currentVersion && Number.isFinite(started) && now.getTime() - started > INSTALL_OVERDUE_AFTER_MS,
-  };
+/** The updater's status file, cleaned up, with what it means now (see updater-status.ts). */
+export function parseUpdaterStatus(
+  text: string,
+  now: Date = new Date(),
+  currentVersion: string = packageJson.version,
+  serverStartedAt: string | null = null,
+): UpdaterStatus | null {
+  return parseStatus(text, now, currentVersion, serverStartedAt);
 }
 
-async function readStatus(dir: string | null, now: Date): Promise<UpdaterStatus | null> {
+async function readStatus(dir: string | null, now: Date, serverStartedAt: string | null): Promise<UpdaterStatus | null> {
   if (!dir) return null;
   try {
-    return parseUpdaterStatus(await readFile(path.join(dir, STATUS_FILE), "utf8"), now);
+    return parseUpdaterStatus(await readFile(path.join(dir, STATUS_FILE), "utf8"), now, packageJson.version, serverStartedAt);
   } catch {
     return null;
   }
+}
+
+/** When this server process started, for when the database can't say (no server start recorded). */
+function serverProcessStartedAt(now: Date): string {
+  return new Date(now.getTime() - process.uptime() * 1000).toISOString();
 }
 
 function requireServerAdminAnywhere(auth: AuthContext): void {
@@ -131,12 +113,14 @@ export async function remoteUpdateState(auth: AuthContext, now: Date = new Date(
   requireServerAdminAnywhere(auth);
   const dir = requestDir();
   const canUpdateHere = dir !== null && process.platform === "win32";
+  const summary = await updateSummary();
   return {
-    ...(await updateSummary()),
+    ...summary,
     canUpdateHere,
     notHere: canUpdateHere ? null : NOT_HERE,
     pending: dir ? await readRequest(dir, now) : null,
-    updater: await readStatus(statusDir(), now),
+    // A download or install from before this server last started didn't finish (UPD8).
+    updater: await readStatus(statusDir(), now, summary.lastStart?.startedAt ?? serverProcessStartedAt(now)),
   };
 }
 
@@ -153,6 +137,11 @@ export async function requestRemoteUpdate(auth: AuthContext, body: Record<string
   const waiting = await readRequest(dir, now());
   if (waiting && !waiting.stuck) {
     throw new ConflictError(`An update to v${waiting.version} was asked for at ${waiting.requestedAt} and is on its way. Give it a few minutes.`);
+  }
+  // One install at a time (UPD4): not while the updater says it's downloading or installing.
+  const last = await readStatus(statusDir(), now(), serverProcessStartedAt(now()));
+  if (updaterBusy(last)) {
+    throw new ConflictError(`The update to v${last?.version} is ${last?.state} now. Give it a few minutes.`);
   }
 
   const prepared = await prepareUpdate(auth, body);
