@@ -7,6 +7,7 @@ import type { AuthContext } from "@/lib/auth/guard";
 
 const prepareUpdate = vi.fn();
 const writeAdminAuditEvent = vi.fn();
+let lastStart: { version: string; previousVersion: string | null; startedAt: string; organisationsChecked: number; organisationsUpgraded: number; organisationsBlocked: number } | null = null;
 
 vi.mock("@/lib/updates/updates", () => ({
   prepareUpdate: (...args: unknown[]) => prepareUpdate(...args),
@@ -20,13 +21,14 @@ vi.mock("@/lib/updates/updates", () => ({
     releaseName: "Tohyee v99.0.0",
     publishedAt: null,
     releaseNotesUrl: null,
-    lastStart: null,
+    lastStart,
   }),
 }));
 vi.mock("@/lib/audit", () => ({ writeAdminAuditEvent: (...args: unknown[]) => writeAdminAuditEvent(...args) }));
 vi.mock("@/lib/db/transactions", () => ({ coreQuery: vi.fn() }));
 
 const { parseUpdaterStatus, remoteUpdateState, requestRemoteUpdate, REQUEST_STUCK_AFTER_MS } = await import("@/lib/updates/remote-update");
+const { updaterBusy } = await import("@/lib/updates/updater-status");
 
 function auth(isServerAdmin = true): AuthContext {
   return { sessionId: "s", user: { id: "u1", email: "admin@example.com", displayName: "Admin", isServerAdmin } } as unknown as AuthContext;
@@ -46,6 +48,7 @@ beforeEach(async () => {
   process.env.TOHYEE_UPDATE_REQUEST_DIR = requests;
   process.env.TOHYEE_UPDATE_STATUS_DIR = statuses;
   setPlatform("win32");
+  lastStart = null;
   prepareUpdate.mockReset();
   writeAdminAuditEvent.mockReset();
   prepareUpdate.mockResolvedValue({ currentVersion: packageJson.version, version: "99.0.0", setup: {}, backups: [{ status: "ok" }, { status: "ok" }] });
@@ -109,6 +112,8 @@ describe("Update now in Tohyee (UPD1-UPD6)", () => {
       message: "No SHA-256",
       at: "2026-11-22T08:59:00Z",
       overdue: false,
+      outcome: "failed",
+      note: null,
     });
     expect(parseUpdaterStatus('{"state":"hacked","version":"1.0.0"}', now)).toBeNull();
     expect(parseUpdaterStatus("not json", now)).toBeNull();
@@ -119,5 +124,60 @@ describe("Update now in Tohyee (UPD1-UPD6)", () => {
 
     await writeFile(path.join(statuses, "status.json"), '{"state":"skipped","version":"0.0.1","message":"v0.40.0 is already installed."}');
     expect((await remoteUpdateState(auth())).updater).toMatchObject({ state: "skipped", version: "0.0.1" });
+  });
+
+  it("UPD7: a finished install doesn't hold Update now back for the next release", async () => {
+    const now = new Date("2026-11-29T09:00:00Z");
+    // What a 0.44/0.45 updater leaves behind after a good update: "installing" the version that now runs.
+    const done = parseUpdaterStatus('{"state":"installing","version":"1.1.0","at":"2026-11-22T08:30:00Z"}', now, "1.1.0");
+    expect(done).toMatchObject({ outcome: "installed", overdue: false });
+    expect(updaterBusy(done)).toBe(false);
+    // What the installer writes from this version on.
+    expect(parseUpdaterStatus('{"state":"installed","version":"1.1.0","at":"2026-11-22T08:34:00Z"}', now, "1.1.0")?.outcome).toBe("installed");
+    // An earlier update's status, once this server has moved past it, says nothing.
+    expect(parseUpdaterStatus('{"state":"failed","version":"1.0.5","at":"2026-11-01T08:00:00Z"}', now, "1.1.0")?.outcome).toBe("old");
+
+    // With that status on the server, the next release can be asked for.
+    await writeFile(path.join(statuses, "status.json"), `{"state":"installing","version":"${packageJson.version}","at":"2026-11-22T08:30:00Z"}`);
+    const state = await requestRemoteUpdate(auth(), { version: "99.0.0" }, () => now);
+    expect(state.updater?.outcome).toBe("installed");
+    expect(state.pending?.version).toBe("99.0.0");
+  });
+
+  it("UPD8: an install from before this server last started, for a version it doesn't run, didn't finish", async () => {
+    const now = new Date("2026-11-22T08:40:00Z");
+    const text = '{"state":"installing","version":"1.1.0","message":"Installing. The installer\'s log is update-1.1.0.log in Tohyee\'s logs.","at":"2026-11-22T08:30:00Z"}';
+    // Still within 20 minutes and no restart yet: busy.
+    expect(parseUpdaterStatus(text, now, "1.0.0", "2026-11-22T07:00:00Z")?.outcome).toBe("working");
+    // Tohyee started again at 08:36, still on v1.0.0: failed, with what to do, and Update now can go again.
+    const stale = parseUpdaterStatus(text, now, "1.0.0", "2026-11-22T08:36:00Z");
+    expect(stale).toMatchObject({ outcome: "failed", overdue: false });
+    expect(stale?.note).toContain("still runs v1.0.0");
+    expect(stale?.note).toContain("Try Update now again");
+    expect(updaterBusy(stale)).toBe(false);
+
+    lastStart = { version: packageJson.version, previousVersion: null, startedAt: "2026-11-22T08:36:00Z", organisationsChecked: 1, organisationsUpgraded: 0, organisationsBlocked: 0 };
+    await writeFile(path.join(statuses, "status.json"), text);
+    expect((await remoteUpdateState(auth(), now)).updater?.outcome).toBe("failed");
+  });
+
+  it("UPD9: the installer's own answer is shown; a failed or overdue install lets it be asked again; a running one doesn't", async () => {
+    const now = new Date("2026-11-22T09:00:00Z");
+    const failed = parseUpdaterStatus(
+      '{"state":"failed","version":"1.1.0","message":"v1.1.0 couldn\'t be installed, so v1.0.0 was put back and is running.","at":"2026-11-22T08:50:00Z"}',
+      now,
+      "1.0.0",
+    );
+    expect(failed).toMatchObject({ outcome: "failed", message: expect.stringContaining("was put back") });
+    expect(updaterBusy(failed)).toBe(false);
+    const downloading = parseUpdaterStatus('{"state":"downloading","version":"1.1.0","at":"2026-11-22T08:50:00Z"}', now, "1.0.0");
+    expect(updaterBusy(downloading)).toBe(true);
+    // A download can't run longer than the updater's 45 minutes.
+    expect(parseUpdaterStatus('{"state":"downloading","version":"1.1.0","at":"2026-11-22T08:00:00Z"}', now, "1.0.0")).toMatchObject({ outcome: "failed", overdue: true });
+
+    // While the updater says it's installing (and it isn't overdue), a second request is refused.
+    await writeFile(path.join(statuses, "status.json"), `{"state":"installing","version":"99.0.0","at":"${new Date(Date.now() + 60_000).toISOString()}"}`);
+    await expect(requestRemoteUpdate(auth(), { version: "99.0.0" })).rejects.toThrow("installing now");
+    expect(prepareUpdate).not.toHaveBeenCalled();
   });
 });

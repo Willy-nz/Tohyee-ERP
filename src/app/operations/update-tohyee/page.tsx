@@ -8,11 +8,13 @@ import { useWorkspace } from "@/components/workspace";
 import { api, errorMessage } from "@/lib/client/api";
 import { formatDateTime } from "@/lib/format";
 import type { RemoteUpdateState } from "@/lib/updates/remote-update";
+import { updaterBusy } from "@/lib/updates/updater-status";
 
 /**
- * Update now (UPD1-UPD6): a server admin updates the Windows server from
+ * Update now (UPD1-UPD9): a server admin updates the Windows server from
  * any device. Everything is backed up first; the Tohyee updater on the
- * server installs it a minute or two later, and Tohyee restarts.
+ * server installs it a minute or two later, and Tohyee restarts. Only a
+ * download or install that's still going holds the button back (UPD7).
  */
 export default function UpdateTohyeePage() {
   const { user } = useWorkspace();
@@ -21,11 +23,7 @@ export default function UpdateTohyeePage() {
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
 
-  const working =
-    busy ||
-    (data?.pending != null && !data.pending.stuck) ||
-    data?.updater?.state === "downloading" ||
-    data?.updater?.state === "installing";
+  const working = busy || (data?.pending != null && !data.pending.stuck) || updaterBusy(data?.updater ?? null);
 
   // While an update is on its way, look again every 15 seconds (Tohyee is away for a minute while it restarts).
   useEffect(() => {
@@ -111,24 +109,29 @@ export default function UpdateTohyeePage() {
 
 function UpdaterLine({ status, current }: { status: NonNullable<RemoteUpdateState["updater"]>; current: string }) {
   const when = status.at ? ` (${formatDateTime(status.at)})` : "";
-  if (status.version === current && status.state === "installing") {
-    return <Notice tone="success">Updated to v{current}{when}.</Notice>;
-  }
-  if (status.state === "downloading") return <Notice>Downloading v{status.version}…{when}</Notice>;
-  if (status.state === "installing") {
-    if (status.overdue) {
+  switch (status.outcome) {
+    case "old":
+      return null;
+    case "installed":
+      return <Notice tone="success">Updated to v{current}{when}.</Notice>;
+    case "working":
+      return status.state === "downloading" ? (
+        <Notice>Downloading v{status.version}…{when}</Notice>
+      ) : (
+        <Notice>Installing v{status.version}. Tohyee is away for a few minutes.{when}</Notice>
+      );
+    case "skipped":
       return (
         <Notice tone="warning">
-          The update to v{status.version} started{when} but this server still runs v{current}. {status.message}
+          The last update was skipped{when}: {status.message ?? "no reason given"}
         </Notice>
       );
-    }
-    return <Notice>Installing v{status.version}. Tohyee is away for a few minutes.{when}</Notice>;
+    case "failed":
+      return (
+        <Notice tone="error">
+          The update to v{status.version ?? "?"} didn&apos;t work{when}. {status.note ?? status.message ?? "No reason was given."}
+          {status.note && status.message ? <> ({status.message})</> : null}
+        </Notice>
+      );
   }
-  return (
-    <Notice tone={status.state === "failed" ? "error" : "warning"}>
-      {status.state === "failed" ? "The last update didn't work" : "The last update was skipped"}
-      {when}: {status.message ?? "no reason given"}
-    </Notice>
-  );
 }

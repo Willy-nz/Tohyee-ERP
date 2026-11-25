@@ -8,6 +8,8 @@ import { passkeySignInOffer, requestFromHeaders } from "@/lib/auth/passkeys";
 import { getPageSessionState } from "@/lib/auth/page-session";
 import { needsSetup } from "@/lib/auth/service";
 import { emailConfigured } from "@/lib/email/mailer";
+import { sourceCodeUrl } from "@/lib/source-code";
+import packageJson from "../../../package.json";
 
 // Reads the session/database on every request; never prerender.
 export const dynamic = "force-dynamic";
@@ -43,6 +45,7 @@ export default async function LoginPage({ searchParams }: PageProps<"/login">) {
       googleMessage={googleSignInMessage(params.google)}
       passkeyAvailable={passkeys.available}
       passkeyProblem={passkeys.problem}
+      sourceCodeUrl={sourceCodeUrl(packageJson.version)}
     />
   );
 }
