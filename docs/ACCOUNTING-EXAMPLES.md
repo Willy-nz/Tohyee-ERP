@@ -20049,8 +20049,9 @@ examples"; "Claiming Investment Boost" (news, 2025).
 
 - **ITX11 An asset's tax details.** Owners and admins give a fixed asset
   from the register its tax details: **method** (diminishing value,
-  straight line, low-value write-off, or not depreciable, e.g. land, or a
-  building at IRD's 0%), the **IRD rate** typed from IRD's rate finder
+  straight line, low-value write-off, or not depreciable, e.g. land or a
+  residential building; a commercial or industrial building is straight
+  line at IRD's 0% rate, so it can get Investment Boost, TXF2), the **IRD rate** typed from IRD's rate finder
   (Tohyee has no list of IRD rates), the **tax cost** (the book cost unless
   changed), the **business use %** (100 unless changed), the date it was
   **first available for use**, and whether it's **new** (or new to NZ) for
@@ -20416,10 +20417,14 @@ interest it charges.
   opening balance typed in the year), 42A income tax paid, 42B RWT
   deducted (IRD's box is RWT on interest; RWT on dividends belongs in 42D,
   and the screen says so), 42C credits on dividends received, 42D other
-  credits, 43A refunds, 43B credits on dividends paid, 43C other debits,
-  44B closing balance, 45 the 10% penalty on a debit closing balance.
-  Kererū's 2026 ICA (ITX26): **41 5,000.00; 42A 8,183.80; 42B 140.00; 42C
-  280.00; 43A 500.00; 43B 2,800.00; 44B 10,303.80**. The income boxes and
+  credits, 42E total credits, 43A refunds, 43B credits on dividends paid,
+  43C other debits, 43D total debits, 44 closing balance (ticked credit or
+  debit, as 41 is), 44B further income tax payable (a debit closing
+  balance; nil for a credit one), 45 the 10% penalty on a debit closing
+  balance (corrected 25 Nov 2026, TXF3).
+  Kererū's 2026 ICA (ITX26): **41 5,000.00 credit; 42A 8,183.80; 42B 140.00; 42C
+  280.00; 42E 8,603.80; 43A 500.00; 43B 2,800.00; 43D 3,300.00; 44
+  10,303.80 credit; 44B nil**. The income boxes and
   tax calculation are ITX50-ITX53. Tested in `tests/unit/ica.test.ts`.
 
 ## Income tax stage 10: the IR4's income and tax calculation (ITX50-ITX53; from IRD's IR4 form for 2026, downloaded from ird.govt.nz and read by Claude 17 Oct 2026, not yet reviewed)
@@ -22977,7 +22982,9 @@ Tested in `tests/unit/fuel-refund.test.ts` and
 - **FUEL11 In the books.** The refund includes GST on the excise. Following
   common practice, the refund received is coded back to the fuel account
   with GST at 15%, so the GST already claimed on that part of the petrol is
-  paid back. Tohyee shows this and doesn't post anything.
+  paid back. Tohyee shows this and doesn't post anything. That's only for
+  a GST-registered organisation that claimed GST on the petrol; others code
+  it with no GST (TXF5).
 - **FUEL12 What it doesn't do.**
   - The ACC levy on petrol.
   - LPG and CNG.
@@ -23794,3 +23801,108 @@ sale, $150.00 GST), due 31 October 2026.
 - **LATE12 Other currencies.** An invoice in another currency is charged in
   that currency, at the rate for the charge date, rounded to its smallest
   unit.
+
+## Tax and payroll fixes (TXF1-TXF9; 25 Nov 2026; following common practice, not yet reviewed)
+
+Fixes from a review of the tax and payroll code. Each rule was checked
+against IRD or legislation.govt.nz on 25 Nov 2026 (through a summarising
+fetch tool, so check the pages). Made-up figures.
+
+- **TXF1 An estate's year of death, with an early balance date.** The 33%
+  rate for an estate covers the income year the person died in and the
+  three after it (IRD, "Trustee tax rates":
+  https://www.ird.govt.nz/income-tax/income-tax-for-businesses-and-organisations/trusts-and-estates/income/trustee-tax-rates).
+  The year of death is numbered the way the rest of Tohyee numbers income
+  years (SPS 24/01): with a 31 October balance date, a death on 15 May 2025
+  falls in the year to 31 October 2025, the **2026** income year. So 33%
+  runs from 2026 to **2029**. On trustee income of $50,000 in 2029 the tax
+  is **$16,500.00**, not $19,500.00 at 39%. A death on 10 December 2025 is in
+  the 2027 income year (33% to 2030). A 30 June balance date was already
+  right: May 2025 is the 2025 income year, 33% to 2028. Tested in
+  `tests/unit/trust-tax.test.ts`.
+- **TXF2 Investment Boost on a new commercial or industrial building.**
+  Inland Revenue's Investment Boost information sheet says new commercial
+  and industrial buildings are eligible even though they get no
+  depreciation, and IRD's "What you can claim with Investment Boost" lists
+  them (residential rental buildings are left out):
+  https://www.taxpolicy.ird.govt.nz/-/media/project/ir/tp/publications/2025/investment-boost-information-sheet.pdf ;
+  https://www.ird.govt.nz/income-tax/income-tax-for-businesses-and-organisations/types-of-business-expenses/new-assets---investment-boost/what--you-can-claim-with-investment-boost .
+  Such a building is set up as **straight line at IRD's 0% rate** (0% is
+  now allowed). A new packing shed costing $500,000.00, first used 1
+  September 2026: Investment Boost **$100,000.00** in the 2027 income year,
+  depreciation $0.00, adjusted tax value **$400,000.00**. "Not depreciable"
+  is for land and residential buildings: Investment Boost on it is refused,
+  and the message says to use straight line at 0% for a commercial
+  building. ITX11 is changed to match. Tested in
+  `tests/integration/tax-depreciation.test.ts`.
+- **TXF3 IR4 imputation boxes 42E to 44B.** On the 2026 IR4 (page 7) box 44
+  is the closing balance at 31 March, ticked credit or debit; 44A is
+  adjustments that reduce further income tax; 44B is further income tax
+  payable, 44 less 44A
+  (https://www.ird.govt.nz/-/media/project/ir/home/documents/forms-and-guides/ir1---ir99/ir4/ir4-2026.pdf).
+  Tohyee now shows every amount as a positive figure, as the form does, with
+  the tick for 41 and 44, plus the totals 42E and 43D. Kererū's 2026 ICA
+  (ITX49): **41 5,000.00 credit; 42E 8,603.80; 43D 3,300.00; 44 10,303.80
+  credit; 44B nil**. A closing debit of 4,500.00 gives **44 4,500.00 debit,
+  44B 4,500.00, 45 450.00**. Tohyee doesn't work out 44A and says so: take
+  any such adjustment off 44B yourself. Tested in `tests/unit/ica.test.ts`.
+- **TXF4 Leave owed at balance date (the 63-day rule).** Income Tax Act
+  2007 s EA 4(1)(b)(i) and (2): employment income that's deducted but not
+  paid by the 63rd day after balance date is income that year (s CH 3) and
+  deductible the next (s DB 51)
+  (https://legislation.govt.nz/act/public/2007/97/en/latest/parts/DLM1514266/).
+  Inland Revenue's 2016 issues paper (chapter 7) gives accrued holiday pay
+  as the example
+  (https://taxpolicy.ird.govt.nz/publications/2016/2016-ip-mts-better-business-tax/chapter-7).
+  When the employee entitlements account (Payroll › Pay items) has a
+  balance at balance date, the workpaper says so in a note and offers the
+  adjustment; **nothing is added by itself**. Pukeko Orchard's account
+  shows **$6,327.45** at 31 March 2026. $1,840.00 of it was paid out in
+  leave by 2 June 2026, so the preparer types that and adds back
+  **$4,487.45**. The 2027 workpaper then offers to deduct that $4,487.45 (s
+  DB 51). Tohyee doesn't work out the leave paid in the 63 days from pay
+  runs yet: the preparer types it. The account also holds the employer
+  KiwiSaver on the leave; whether that part is caught isn't decided here.
+  Tested in `tests/unit/leave-add-back.test.ts` and
+  `tests/integration/tax-leave-add-back.test.ts`.
+- **TXF5 Coding the fuel refund (FUEL11).** The advice to code the refund
+  with GST at 15% shows only when the organisation is registered for GST at
+  the end of the quarter, and says it's right for petrol GST was claimed
+  on. Petrol added by hand (FUEL4) usually had no GST claimed, so the
+  screen says to code that part with no GST. An organisation not
+  registered is told to code the refund with no GST. The refund includes
+  the GST on the excise (Fuel Excise Duty Refund Regulations, reg 5(1) and
+  6(a): https://www.legislation.govt.nz/act/public/2012/1/en/latest/DLM276777).
+  Tested in `tests/integration/fuel-refund.test.ts`.
+- **TXF6 KiwiSaver employer contributions by age.** Employers don't have to
+  contribute for employees under 16 or over 65 (IRD's payroll
+  specification 2026-27, section 4.5.2), and IRD's employer page puts the
+  compulsory contribution on employees "aged under 65"; 16 and 17 year olds
+  get it from 1 April 2026 (specification 2.3)
+  (https://www.ird.govt.nz/kiwisaver/kiwisaver-employers/kiwisaver-contributions-and-deductions/employer-contributions-to-kiwisaver-and-complying-funds).
+  So for a member under 16 (under 18 before 1 April 2026) or 65 or over on
+  the pay date, any employer rate is allowed, 0% included, and their own
+  deductions carry on. A 67-year-old earning $1,000.00 at 0%: employer
+  contribution **$0.00**. A 40-year-old still needs 3.5%. Without a date of
+  birth the minimum applies. Tested in `tests/unit/payroll-calculations.test.ts`.
+- **TXF7 Minor beneficiaries: Māori authority income.** IRD's "Beneficiary
+  tax" page lists income from a Māori authority as one of the cases the
+  minor beneficiary rule doesn't apply to
+  (https://www.ird.govt.nz/income-tax/income-tax-for-businesses-and-organisations/trusts-and-estates/income/distributions/beneficiary-tax).
+  A beneficiary's income for the year can be ticked "All of it comes from a
+  Māori authority distribution". Nikau (10) gets $3,000.00 that's all from
+  one: it's taxed to Nikau, not by the trustee at 39%. Tohyee can't split a
+  beneficiary's income between Māori authority and other income yet. Tested
+  in `tests/unit/trust-tax.test.ts` and `tests/integration/trust-tax.test.ts`.
+- **TXF8 Income tax rates for later years.** IRD's individual rates have
+  applied from 1 April 2025, and Tohyee has checked them up to the 2027
+  income year (1 April 2026 to 31 March 2027)
+  (https://ird.govt.nz/income-tax/income-tax-for-individuals/tax-codes-and-tax-rates-for-individuals/tax-rates-for-individuals).
+  A later year still uses them, with a note asking to check IRD's rates for
+  that year. Tested in `tests/unit/income-tax-rules.test.ts`.
+- **TXF9 An entered clock-out time.** The out time a manager enters (RS8) is
+  compared with the clock-in as a moment in time, not as text, so it works
+  whatever the database's time zone is. Clocked in at 11:00 on 3 October
+  2026: 12:00 is accepted (1.00 hour) and 10:00 is refused, with the
+  database in UTC or in New Zealand time. Tested in
+  `tests/integration/payroll-rosters.test.ts`.
