@@ -1,3 +1,4 @@
+import { assertOrganisationMayReach } from "@/lib/network/organisation-reach";
 import { createWriteStream } from "node:fs";
 import http from "node:http";
 import type { Duplex } from "node:stream";
@@ -42,8 +43,16 @@ const DOWNLOAD_IDLE_MS = 60_000;
 /** A connection to the post box that checks its certificate (pinned or by name) before anything is written. For `http.request`'s createConnection. */
 export function connector(target: BoxTarget) {
   return (_options: unknown, done: (error: Error | null, socket?: Duplex) => void) => {
+    // An organisation's own pairing code says where to connect: checked like any address it gives (L7),
+    // and the connection goes to the address that was checked.
+    assertOrganisationMayReach(target.address, "a camera post box").then(
+      (addresses) => open(addresses[0], done),
+      (error: Error) => done(new BoxError(error.message, "unreachable")),
+    );
+  };
+  function open(address: string, done: (error: Error | null, socket?: Duplex) => void) {
     const socket = tls.connect({
-      host: target.address,
+      host: address,
       port: target.port,
       servername: /^\d+(\.\d+){3}$/.test(target.address) ? undefined : target.address,
       minVersion: "TLSv1.2",
@@ -70,7 +79,7 @@ export function connector(target: BoxTarget) {
       }
       settle(null);
     });
-  };
+  }
 }
 
 type Call = { method: "GET" | "POST" | "PUT"; path: string; body?: unknown; auth?: boolean };

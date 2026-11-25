@@ -21,6 +21,7 @@ import type { OrgTx } from "@/lib/db/org-transaction";
 import { coreQuery } from "@/lib/db/transactions";
 import { setMemberFarmAccess } from "@/lib/farming/access";
 import { saveFarm, setFarmingEnabled } from "@/lib/farming/paddocks";
+import { saveOrganisationNetwork } from "@/lib/network/organisation-reach";
 import { apiRequest, createTestOrganisation, createTestUser, describeWithDatabase, inOrganisation, params, sessionCookieFor, startTestServer, type TestServer } from "../helpers/test-server";
 
 const ORG = "camera-postbox";
@@ -64,6 +65,8 @@ describeWithDatabase("camera post box", () => {
     box = await startPostbox(config, { log: () => undefined, failedLoginDelayMs: 5 });
 
     server = await startTestServer();
+    // The test post box runs on this computer, which organisations can only reach once a server admin allows it.
+    await saveOrganisationNetwork({ id: null, email: "test-server-admin@example.com" }, { thisComputer: true });
     owner = await createTestUser("postbox-owner@example.com", { serverAdmin: true, displayName: "Jade Kerr" });
     staff = await createTestUser("postbox-staff@example.com", { displayName: "Mere Tane" });
     await createTestOrganisation(owner, ORG);
@@ -102,6 +105,16 @@ describeWithDatabase("camera post box", () => {
       client.close();
     }
   }
+
+  it("a post box on this computer is refused until a server admin allows it", async () => {
+    await saveOrganisationNetwork({ id: null, email: "test-server-admin@example.com" }, { thisComputer: false });
+    try {
+      const { assertOrganisationMayReach } = await import("@/lib/network/organisation-reach");
+      await expect(assertOrganisationMayReach("127.0.0.1", "a camera post box")).rejects.toThrow(/this Tohyee server itself/);
+    } finally {
+      await saveOrganisationNetwork({ id: null, email: "test-server-admin@example.com" }, { thisComputer: true });
+    }
+  });
 
   it("only owners and admins see or set up the post box", async () => {
     const added = await call(owner, camerasRoute.POST as Handler, "/api/farming/security/cameras", "POST", { farmId, name: "Gate" });

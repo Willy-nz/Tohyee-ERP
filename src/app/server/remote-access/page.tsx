@@ -9,6 +9,7 @@ import type { RemotePause } from "@/lib/auth/remote-pause";
 import type { RemoteAccess } from "@/lib/remote/settings";
 import type { TunnelStatus } from "@/lib/remote/tunnel";
 import { useConfirm } from "@/components/confirm-dialog";
+import { OrganisationNetworkCard } from "@/components/server/organisation-network-card";
 
 const STATUS: Record<TunnelStatus, { tone: "green" | "amber" | "red" | "neutral"; label: string }> = {
   off: { tone: "neutral", label: "Off" },
@@ -400,6 +401,7 @@ export default function RemoteAccessPage() {
           </Card>
         </>
       ) : null}
+      <OrganisationNetworkCard />
     </Page>
   );
 }
