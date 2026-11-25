@@ -4,7 +4,7 @@ import { InfoTip } from "@/components/info-tip";
 import { type FormEvent, useEffect, useRef, useState } from "react";
 import { useConfirm } from "@/components/confirm-dialog";
 import { useApiData } from "@/components/hooks";
-import { Badge, Button, Card, Field, Notice } from "@/components/ui";
+import { Badge, Button, Card, Field, Notice, RefreshProblem } from "@/components/ui";
 import { api, errorMessage } from "@/lib/client/api";
 import { buildTime } from "@/lib/demo/build-time";
 import type { DemoFarmListing } from "@/lib/demo/service";
@@ -97,6 +97,7 @@ export function DemoFarmsCard({ me, onChanged }: { me: { id: string; email: stri
       <div className={styles.stack}>
         {status ? <Notice tone={status.tone}>{status.text}</Notice> : null}
         {state.error ? <Notice tone="error">{state.error}</Notice> : null}
+        <RefreshProblem problem={state.refreshError} loadedAt={state.loadedAt} onRetry={reload} />
         {!enabled ? (
           <Notice>The demo farm is turned off on this server (TOHYEE_DEMO_FARM=off). Demo farms already made stay until they&apos;re deleted.</Notice>
         ) : (

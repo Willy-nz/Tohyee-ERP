@@ -5,7 +5,8 @@ import { useEffect, useMemo, useRef, useState } from "react";
 import { readFileAsBase64 } from "@/components/bank/common";
 import { useConfirm } from "@/components/confirm-dialog";
 import { useApiData } from "@/components/hooks";
-import { Button, Notice } from "@/components/ui";
+import { Button, Notice, RefreshProblem } from "@/components/ui";
+import { compressPhoto } from "@/lib/offline/photos";
 import { api, errorMessage, newIdempotencyKey } from "@/lib/client/api";
 import type { ChatLink, ChatLinkKind, ChatMessage } from "@/lib/farming/chat";
 import type { Farm, Paddock } from "@/lib/farming/paddocks";
@@ -131,6 +132,8 @@ function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisatio
   const [busy, setBusy] = useState(false);
   const voice = useVoiceRecorder();
   const [error, setError] = useState<string | null>(null);
+  // One key per message until it's sent, so a retry after a lost reply doesn't post it twice.
+  const [sendKey, setSendKey] = useState(() => newIdempotencyKey(farm ? "farm-chat" : "team-chat"));
   const endRef = useRef<HTMLDivElement>(null);
   const chatRef = useRef<HTMLDivElement>(null);
   const composeRef = useRef<HTMLFormElement>(null);
@@ -171,11 +174,16 @@ function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisatio
   async function loadOlder() {
     const first = messages[0]?.id;
     if (!first) return;
-    const answer = await api<{ messages: Named[]; more: boolean }>(
-      `${base}?${new URLSearchParams({ organisationId, ...scope, before: first }).toString()}`,
-    );
-    setOlder((current) => [...answer.messages, ...current]);
-    setOlderMore(answer.more);
+    setError(null);
+    try {
+      const answer = await api<{ messages: Named[]; more: boolean }>(
+        `${base}?${new URLSearchParams({ organisationId, ...scope, before: first }).toString()}`,
+      );
+      setOlder((current) => [...answer.messages, ...current]);
+      setOlderMore(answer.more);
+    } catch (caught) {
+      setError(`Couldn't load older messages. ${errorMessage(caught)}`);
+    }
   }
 
   async function send() {
@@ -183,7 +191,12 @@ function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisatio
     setBusy(true);
     setError(null);
     try {
-      const encoded = await Promise.all(photos.map(async (file) => ({ fileName: file.name, contentBase64: await readFileAsBase64(file) })));
+      // A smaller JPEG copy of each photo: full-size phone photos are slow on a farm's mobile signal.
+      const encoded = await Promise.all(photos.map(async (file) => {
+        const copy = await compressPhoto(file);
+        const fileName = copy === file ? file.name : `${file.name.replace(/\.[^.]*$/, "") || "photo"}.jpg`;
+        return { fileName, contentBase64: await readFileAsBase64(copy === file ? file : new File([copy], fileName, { type: "image/jpeg" })) };
+      }));
       const recorded = voice.note ? { seconds: voice.note.seconds, contentBase64: await readFileAsBase64(voice.note.file) } : undefined;
       await api(base, {
         method: "POST",
@@ -194,9 +207,10 @@ function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisatio
           photos: encoded,
           voice: recorded,
           ...(farm ? { links: links.map(({ kind, id }) => ({ kind, id })) } : {}),
-          idempotencyKey: newIdempotencyKey(farm ? "farm-chat" : "team-chat"),
+          idempotencyKey: sendKey,
         },
       });
+      setSendKey(newIdempotencyKey(farm ? "farm-chat" : "team-chat"));
       setBody("");
       setPhotos([]);
       setLinks([]);
@@ -225,6 +239,7 @@ function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisatio
     <div className={styles.chat} ref={chatRef} data-room={room.kind}>
       {error ? <Notice tone="error">{error}</Notice> : null}
       {chat.error ? <Notice tone="error">{chat.error}</Notice> : null}
+      <RefreshProblem problem={chat.refreshError} loadedAt={chat.loadedAt} onRetry={reload} />
       <div className={styles.list}>
         {showOlder ? (
           <button type="button" className={styles.older} onClick={() => void loadOlder()}>

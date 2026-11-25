@@ -204,3 +204,29 @@ export function Stat({ label, value }: { label: string; value: ReactNode }) {
     </div>
   );
 }
+
+/**
+ * One quiet line for a screen whose refresh failed while it still shows the
+ * last figures it loaded (useApiData's `refreshError`). Nothing when there's
+ * no problem.
+ */
+export function RefreshProblem({
+  problem,
+  loadedAt,
+  onRetry,
+}: {
+  problem: string | null;
+  loadedAt?: number | null;
+  onRetry: () => void;
+}) {
+  if (!problem) return null;
+  const time = loadedAt ? new Date(loadedAt).toLocaleTimeString("en-NZ", { hour: "numeric", minute: "2-digit" }) : null;
+  return (
+    <div className={`${styles.notice} ${styles.warning}`} role="status">
+      {`Couldn't refresh, so this shows the last figures${time ? ` (from ${time})` : ""}. `}
+      <Button variant="secondary" size="small" onClick={onRetry}>
+        Try again
+      </Button>
+    </div>
+  );
+}
