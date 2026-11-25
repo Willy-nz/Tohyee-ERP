@@ -293,6 +293,7 @@ describeWithDatabase("connect your own AI (MCP)", () => {
         "get_sales_platform_status",
         "get_signing_request",
         "get_spreadable_lines",
+        "get_spreading_suggestions",
         "get_spreading_worksheet",
         "get_supplier_credit_note",
         "gst_return",

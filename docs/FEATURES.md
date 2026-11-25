@@ -640,8 +640,8 @@ that something happened.
   year's depreciation by type, disposals this year, and ties to the ledger
   account by account. Tax depreciation beside book, pooling and low-value
   write-offs aren't built.
-- **Spreading** (Accounting, Month end; SW1-SW25, accepted by the owner
-  24 Nov 2026): one worksheet in place of the spreadsheet
+- **Spreading** (Accounting, Month end; SW1-SW25 accepted by the owner
+  24 Nov 2026, SW26-SW28 not yet reviewed): one worksheet in place of the spreadsheet
   for costs **paid in advance**, **income in advance**, costs **not billed
   yet** and income **not invoiced yet**. Each kind has one balance sheet
   account, set when an admin turns it on (1200 Prepayments, and Accrued
@@ -684,7 +684,13 @@ that something happened.
   posted, and put on the income or expense line of each month's journal.
   The journal's own custom fields are filled in on Month end. A required
   tracking category stops a month until the item has one, and the preview
-  names the item.
+  names the item. A **Suggested** card (SW26-SW28, tenant migration 0309)
+  lists what Tohyee noticed: bill, invoice and bank lines whose words say
+  they cover more than a month ("1 Dec 2026 to 30 Nov 2027", "annual",
+  "12 months"), with the dates it read, and suppliers who billed an
+  expense account in each of the last three months and haven't this
+  month, with the average. Nothing is added until someone presses Add;
+  "Not this one" keeps a suggestion away. AI keys read and dismiss them.
 - **Projects and time tracking** (Sales; PJ1-PJ13, not yet approved by the owner), like project tracking in other accounting software: a **project** for a customer with an optional
   estimate and deadline, **In progress** or **Closed** (only by closing and
   reopening). **Tasks** are hourly (a rate), fixed price or non-chargeable,
