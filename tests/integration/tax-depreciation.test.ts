@@ -50,6 +50,7 @@ describeWithDatabase("income tax: tax depreciation and Investment Boost", () => 
     await expect(as((tx) => setTaxDetails(tx, machineId, { method: "sl", rate: "20", investmentBoost: true, version: 0 }))).rejects.toThrow("tick that it's new");
     await expect(as((tx) => setTaxDetails(tx, machineId, { method: "low_value", version: 0 }))).rejects.toThrow("1,000.00 or less");
     await expect(as((tx) => setTaxDetails(tx, machineId, { method: "low_value", newAsset: true, investmentBoost: true, version: 0 }))).rejects.toThrow("Investment Boost is only for assets depreciated");
+    await expect(as((tx) => setTaxDetails(tx, machineId, { method: "not_depreciable", newAsset: true, investmentBoost: true, version: 0 }))).rejects.toThrow("straight line at IRD's 0% building rate");
     await expect(as((tx) => setTaxDetails(tx, machineId, { method: "dv", version: 0 }))).rejects.toThrow("rate");
     // Only owners and admins, through the API.
     const cookie = await sessionCookieFor(bookkeeper);
@@ -100,5 +101,18 @@ describeWithDatabase("income tax: tax depreciation and Investment Boost", () => 
     expect(report.workpaper.taxableIncome).toBe("13333.33");
     const assets = await as((tx) => listTaxAssets(tx, 2027));
     expect(assets.find((asset) => asset.assetId === machineId)?.year).toMatchObject({ openingAtv: "66666.67", depreciation: "0.00", recovered: "13333.33", disposed: true });
+  });
+
+  it("TXF2 a new commercial building at IRD's 0% rate gets Investment Boost", async () => {
+    const buildingId = (
+      await as(async (tx) => {
+        const typeId = (await tx.query<{ type_id: string }>("select type_id::text from fixed_assets where id = $1", [machineId])).rows[0].type_id;
+        return createFixedAsset(tx, { idempotencyKey: key("asset"), name: "Packing shed", typeId, purchaseDate: "2026-09-01", cost: "500000.00" });
+      })
+    ).asset.id;
+    const saved = await as((tx) => setTaxDetails(tx, buildingId, { method: "sl", rate: "0", newAsset: true, investmentBoost: true, version: 0 }));
+    expect(saved.details).toMatchObject({ method: "sl", rate: "0", investmentBoost: true });
+    const assets = await as((tx) => listTaxAssets(tx, 2027));
+    expect(assets.find((asset) => asset.assetId === buildingId)?.year).toMatchObject({ investmentBoost: "100000.00", depreciation: "0.00", closingAtv: "400000.00" });
   });
 });

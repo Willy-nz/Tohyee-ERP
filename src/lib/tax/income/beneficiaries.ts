@@ -150,6 +150,8 @@ export type BeneficiaryIncome = {
   withdrawn: string;
   /** Typed opening balance; null is last year's closing balance (TRU24). */
   openingBalance: string | null;
+  /** It all comes from a Māori authority distribution, so the minor beneficiary rule doesn't apply (TXF7). */
+  fromMaoriAuthority: boolean;
 };
 
 type IncomeRow = {
@@ -162,10 +164,11 @@ type IncomeRow = {
   non_taxable_distribution: string;
   withdrawn: string;
   opening_balance: string | null;
+  from_maori_authority: boolean;
 };
 
 const INCOME_COLUMNS = `income_year, beneficiary_id::text, amount::text, trustee_pays_tax, other_income::text, taxable_distribution::text,
-  non_taxable_distribution::text, withdrawn::text, opening_balance::text`;
+  non_taxable_distribution::text, withdrawn::text, opening_balance::text, from_maori_authority`;
 
 function toIncome(row: IncomeRow): BeneficiaryIncome {
   return {
@@ -177,6 +180,7 @@ function toIncome(row: IncomeRow): BeneficiaryIncome {
     nonTaxableDistribution: toFixedString(dec(row.non_taxable_distribution), 2),
     withdrawn: toFixedString(dec(row.withdrawn), 2),
     openingBalance: row.opening_balance === null ? null : toFixedString(dec(row.opening_balance), 2),
+    fromMaoriAuthority: row.from_maori_authority,
   };
 }
 
@@ -198,8 +202,8 @@ async function openingBalances(tx: OrgTx, year: number): Promise<Map<string, Dec
 }
 
 /** The beneficiaries and their income for a year, as the workpaper takes them (TRU3). */
-export async function beneficiaryAllocations(tx: OrgTx, year: number): Promise<Array<{ beneficiary: Beneficiary; amount: ReturnType<typeof dec> }>> {
-  return (await beneficiaryYears(tx, year)).filter((entry) => isPositive(entry.amount)).map((entry) => ({ beneficiary: entry.beneficiary, amount: entry.amount }));
+export async function beneficiaryAllocations(tx: OrgTx, year: number): Promise<Array<{ beneficiary: Beneficiary; amount: ReturnType<typeof dec>; fromMaoriAuthority: boolean }>> {
+  return (await beneficiaryYears(tx, year)).filter((entry) => isPositive(entry.amount)).map((entry) => ({ beneficiary: entry.beneficiary, amount: entry.amount, fromMaoriAuthority: entry.fromMaoriAuthority ?? false }));
 }
 
 /** Every beneficiary's figures for a year (TRU15-TRU25), with opening balances carried from last year. */
@@ -219,6 +223,7 @@ export async function beneficiaryYears(tx: OrgTx, year: number): Promise<Benefic
         nonTaxableDistribution: dec(entry.nonTaxableDistribution),
         withdrawn: dec(entry.withdrawn),
         openingBalance: entry.openingBalance === null ? carried.get(entry.beneficiaryId) ?? ZERO_DECIMAL : dec(entry.openingBalance),
+        fromMaoriAuthority: entry.fromMaoriAuthority,
       },
     ];
   });
@@ -260,6 +265,7 @@ export async function saveBeneficiaryIncome(tx: OrgTx, input: { incomeYear: unkn
     const withdrawn = amount(line.withdrawn, "withdrawals", true);
     const opening = line.openingBalance === null || line.openingBalance === undefined || line.openingBalance === "" ? null : amount(line.openingBalance, "opening balance", true);
     const trusteePaysTax = optionalBoolean(line.trusteePaysTax, `${who.name}'s trusteePaysTax`) ?? false;
+    const fromMaoriAuthority = optionalBoolean(line.fromMaoriAuthority, `${who.name}'s fromMaoriAuthority`) ?? false;
     if ([income, taxable, nonTaxable, withdrawn].every(isZero) && opening === null) continue;
     total = add(total, income);
     kept.push({
@@ -271,14 +277,15 @@ export async function saveBeneficiaryIncome(tx: OrgTx, input: { incomeYear: unkn
       nonTaxableDistribution: toFixedString(nonTaxable, 2),
       withdrawn: toFixedString(withdrawn, 2),
       openingBalance: opening === null ? null : toFixedString(opening, 2),
+      fromMaoriAuthority,
     });
   }
   await tx.query("delete from trust_beneficiary_income where income_year = $1", [year]);
   for (const line of kept) {
     await tx.query(
-      `insert into trust_beneficiary_income (income_year, beneficiary_id, amount, updated_by_email, trustee_pays_tax, other_income, taxable_distribution, non_taxable_distribution, withdrawn, opening_balance)
-       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10)`,
-      [year, line.beneficiaryId, line.amount, tx.actor.email, line.trusteePaysTax, line.otherIncome, line.taxableDistribution, line.nonTaxableDistribution, line.withdrawn, line.openingBalance],
+      `insert into trust_beneficiary_income (income_year, beneficiary_id, amount, updated_by_email, trustee_pays_tax, other_income, taxable_distribution, non_taxable_distribution, withdrawn, opening_balance, from_maori_authority)
+       values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11)`,
+      [year, line.beneficiaryId, line.amount, tx.actor.email, line.trusteePaysTax, line.otherIncome, line.taxableDistribution, line.nonTaxableDistribution, line.withdrawn, line.openingBalance, line.fromMaoriAuthority],
     );
   }
   await writeAuditEvent(tx, {

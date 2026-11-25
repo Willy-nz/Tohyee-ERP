@@ -8,7 +8,7 @@ export const GET = route(async (request) => {
   return json({ lines });
 });
 
-/** PUT: `incomeYear` and `lines` [{beneficiaryId, amount, trusteePaysTax, otherIncome, taxableDistribution, nonTaxableDistribution, withdrawn, openingBalance}], replacing that year's beneficiary income and distributions (TRU3, TRU18, TRU21, TRU24). */
+/** PUT: `incomeYear` and `lines` [{beneficiaryId, amount, trusteePaysTax, fromMaoriAuthority, otherIncome, taxableDistribution, nonTaxableDistribution, withdrawn, openingBalance}], replacing that year's beneficiary income and distributions (TRU3, TRU18, TRU21, TRU24). */
 export const PUT = route(async (request) => {
   const body = await readJson(request);
   const lines = await withOrganisation(request, body.organisationId, "admin", (tx) => saveBeneficiaryIncome(tx, { incomeYear: body.incomeYear, lines: body.lines }));
