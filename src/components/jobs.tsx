@@ -780,7 +780,7 @@ export function VisitView({ organisationId, visitId }: { organisationId: string;
                   <input
                     type="checkbox"
                     checked={!!check.tickedAt}
-                    disabled={busy || !mine || visit.status === "cancelled"}
+                    disabled={busy || !mine || visit.status === "cancelled" || visit.status === "finished"}
                     onChange={(event) => act({ action: "check", item: check.item, ticked: event.target.checked })}
                   />{" "}
                   {check.item}
@@ -803,7 +803,8 @@ export function VisitView({ organisationId, visitId }: { organisationId: string;
             Signed by <strong>{visit.signedBy}</strong> on {formatDate(dayOf(visit.signedAt!))} at {timeOf(visit.signedAt!)}.
           </p>
         ) : null}
-        {mine && visit.status !== "cancelled" ? (
+        {!visit.signedBy && visit.status === "scheduled" ? <p className={ui.muted}>Start the visit, then the person on site can sign for it.</p> : null}
+        {mine && !visit.signedBy && (visit.status === "started" || visit.status === "finished") ? (
           <div className={ui.inlineForm}>
             <Field label="Signed by">
               <input value={signedBy} maxLength={200} onChange={(event) => setSignedBy(event.target.value)} />

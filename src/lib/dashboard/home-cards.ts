@@ -1,3 +1,4 @@
+import { isoDateAt } from "@/lib/dates";
 import { addDays } from "@/lib/financial-year";
 import type { JobSummary } from "@/lib/projects/jobs";
 
@@ -9,6 +10,6 @@ import type { JobSummary } from "@/lib/projects/jobs";
 export function jobsAtAGlance(jobs: JobSummary[], servicesDue: number, today: string): { open: number; visitSoon: number; noVisit: number; servicesDue: number } {
   const open = jobs.filter((job) => job.status !== "closed");
   const last = addDays(today, 6);
-  const soon = open.filter((job) => job.nextVisit !== null && job.nextVisit.slice(0, 10) <= last);
+  const soon = open.filter((job) => job.nextVisit !== null && isoDateAt(new Date(job.nextVisit)) <= last);
   return { open: open.length, visitSoon: soon.length, noVisit: open.filter((job) => job.nextVisit === null).length, servicesDue };
 }
