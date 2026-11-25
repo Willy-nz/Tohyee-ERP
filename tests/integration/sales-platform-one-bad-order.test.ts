@@ -6,7 +6,7 @@ import { getOrganisation } from "@/lib/organisations/registry";
 import { connectStore, syncConnection, updateConnectionSettings } from "@/lib/sales-platforms/service";
 import { setSalesPlatformFetchForTests } from "@/lib/sales-platforms/shopify";
 import { createTaxCode } from "@/lib/tax/codes";
-import { CLIENT_ID, CLIENT_SECRET, fakeShopifyStore, order1001, payout70001, storeState } from "../helpers/fake-shopify-orders";
+import { CLIENT_ID, CLIENT_SECRET, fakeShopifyStore, order1001, storeState } from "../helpers/fake-shopify-orders";
 import { createTestOrganisation, createTestUser, describeWithDatabase, inOrganisation, key, startTestServer, type TestServer } from "../helpers/test-server";
 
 /** SPF10 (review M3): one order Shopify answers with an error no longer stops the other orders or pauses the store. */

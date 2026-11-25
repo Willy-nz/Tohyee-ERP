@@ -6449,8 +6449,9 @@ The rules (our choice where Shopify and the owner are silent):
   errors. Syncs run every 15 minutes (off with
   TOHYEE_SALES_PLATFORM_SYNC_SCHEDULER=off) or on **Sync now**; each fetches
   what changed since the last one. A failed sync records its error and is
-  tried again next time; three failures in a row pause the connection until
-  an admin syncs it successfully.
+  tried again next time; three failures in a row of the store refusing the
+  login pause the connection until an admin syncs it successfully (other
+  failures keep being tried, SPF10).
 - **Disconnecting** removes the credentials, the cached access token and
   the links between Shopify and Tohyee records, and unsubscribes the
   webhooks it can. Contacts and items brought in stay, and so does the
