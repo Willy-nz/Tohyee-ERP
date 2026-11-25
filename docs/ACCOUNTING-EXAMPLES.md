@@ -23794,3 +23794,38 @@ sale, $150.00 GST), due 31 October 2026.
 - **LATE12 Other currencies.** An invoice in another currency is charged in
   that currency, at the rate for the charge date, rounded to its smallest
   unit.
+
+## Sales platform fixes: stock, payouts and missed orders (SPF1-SPF12; 25 Nov 2026; following common practice, not yet reviewed)
+
+Made-up store as in SWS1: GST registered, prices include GST, clearing
+account 1010, bank 1000, sales 4000, Income in advance 2350. Gift box
+(GIFTBOX) is a stock item with purchase price 20.00 unless said otherwise.
+Tested in `tests/integration/sales-platform-negative-stock-sent.test.ts`,
+`tests/integration/sales-platform-stock-later.test.ts` and the other
+`tests/integration/sales-platform-*.test.ts` files named below.
+
+- **SPF1 Sales when sent follows Allow negative stock.** Sales when sent is
+  on and Allow negative stock is on. #1001 (one gift box, 115.00) is paid on
+  1 Nov and held in 2350. Shopify marks it sent on 3 Nov with nothing on
+  hand: Dr 2350 **100.00** / Cr 4000 **100.00**, and the box goes out at its
+  purchase price (ST11), Dr cost of goods sold **20.00** / Cr inventory
+  **20.00**, leaving **-1 worth -20.00**, as an invoice would. With negative
+  stock off, the order waits, its log line says what to do (enter a bill
+  that receives the stock, add it with a stock adjustment, or turn on Allow
+  negative stock in Organisation settings), and the store's stuck-stock
+  warning lists it with the orders not yet invoiced.
+- **SPF2 Stock that can't be backdated moves on the earliest day allowed.**
+  Tohyee doesn't re-cost stock, so it never moves stock before an item's
+  latest movement. #1001 is paid on 1 Nov with no gift boxes on hand
+  (negative stock off), so it waits. On 25 Nov a bill brings in 5 boxes at
+  10.00. At the next sync #1001 is invoiced on **1 Nov** (the day it was
+  paid, so its GST is in the right period): Dr 1010 34.50 / Cr 4000 30.00 /
+  Cr GST 4.50. Its box goes out on **25 Nov**, the earliest day allowed, in
+  a journal of its own: Dr cost of goods sold **10.00** / Cr inventory
+  **10.00**, dated 25 Nov. The movement and the sync log say plainly that the
+  stock moved later because stock can't be backdated. Stock is **4 worth
+  40.00**, the same as the inventory account on every date. The same goes
+  for a restocked refund and for stock sent under Sales when sent. Stuck
+  orders are tried again oldest first (by the day they were placed), up to
+  50 a sync. Voiding such an invoice later is refused while other stock has
+  moved since, as for any invoice (ST4).

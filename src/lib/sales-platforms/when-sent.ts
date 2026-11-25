@@ -287,7 +287,8 @@ async function send(
           inventoryAccountCode: ctx.inventoryCode,
           offsetAccountCode: ctx.costOfSalesCode,
           quantity: toPlainString(part.quantity),
-        });
+          // SPF1: Allow negative stock applies, as on an invoice. SPF2: stock that can't be backdated goes on the earliest day allowed.
+        }, { followNegativeStockSetting: true, onEarliestDate: true });
       }
     }
   }

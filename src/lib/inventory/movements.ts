@@ -4,10 +4,12 @@ import { parseIsoDate } from "@/lib/dates";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { NotFoundError, ValidationError } from "@/lib/errors";
 import { assertSameRequest, requestHash } from "@/lib/idempotency";
-import { applyMovement, type CostingInput } from "@/lib/inventory/costing";
+import { applyMovement, type CostingInput, type CostingOptions } from "@/lib/inventory/costing";
+import { fallbackStockCost, negativeStockHelp } from "@/lib/inventory/stock";
 import { parseJournalBody, postJournalBody } from "@/lib/ledger/journals";
 import { currencyMinorUnits } from "@/lib/money/currency";
-import { abs, dec, isNegative, parseDecimalInput, toFixedString, toPlainString } from "@/lib/money/decimal";
+import { formatDate } from "@/lib/format";
+import { abs, dec, isNegative, isPositive, parseDecimalInput, toFixedString, toPlainString } from "@/lib/money/decimal";
 import {
   optionalId,
   optionalSource,
@@ -253,11 +255,16 @@ async function loadMovement(tx: OrgTx, where: string, values: unknown[]): Promis
  *   doesn't do yet, and silently mis-costing is worse than saying no.
  * - Retries with the same idempotency key return the original movement
  *   (checked before anything is recalculated).
+ * - `followNegativeStockSetting` (stock sent for a sales platform order,
+ *   SPF1): stock going out follows the organisation's Allow negative stock
+ *   setting, as an invoice does (ST9-ST11).
+ * - `onEarliestDate` (SPF2): a movement dated before the item's latest one
+ *   moves on that latest day instead, with a note saying so.
  */
 export async function postMovement(
   tx: OrgTx,
   input: Record<string, unknown>,
-  options: { receiptValue?: string } = {},
+  options: { receiptValue?: string; followNegativeStockSetting?: boolean; onEarliestDate?: boolean } = {},
 ): Promise<{ created: boolean; movement: Movement }> {
   const parsed = parseMovement(tx, input, options.receiptValue ?? null);
   const hash = movementHash(parsed);
@@ -314,7 +321,13 @@ export async function postMovement(
     [itemCode, parsed.locationValueId],
   );
   const balance = balanceResult.rows[0];
-  if (isNegative(dec(balance.on_hand_quantity))) {
+  const outgoing =
+    parsed.movementType === "issue" || parsed.movementType === "supplier_return" || (parsed.movementType === "adjustment" && isNegative(dec(parsed.quantityDelta!)));
+  const allowNegative =
+    options.followNegativeStockSetting === true &&
+    outgoing &&
+    (await tx.query<{ allow_negative_stock: boolean }>("select allow_negative_stock from organisation_settings where id = true")).rows[0]?.allow_negative_stock === true;
+  if (isNegative(dec(balance.on_hand_quantity)) && !allowNegative) {
     throw new ValidationError(
       `${itemCode} is below zero there, so stock can only come in on a bill, where the shortfall is costed (ST10).`,
     );
@@ -331,7 +344,12 @@ export async function postMovement(
     return { created: false, movement: toMovement(committedMeanwhile) };
   }
 
-  if (balance.last_movement_date && parsed.movementDate < balance.last_movement_date) {
+  let note: string | null = null;
+  if (balance.last_movement_date && parsed.movementDate < balance.last_movement_date && options.onEarliestDate) {
+    note = `${itemCode} moved on ${formatDate(balance.last_movement_date)}, not ${formatDate(parsed.movementDate)}, because ${itemCode} already had stock movements dated ${formatDate(balance.last_movement_date)} and stock can't be backdated.`;
+    parsed.movementDate = balance.last_movement_date;
+    parsed.description = `${parsed.description ?? `${parsed.movementType.replace("_", " ")} ${parsed.itemCode}`}. ${note}`.slice(0, 500);
+  } else if (balance.last_movement_date && parsed.movementDate < balance.last_movement_date) {
     throw new ValidationError(
       `${itemCode} already has stock movements dated ${balance.last_movement_date}. Backdated stock movements aren't supported yet, because every later sale would need re-costing. Use ${balance.last_movement_date} or later.`,
     );
@@ -387,11 +405,19 @@ export async function postMovement(
   }
 
   const moneyScale = currencyMinorUnits(tx.baseCurrency);
-  const result = applyMovement(
-    { quantity: balance.on_hand_quantity, value: balance.carrying_value },
-    costingInput,
-    moneyScale,
-  );
+  const costing: CostingOptions = { allowNegative };
+  if (allowNegative && !isPositive(dec(balance.on_hand_quantity))) {
+    costing.fallbackUnitCost = await fallbackStockCost(tx, itemId, itemCode, parsed.locationValueId);
+  }
+  let result: ReturnType<typeof applyMovement>;
+  try {
+    result = applyMovement({ quantity: balance.on_hand_quantity, value: balance.carrying_value }, costingInput, moneyScale, costing);
+  } catch (error) {
+    if (error instanceof ValidationError && options.followNegativeStockSetting) {
+      throw new ValidationError(`${itemCode}: ${error.message}${negativeStockHelp(error.message, allowNegative)}`);
+    }
+    throw error;
+  }
   // Values are whole cents, stored as e.g. "3.30".
   const valueDelta = toFixedString(dec(result.valueDelta), moneyScale);
   const valueAfter = toFixedString(dec(result.valueAfter), moneyScale);
