@@ -43,8 +43,11 @@ const interfaceAddresses = () =>
     .map((entry) => entry.address.toLowerCase());
 let ownAddresses: () => string[] = interfaceAddresses;
 
-/** Tests use made-up host names and addresses. */
-export function setOrganisationReachForTests(next: { resolve?: Resolve | null; ownAddresses?: (() => string[]) | null }): void {
+let networkForTests: OrganisationNetwork | null = null;
+
+/** Tests use made-up host names and addresses, and tests without the server's database can set the server admin's choice. */
+export function setOrganisationReachForTests(next: { resolve?: Resolve | null; ownAddresses?: (() => string[]) | null; network?: OrganisationNetwork | null }): void {
+  if (next.network !== undefined) networkForTests = next.network;
   if (next.resolve !== undefined) resolve = next.resolve ?? resolveWithDns;
   if (next.ownAddresses !== undefined) ownAddresses = next.ownAddresses ?? interfaceAddresses;
 }
@@ -63,6 +66,7 @@ export function addressPlace(address: string, own: readonly string[] = ownAddres
 }
 
 export async function getOrganisationNetwork(): Promise<OrganisationNetwork> {
+  if (networkForTests) return networkForTests;
   // Without the server's database (unit tests) the defaults apply.
   const stored = await readServerSetting<Partial<OrganisationNetwork>, Record<string, never>>(KEY).catch(() => ({ value: {} as Partial<OrganisationNetwork> }));
   return {
