@@ -544,7 +544,7 @@ export function orderExtraFields(parts: OrderParts): { order: string; allocation
   if (parts.sent) {
     // An alias, so it doesn't clash with the extras' own fulfillments field.
     order.push(`sentLines: fulfillments(first: ${SENT_PER_ORDER}) {
-      id status createdAt
+      id status createdAt updatedAt
       fulfillmentLineItems(first: ${SENT_LINES_PER_FULFILMENT}) { nodes { lineItem { id } quantity } pageInfo { hasNextPage } }
     }`);
   }

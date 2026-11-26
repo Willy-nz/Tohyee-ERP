@@ -1947,6 +1947,18 @@ that something happened.
   out. Tested on GitHub's Windows machines (a held file, and a failure on
   purpose before the start), not yet on a real Windows computer or with a
   restart in the middle.
+  **Signed updates** (UPD14-UPD19): the release build signs the Windows
+  installer with the owner's own key (kept offline; a GitHub secret signs
+  each release) and uploads a `.sig` beside it. Update now and the server
+  app's Install check it against the public keys each install shipped with,
+  and refuse an update that isn't signed or doesn't match. A server installed
+  before signing keeps the SHA-256 check and says "not signed", so the first
+  signed version still installs. Keys can be replaced (the file lists more
+  than one). Android release APKs are signed with one permanent key from the
+  secrets, checked against the previous release's; without it the release
+  has the test build and its notes say so. Setting it up:
+  `docs/OWNER-SETUP-SIGNING.md`. Checked on GitHub's Windows machines with
+  throwaway keys, not yet with the real key or on a real server.
 - **Server stats** in the Windows server app: CPU, memory,
   requests, people using Tohyee, database connections, disk space and each
   organisation's database size, with graphs of the last 24 hours.

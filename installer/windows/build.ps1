@@ -135,8 +135,17 @@ if ($LASTEXITCODE -ne 0) { throw "Building the Tohyee server app failed with exi
 if (-not (Test-Path (Join-Path $stage 'tray\TohyeeTray.exe'))) { throw 'The Tohyee server app (TohyeeTray.exe) was not built.' }
 Get-ChildItem (Join-Path $stage 'tray') -Include *.pdb, *.xml -Recurse | Remove-Item -Force
 
-foreach ($script in @('configure-tohyee.ps1', 'remove-services.ps1', 'tohyee-updater.ps1', 'update-guard.ps1', 'database-logins.sql', 'database-owner.sql')) {
+foreach ($script in @('configure-tohyee.ps1', 'remove-services.ps1', 'tohyee-updater.ps1', 'update-guard.ps1', 'database-logins.sql', 'database-owner.sql', 'release-signature.ps1', 'release-keys.txt')) {
   Copy-Item (Join-Path $PSScriptRoot $script) (Join-Path $stage "scripts\$script")
+}
+# The public keys this install will trust for updates (UPD14-UPD19): a
+# private key or a broken line here stops the build.
+. (Join-Path $PSScriptRoot 'release-signature.ps1')
+$releaseKeys = Get-TohyeeReleaseKeys (Join-Path $PSScriptRoot 'release-keys.txt')
+if ($releaseKeys.Count -eq 0) {
+  Write-Host 'release-keys.txt lists no keys: installs from this build check updates against the SHA-256 only (not signed).'
+} else {
+  Write-Host "Installs from this build trust update signatures from key(s) $(($releaseKeys | ForEach-Object { $_.Id }) -join ', ')."
 }
 
 Write-Host "== Inno Setup $InnoSetupVersion"
