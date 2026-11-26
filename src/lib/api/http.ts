@@ -206,7 +206,7 @@ export async function withTeamChat<T>(
   const membership = await requireOrganisationRole(auth, organisationId, "farm_worker");
   assertDemoAllows(request, membership.organisation);
   if (!teamChatAllows(membership.role, need)) {
-    throw new ForbiddenError(need === "post" ? "Posting in Chat needs the bookkeeper role or higher, or a sales role, in this organisation." : "Chat isn't open to your role in this organisation.");
+    throw new ForbiddenError("Chat isn't open to your role in this organisation.");
   }
   const people = await loadMemberNames(membership.organisation.id);
   const result = await withOrganisationTransaction(

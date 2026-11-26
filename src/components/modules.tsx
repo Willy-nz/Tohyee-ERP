@@ -30,7 +30,7 @@ export type Modules = {
   accounting?: boolean;
   /** Payroll (PAO1): in Accounting's menus while Accounting is on, its own app while it's off. Left out means on. */
   payroll?: boolean;
-  /** Chat (TCH1): one chat for the whole organisation, its own app. */
+  /** Chat (TCH1, TCH10): Everyone, spaces and direct messages, its own app. */
   chat?: boolean;
 };
 
@@ -332,7 +332,7 @@ export function ModulesCard({ organisationId }: { organisationId: string }) {
               <td>
                 <span className={ui.moduleIdentity}><IllustratedIcon name="chat" size={32} /><strong>Chat</strong></span>
                 <div className={ui.muted}>
-                  One chat for everyone in the organisation, with photos and voice notes, kept on this server. Its own app. Farm staff use their farm&apos;s chat instead.
+                  Everyone, spaces and direct messages, with photos, voice notes and mentions, kept on this server. Its own app. Farm staff use their farm&apos;s chat instead.
                 </div>
                 {chatOn ? (
                   <div className={ui.actions}>

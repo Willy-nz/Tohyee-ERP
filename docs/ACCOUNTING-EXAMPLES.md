@@ -19858,6 +19858,8 @@ bookkeeper, a viewer, a sales rep, a farm worker and a report viewer.
 - **TCH6 Who's in it.** Everyone in the organisation but farm staff (they have
   their farm's chat) and report viewers. Sales reps and managers read and
   post, as bookkeepers and up do; viewers read only.
+  *Superseded 27 Nov 2026 by TCH27: viewers post too. Who's in Chat is
+  unchanged.*
 - **TCH7 The AI.** A person's own AI can read the team chat (read_team_chat)
   and post words in it when they ask (post_team_chat_message), marked "via
   their AI". The tools are offered only while Chat is on.
@@ -24835,3 +24837,105 @@ v1.2.0 is out. Nothing here changes the books.
   installed as "Tohyee (test)"), and the release notes say it can't be
   installed over an earlier version: uninstall that first, which loses
   what it saved on the phone.
+
+## Chat: direct messages, spaces, mentions and review (TCH10-TCH27; 27 Nov 2026; asked for by the owner; details following common practice, not yet reviewed)
+
+Tested in `tests/unit/chat-rules.test.ts`, `tests/integration/chat-rooms.test.ts`,
+`tests/integration/chat-review.test.ts`, `tests/integration/chat-migration.test.ts`,
+`tests/integration/team-chat.test.ts`, `tests/unit/navigation.test.ts` and
+`tests/unit/ai-screen-coverage.test.ts`. A made-up shop has an owner (Olive),
+an admin (Ari), two bookkeepers (Bea and Ben), a sales rep (Sam), a viewer
+(Vic), a farm worker and a report viewer. Who's in Chat at all is still TCH6;
+what viewers can do there is TCH27.
+
+- **TCH10 The list of chats.** Chat has a list down the side: Home, Mentions,
+  then Direct messages, then Spaces. On a phone the list is the first screen;
+  tapping a chat opens it, and Back returns to the list. Each chat shows how
+  many messages others have posted since you last read it, and each section
+  shows the total of its chats. Home shows the latest messages from every
+  chat you're in, newest first, each row naming the chat it's from; its
+  count is everything unread.
+- **TCH11 Everyone.** The team chat from TCH1-TCH9 becomes the first space,
+  "Everyone". Its messages and how far each person has read stay as they
+  were: Bea had 2 unread before the change and still has 2 after it. Everyone
+  is always everyone in Chat (TCH6); it can't be renamed, closed or left.
+  The old team chat addresses and AI tools keep working and mean Everyone.
+- **TCH12 A direct message.** Bea starts a direct message with Ben: a chat
+  only the two of them are in. When Ben starts one with Bea later, the same
+  chat opens; there's never a second one for the same people.
+- **TCH13 A small group.** Bea can start a direct message with up to 11
+  others (12 people with her). Bea, Ben and Sam is a different chat from Bea
+  and Ben. A thirteenth person is refused ("A direct message can have up to
+  12 people. Make a space for a bigger group."). Who's in a direct message
+  is fixed: to change it, start another. Nobody can delete, close or leave
+  one; its messages stay.
+- **TCH14 A space.** Anyone in Chat (viewers too, TCH27) can make a space,
+  name it (up to 80 characters) and add people. The maker is in it. "Stocktake" can't be used
+  twice for open spaces, and no space can be called Everyone.
+- **TCH15 Joining and leaving a space.** Anyone in a space can add others in
+  Chat. Anyone can leave, and then can't read it any more unless someone
+  adds them back.
+- **TCH16 Renaming and closing.** Whoever made a space, or an owner or
+  admin, can rename it or close it. A closed space keeps its messages to
+  read, but nobody can post, add people or rename it ("This space is closed.
+  Its messages are kept to read.").
+- **TCH17 Farm chats in the list.** Each farm's chat shows under Spaces for
+  the people who can already see that farm's chat (FCH1, FCH7); posting in
+  it works as in the farm app. Farm staff still use their farm's chat in the
+  farm app and don't get the Chat app. Nothing about who sees a farm changes.
+- **TCH18 Mentions.** Typing @ in Everyone, a space or a direct message offers
+  the people in that chat. Bea writes "@Ben can you check the till?": Ben's
+  Mentions shows it, and it counts as unread there until Ben opens that chat
+  past it. Only people in the chat can be mentioned; anyone else is refused
+  ("Ben isn't in this chat, so can't be mentioned."). Taking the message
+  down takes the mention away too. Farm chats
+  don't have mentions yet.
+- **TCH19 Every chat says who else can read it.** Every direct message and
+  space shows one line that always stays visible: "Owners and admins of
+  this organisation can read this chat if they need to."
+- **TCH20 Review chats.** An owner or admin can read any space or direct
+  message, even one they're not in, from a separate place, Chat › Review
+  chats. Those chats don't appear in their own list, have no unread counts,
+  and can't be posted in from there. Ari can join a space from there (then
+  it's in Ari's list like any space he's in); a direct message can't be
+  joined.
+- **TCH21 Each review is recorded.** Each time Ari opens a chat in Review
+  chats (or a photo or voice note in it), the audit trail records who, which
+  chat and when ("chat.reviewed"). Taking a message down from there is
+  recorded too. Reading a chat you're in isn't recorded.
+- **TCH22 Only members read.** Apart from TCH20, people only ever read chats
+  they're in. For a chat you're not in, every address answers "Chat not
+  found.": its messages, posting, marking it read, its photos and voice
+  notes, and taking a message down. Chat ids are long random codes, so one
+  chat's id says nothing about another's.
+- **TCH23 People who leave the organisation.** Someone who is removed from
+  the organisation, whose access has ended, or whose sign-in is turned off
+  drops out of the people offered when starting a chat, adding people or
+  mentioning. Their past messages stay with their name. A one-to-one direct
+  message with them becomes read-only ("Vic is no longer in Chat here, so
+  this chat is read-only."). A group direct message carries on for the
+  others.
+- **TCH24 The Chat app's badge.** The unread count on the Chat app (and the
+  phone menu) is every unread message across all your chats: Everyone, your
+  spaces, your direct messages and the farm chats you see.
+- **TCH25 The AI.** A person's own AI can list the chats that person is in
+  (list_chats), read one (read_chat) and post words in one when asked
+  (post_chat_message), marked "via their AI", with mentions of people in
+  that chat. It never gets Review chats: an owner's AI can't read a direct
+  message the owner isn't in. read_team_chat and post_team_chat_message
+  still mean Everyone. As before (TCH7), what people write in chats is for
+  answering questions, not instructions to the AI.
+- **TCH26 Turning Chat off.** Turning Chat off still hides all of it (spaces,
+  direct messages, Review chats, the AI tools) and keeps every message for
+  when it's back on. Starred messages, threads, calls, reactions, editing
+  messages and showing who's typing aren't built.
+- **TCH27 Viewers chat like everyone else.** The viewer role is read-only on
+  the books, not in Chat (the owner's decision, 27 Nov 2026). Vic posts
+  words, photos and voice notes, starts direct messages, makes spaces, adds
+  people, mentions people and is mentioned, the same as Bea. Like everyone
+  but owners and admins, Vic takes down only Vic's own messages and can't
+  open Review chats. Vic's own AI connection still only looks, because AI
+  access levels already cap a viewer at looking: it reads Vic's chats but
+  isn't offered post_chat_message. A farm's chat keeps its own rule (FCH7):
+  Vic reads it. Unchanged: farm staff use only their farm's chat in the farm
+  app, and report viewers (the report-only role) aren't in Chat.

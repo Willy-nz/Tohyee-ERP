@@ -42,7 +42,7 @@ export function availableApps(modules: Modules | null, reportViewer = false, far
   ).map((app) => app.key);
 }
 
-/** Team chat messages this person hasn't read (TCH5), checked every minute while Chat is on. */
+/** Messages this person hasn't read across all their chats (TCH5, TCH24), checked every minute while Chat is on. */
 export function useTeamChatUnread(organisationId: string | null, on: boolean): number {
   const unread = useApiData<{ enabled: boolean; unread: number }>(on && organisationId ? "/api/chat/unread" : null, { organisationId: organisationId ?? "" });
   const reload = unread.reload;

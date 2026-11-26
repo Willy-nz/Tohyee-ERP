@@ -289,6 +289,7 @@ import { migration as m0313 } from "@/lib/db/migrations/tenant/0313-tax-rate-zer
 import { migration as m0316 } from "@/lib/db/migrations/tenant/0316-mob-farm-moves";
 import { migration as m0317 } from "@/lib/db/migrations/tenant/0317-farm-water-pipes";
 import { migration as m0318 } from "@/lib/db/migrations/tenant/0318-farm-task-category";
+import { migration as m0320 } from "@/lib/db/migrations/tenant/0320-chat-spaces";
 import { migration as m0315 } from "@/lib/db/migrations/tenant/0315-tax-decisions";
 import { migration as m0314 } from "@/lib/db/migrations/tenant/0314-sales-platform-cancelled-fulfilments";
 import { migration as m0310 } from "@/lib/db/migrations/tenant/0310-sales-platform-fixes";
@@ -651,4 +652,5 @@ export const tenantMigrations: readonly Migration[] = [
   m0316,
   m0317,
   m0318,
+  m0320,
 ];

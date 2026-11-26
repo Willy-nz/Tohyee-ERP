@@ -2,6 +2,7 @@ import { afterAll, beforeAll, expect, it } from "vitest";
 import * as attachmentRoute from "@/app/api/chat/attachments/[attachmentId]/route";
 import * as chatRoute from "@/app/api/chat/route";
 import * as unreadRoute from "@/app/api/chat/unread/route";
+import { effectiveAccessLevel, levelAllows } from "@/lib/ai/access-levels";
 import { findAiTool } from "@/lib/ai/catalogue";
 import { loadToolModules, moduleHidesTool } from "@/lib/ai/tool-modules";
 import type { SessionUser } from "@/lib/auth/sessions";
@@ -80,7 +81,7 @@ describeWithDatabase("team chat", () => {
     expect((await owner((tx) => listTeamChat(tx))).messages.map((entry) => entry.body)).not.toContain("On the farm");
   });
 
-  it("TCH6: sales reps read and post, viewers read only, farm staff and report viewers aren't in it", async () => {
+  it("TCH6, TCH27: sales reps and viewers read and post; farm staff and report viewers aren't in it", async () => {
     const posted = await chatRoute.POST(
       apiRequest("/api/chat", { method: "POST", cookie: await sessionCookieFor(people.rep), body: { organisationId: ORG, body: "Order for Ana is packed", idempotencyKey: key("team") } }),
       undefined as never,
@@ -91,7 +92,8 @@ describeWithDatabase("team chat", () => {
       apiRequest("/api/chat", { method: "POST", cookie: await sessionCookieFor(people.viewer), body: { organisationId: ORG, body: "Hi", idempotencyKey: key("team") } }),
       undefined as never,
     );
-    expect(viewerPost.status).toBe(403);
+    // TCH27 supersedes TCH6's "viewers read only": the viewer role limits the books, not chat.
+    expect(viewerPost.status).toBe(201);
     expect((await get("worker", chatRoute, `/api/chat?organisationId=${ORG}`)).status).toBe(403);
     expect((await get("reports", chatRoute, `/api/chat?organisationId=${ORG}`)).status).toBe(403);
     // The voice note plays for people in the chat.
@@ -103,9 +105,10 @@ describeWithDatabase("team chat", () => {
 
   it("TCH5: unread counts others' messages since you last read", async () => {
     const answer = await get("viewer", unreadRoute, `/api/chat/unread?organisationId=${ORG}`);
-    expect(await answer.json()).toEqual({ enabled: true, unread: 3 });
-    // The owner posted the first and has read up to it; the bookkeeper's and the rep's are new to them.
-    expect(await owner((tx) => teamChatUnread(tx))).toEqual({ enabled: true, unread: 2 });
+    // The viewer posted last (TCH27), which counts as reading the team chat up to there; since TCH24 the farm chat's 1 counts too.
+    expect(await answer.json()).toEqual({ enabled: true, unread: 1 });
+    // The owner posted the first and has read up to it; the bookkeeper's, the rep's and the viewer's are new to them.
+    expect(await owner((tx) => teamChatUnread(tx))).toEqual({ enabled: true, unread: 3 });
   });
 
   it("TCH4: only the poster, or an owner or admin, takes a message down", async () => {
@@ -122,13 +125,15 @@ describeWithDatabase("team chat", () => {
     expect(chat.messages.at(-1)).toMatchObject({ body: "Stock count Friday", viaAi: true });
     expect(chat.messages[0]).toMatchObject({ removed: true });
     await expect(as("worker", "farm_worker")((tx) => read.run(tx, {}, {} as never))).rejects.toThrow("Chat isn't open to this role.");
-    await expect(as("viewer", "viewer")((tx) => post.run(tx, { body: "Hi" }, {} as never))).rejects.toThrow("Posting in Chat needs");
+    // A viewer's own AI looks only (its access level is capped at read), so it's never offered the posting tool (TCH27).
+    expect(levelAllows(effectiveAccessLevel("full", "viewer"), post.level)).toBe(false);
+    expect(levelAllows(effectiveAccessLevel("full", "viewer"), read.level)).toBe(true);
   });
 
   it("TCH1: turning Chat off keeps the messages for when it's back on", async () => {
     await owner((tx) => setTeamChatEnabled(tx, { enabled: false }));
     await expect(owner((tx) => listTeamChat(tx))).rejects.toThrow("Chat is off.");
     await owner((tx) => setTeamChatEnabled(tx, { enabled: true }));
-    expect((await owner((tx) => listTeamChat(tx))).messages.length).toBe(4);
+    expect((await owner((tx) => listTeamChat(tx))).messages.length).toBe(5);
   });
 });

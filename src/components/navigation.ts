@@ -525,8 +525,11 @@ export const CRM_MENUS: Menu[] = (
 ).map((menu) => ({ ...menu, module: "crm" as const }));
 
 /** Analytics' tabs (its own app, under /analytics); shown only while Analytics is on. */
-/** The Chat app (TCH1): one page, the organisation's chat. */
-export const CHAT_MENUS: Menu[] = [{ label: "Chat", href: "/chat", groups: [], area: ["/chat"] }];
+/** The Chat app (TCH1, TCH10): the chats, and Review chats for owners and admins (TCH20). */
+export const CHAT_MENUS: Menu[] = [
+  { label: "Chat", href: "/chat", groups: [], area: ["/chat"] },
+  { label: "Review chats", href: "/chat/review", groups: [], area: ["/chat/review"], minRole: "admin" },
+];
 
 // Where the data comes from and how it's shaped is for whoever keeps the books: people who only look see Reports.
 export const ANALYTICS_MENUS: Menu[] = [
@@ -567,7 +570,7 @@ export const AREAS: Record<string, string[]> = {
 };
 
 /** Home pages whose menu is current on that page only, not the pages under it. */
-const EXACT_AREAS = new Set(["/operations", "/crm", "/analytics", "/operations/farm"]);
+const EXACT_AREAS = new Set(["/operations", "/crm", "/analytics", "/operations/farm", "/chat"]);
 
 export function inArea(pathname: string, menu: Menu): boolean {
   return (menu.area ?? AREAS[menu.label] ?? []).some((path) =>
@@ -738,7 +741,7 @@ export function visibleMenus(app: AppKey, access: Access): Menu[] {
       .filter((menu) => menu.groups.length > 0);
   }
   // Chat (TCH1, TCH6): while it's on, for everyone but farm staff and report viewers.
-  if (app === "chat") return access.modules?.chat === true && !access.farmWorker ? CHAT_MENUS : [];
+  if (app === "chat") return access.modules?.chat === true && !access.farmWorker ? CHAT_MENUS.filter((menu) => !menu.minRole || access.can(menu.minRole)) : [];
   // MOD2: no Accounting menus while it's off; Farm needs Accounting.
   if ((app === "accounting" || app === "farm") && access.modules?.accounting === false) return [];
   if (access.farmWorker) {

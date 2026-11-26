@@ -2,12 +2,12 @@
 
 import { Suspense } from "react";
 import { RequireOrganisation } from "@/components/books";
-import { TeamChat } from "@/components/farm-chat";
+import { ChatApp } from "@/components/chat/chat-app";
 import { useModules } from "@/components/modules";
 import { Notice, Page, PageHeader } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
 
-/** The organisation's team chat (TCH1-TCH6). */
+/** Chat (TCH1-TCH27): the list of chats and the open one. */
 export default function ChatPage() {
   return (
     <Page>
@@ -26,12 +26,5 @@ function ChatForOrganisation({ organisationId }: { organisationId: string }) {
   if (role === "farm_worker" || role === "report_viewer") return <Notice tone="info">Chat isn&apos;t open to your role in this organisation.</Notice>;
   if (!modules) return null;
   if (!modules.chat) return <Notice tone="info">Chat is off. An admin can turn it on under Settings, Modules.</Notice>;
-  return (
-    <TeamChat
-      organisationId={organisationId}
-      name={current?.displayName ?? "the team"}
-      canRemoveAny={role === "owner" || role === "admin"}
-      canPost={role !== "viewer"}
-    />
-  );
+  return <ChatApp organisationId={organisationId} />;
 }
