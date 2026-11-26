@@ -6,10 +6,11 @@ import { formatDate } from "@/lib/format";
 import { loadStockContext } from "@/lib/inventory/stock";
 import { postMovement } from "@/lib/inventory/movements";
 import { type AmountsMode, calculateInvoice } from "@/lib/invoices/amounts";
-import { parseJournalBody, postJournalBody } from "@/lib/ledger/journals";
-import { add, cmp, dec, type Decimal, isPositive, isZero, mul, mulDiv, neg, sub, sum, toFixedString, toPlainString } from "@/lib/money/decimal";
+import { add, cmp, dec, type Decimal, isPositive, isZero, mul, mulDiv, sub, sum, toFixedString, toPlainString } from "@/lib/money/decimal";
 import type { PlatformOrder } from "@/lib/sales-platforms/connector";
 import { writeLog } from "@/lib/sales-platforms/log";
+import { reverseCancelled, sentKey } from "@/lib/sales-platforms/sent-cancelled";
+import { type HeldRow, left, loadHeld, type Move, postMoves, SCALE, saveRows, SOURCE, stillHeld } from "@/lib/sales-platforms/held-rows";
 import { type HeldUse, localDate, type PlannedLine, type RefundHeld } from "@/lib/sales-platforms/orders";
 import { requireString } from "@/lib/validation";
 
@@ -23,29 +24,6 @@ import { requireString } from "@/lib/validation";
  * nothing left to send has anything left held moved to sales, so Income in
  * advance clears.
  */
-
-const SCALE = 2;
-const SOURCE = "sales-platform";
-
-/** One line an order holds, as stored. */
-type HeldRow = {
-  id: string;
-  line_kind: "line" | "shipping";
-  line_external_id: string;
-  description: string;
-  item_code: string | null;
-  item_type: string | null;
-  income_code: string;
-  held_code: string;
-  quantity: string;
-  amount: string;
-  sent_quantity: string;
-  refunded_quantity: string;
-  recognised_amount: string;
-  refunded_amount: string;
-  closed: boolean;
-  stock_out_item_id: string | null;
-};
 
 export type HeldLine = {
   kind: "line" | "shipping";
@@ -105,31 +83,18 @@ export async function saveHeld(tx: OrgTx, connectionId: string, orderId: string,
   }
 }
 
-async function loadHeld(tx: OrgTx, connectionId: string, orderId: string): Promise<HeldRow[]> {
-  const result = await tx.query<HeldRow>(
-    `select h.id, h.line_kind, h.line_external_id, h.description, i.code as item_code, i.item_type, income.code as income_code, held.code as held_code,
-            h.quantity::text, h.amount::text, h.sent_quantity::text, h.refunded_quantity::text, h.recognised_amount::text, h.refunded_amount::text, h.closed, h.stock_out_item_id::text
-       from sales_platform_held_lines h
-       join accounts income on income.id = h.income_account_id
-       join accounts held on held.id = h.held_account_id
-       left join items i on i.id = h.item_id
-      where h.connection_id = $1 and h.order_external_id = $2
-      order by h.id
-      for update of h`,
-    [connectionId, orderId],
-  );
-  return result.rows;
-}
-
-const left = (row: HeldRow): Decimal => sub(sub(dec(row.quantity), dec(row.sent_quantity)), dec(row.refunded_quantity));
-const stillHeld = (row: HeldRow): Decimal => sub(sub(dec(row.amount), dec(row.recognised_amount)), dec(row.refunded_amount));
-
 /** What a refund can take from what's held (SWS5, SWS6), or null when the order holds nothing. */
 export async function refundHeld(tx: OrgTx, connectionId: string, orderId: string): Promise<RefundHeld | null> {
-  const rows = (await loadHeld(tx, connectionId, orderId)).filter((row) => !row.closed);
-  if (rows.length === 0) return null;
+  const all = await loadHeld(tx, connectionId, orderId);
+  const rows = all.filter((row) => !row.closed);
+  // SPF18: lines held from the start whose stock left when they were sent, open or not.
+  const sentFromStock = new Set(
+    all.filter((row) => row.line_kind === "line" && row.item_code !== null && (row.item_type === "stock" || row.item_type === "kit") && isPositive(dec(row.sent_quantity))).map((row) => row.line_external_id),
+  );
+  if (rows.length === 0 && sentFromStock.size === 0) return null;
   return {
-    accountCode: rows[0].held_code,
+    sentFromStock,
+    accountCode: (rows[0] ?? all[0]).held_code,
     lines: new Map(rows.filter((row) => row.line_kind === "line").map((row) => [row.line_external_id, left(row)])),
     shipping: new Set(rows.filter((row) => row.line_kind === "shipping" && isZero(dec(row.sent_quantity))).map((row) => row.line_external_id)),
     stockOut: new Map(rows.flatMap((row) => (row.line_kind === "line" && row.stock_out_item_id ? [[row.line_external_id, row.stock_out_item_id] as const] : []))),
@@ -162,29 +127,6 @@ export async function ordersHeld(tx: OrgTx, connectionId: string, limit = 25): P
   return ids;
 }
 
-type Move = { from: string; to: string; amount: Decimal; description: string };
-
-/** Posts the moves out of Income in advance as one journal (origin sales_when_sent), or nothing when they come to nothing. */
-async function postMoves(tx: OrgTx, key: string, date: string, reference: string, description: string, moves: readonly Move[]): Promise<string | null> {
-  const lines: Array<{ accountCode: string; debitAmount: string; creditAmount: string; description: string }> = [];
-  for (const move of moves) {
-    if (isZero(move.amount)) continue;
-    const amount = toFixedString(isPositive(move.amount) ? move.amount : neg(move.amount), SCALE);
-    const [debit, credit] = isPositive(move.amount) ? [move.from, move.to] : [move.to, move.from];
-    lines.push({ accountCode: debit, debitAmount: amount, creditAmount: "0", description: move.description });
-    lines.push({ accountCode: credit, debitAmount: "0", creditAmount: amount, description: move.description });
-  }
-  if (lines.length === 0) return null;
-  const posted = await postJournalBody(
-    tx,
-    SOURCE,
-    key,
-    parseJournalBody(tx, { postingDate: date, reference: reference.slice(0, 100), description: description.slice(0, 500), lines }, { internal: true }),
-    { origin: "sales_when_sent" },
-  );
-  return posted.journal.id;
-}
-
 /** Closes lines with nothing left to send, moving anything still held for them to sales (SWS7). */
 function finish(rows: HeldRow[], moves: Move[]): void {
   for (const row of rows) {
@@ -197,16 +139,6 @@ function finish(rows: HeldRow[], moves: Move[]): void {
       row.recognised_amount = toFixedString(add(dec(row.recognised_amount), rest), SCALE);
     }
     row.closed = true;
-  }
-}
-
-async function saveRows(tx: OrgTx, rows: readonly HeldRow[]): Promise<void> {
-  for (const row of rows) {
-    await tx.query(
-      `update sales_platform_held_lines set sent_quantity = $2::numeric, refunded_quantity = $3::numeric, recognised_amount = $4::numeric,
-              refunded_amount = $5::numeric, closed = $6, updated_at = now() where id = $1`,
-      [row.id, row.sent_quantity, row.refunded_quantity, row.recognised_amount, row.refunded_amount, row.closed],
-    );
   }
 }
 
@@ -250,8 +182,10 @@ export async function takeRefundFromHeld(
 async function send(
   tx: OrgTx,
   input: { rows: HeldRow[]; lines: ReadonlyArray<{ lineItemId: string; quantity: string }> | null; date: string; orderName: string; reference: string; description: string; key: string },
-): Promise<string | null> {
+): Promise<{ journalId: string | null; counted: CountedLine[] }> {
   const { rows, date } = input;
+  // SPF13: what this counting does to each line, so a cancelled shipment can undo exactly that.
+  const before = new Map(rows.map((row) => [row.id, { sent: row.sent_quantity, recognised: row.recognised_amount }]));
   const wanted =
     input.lines ?? rows.filter((row) => row.line_kind === "line" && !row.closed).map((row) => ({ lineItemId: row.line_external_id, quantity: toPlainString(left(row)) }));
   const moves: Move[] = [];
@@ -285,6 +219,14 @@ async function send(
   }
   finish(rows, moves);
   const journalId = await postMoves(tx, `${input.key}:journal`, date, input.reference, input.description, moves);
+  const counted: CountedLine[] = [];
+  for (const row of rows) {
+    const was = before.get(row.id)!;
+    const quantity = sub(dec(row.sent_quantity), dec(was.sent));
+    const amount = sub(dec(row.recognised_amount), dec(was.recognised));
+    if (isZero(quantity) && isZero(amount)) continue;
+    counted.push({ heldLineId: row.id, quantity: toPlainString(quantity), amount: toFixedString(amount, SCALE) });
+  }
   if (stock.length > 0) {
     const ctx = await loadStockContext(tx, "Stock can't be taken out for what was sent");
     for (const entry of stock) {
@@ -315,7 +257,29 @@ async function send(
       }
     }
   }
-  return journalId;
+  return { journalId, counted };
+}
+
+/** One line's part in counting a fulfilment: the quantity sent and the amount moved to sales (SPF13). */
+type CountedLine = { heldLineId: string; quantity: string; amount: string };
+
+/** Records a fulfilment as counted, with what it did line by line (SWS8, SPF13). */
+async function recordSent(
+  tx: OrgTx,
+  input: { connectionId: string; orderId: string; fulfilmentId: string; sentOn: string; journalId: string | null; counted: readonly CountedLine[] },
+): Promise<void> {
+  const inserted = await tx.query<{ id: string }>(
+    `insert into sales_platform_sent (connection_id, order_external_id, fulfilment_external_id, sent_on, journal_id, lines_recorded) values ($1, $2, $3, $4, $5, true) returning id`,
+    [input.connectionId, input.orderId, input.fulfilmentId, input.sentOn, input.journalId],
+  );
+  for (const line of input.counted) {
+    await tx.query("insert into sales_platform_sent_lines (sent_id, held_line_id, quantity, amount) values ($1, $2, $3::numeric, $4::numeric)", [
+      inserted.rows[0].id,
+      line.heldLineId,
+      line.quantity,
+      line.amount,
+    ]);
+  }
 }
 
 /**
@@ -323,49 +287,63 @@ async function send(
  * fulfilment not yet counted (up to `upTo`, oldest first), a journal moves
  * each sent line's share out of Income in advance to its sales account, and
  * the shipping with the first thing sent; stock items come out of stock.
- * Dated the day it was sent, or the invoice date if that's later.
+ * Dated the day it was sent, or the invoice date if that's later. A counted
+ * fulfilment Shopify has since cancelled is reversed (SPF13-SPF19), in
+ * Shopify's order with the counting: by when each was sent or cancelled.
  */
 export async function countSent(
   tx: OrgTx,
   input: { connectionId: string; storeDomain: string; order: PlatformOrder; invoiceDate: string; upTo: string | null },
-): Promise<{ counted: number }> {
+): Promise<{ counted: number; reversed: string[] }> {
   const { order } = input;
-  if (!order.sent) return { counted: 0 };
-  const done = await tx.query<{ fulfilment_external_id: string }>(
-    "select fulfilment_external_id from sales_platform_sent where connection_id = $1 and order_external_id = $2",
+  if (!order.sent) return { counted: 0, reversed: [] };
+  const done = await tx.query<{ fulfilment_external_id: string; reversed: boolean }>(
+    "select fulfilment_external_id, reversed_at is not null as reversed from sales_platform_sent where connection_id = $1 and order_external_id = $2",
     [input.connectionId, order.externalId],
   );
-  const counted = new Set(done.rows.map((row) => row.fulfilment_external_id));
-  const waiting = order.sent
-    .filter((f) => f.status === "SUCCESS" && !counted.has(f.externalId))
-    .filter((f) => input.upTo === null || (f.createdAt !== null && Date.parse(f.createdAt) <= Date.parse(input.upTo)))
-    .sort((a, b) => Date.parse(a.createdAt ?? "") - Date.parse(b.createdAt ?? ""));
-  if (waiting.length === 0) return { counted: 0 };
+  const counted = new Map(done.rows.map((row) => [row.fulfilment_external_id, row.reversed]));
+  const upTo = input.upTo === null ? null : Date.parse(input.upTo);
+  const at = (value: string | null | undefined): number => (value ? Date.parse(value) : Number.POSITIVE_INFINITY);
+  const events = [
+    ...order.sent
+      .filter((f) => f.status === "SUCCESS" && !counted.has(f.externalId))
+      .filter((f) => upTo === null || (f.createdAt !== null && Date.parse(f.createdAt) <= upTo))
+      .map((fulfilment) => ({ kind: "count" as const, fulfilment, at: at(fulfilment.createdAt) })),
+    // SPF13: counted, not yet reversed, and now cancelled. When it was cancelled is when Shopify last changed it.
+    ...order.sent
+      .filter((f) => f.status === "CANCELLED" && counted.get(f.externalId) === false)
+      .filter((f) => upTo === null || (f.updatedAt != null && Date.parse(f.updatedAt) <= upTo))
+      .map((fulfilment) => ({ kind: "reverse" as const, fulfilment, at: at(fulfilment.updatedAt) })),
+  ].sort((a, b) => a.at - b.at);
+  if (events.length === 0) return { counted: 0, reversed: [] };
   const rows = await loadHeld(tx, input.connectionId, order.externalId);
   let number = 0;
-  for (const fulfilment of waiting) {
+  const reversed: string[] = [];
+  for (const event of events) {
+    const { fulfilment } = event;
+    if (event.kind === "reverse") {
+      const message = await reverseCancelled(tx, { connectionId: input.connectionId, storeDomain: input.storeDomain, order, fulfilment, rows });
+      if (message) reversed.push(message);
+      continue;
+    }
     if (fulfilment.incomplete) throw new ValidationError(`a fulfilment sent more lines than Tohyee reads, so what it sent can't be counted yet.`);
     const sentOn = fulfilment.createdAt ? localDate(fulfilment.createdAt) : input.invoiceDate;
     const date = sentOn < input.invoiceDate ? input.invoiceDate : sentOn;
-    const journalId = await send(tx, {
+    const result = await send(tx, {
       rows,
       lines: fulfilment.lines,
       date,
       orderName: order.name,
       reference: `${order.name} sent`,
       description: `${order.name}: sent on ${sentOn}`,
-      key: `sp:${input.storeDomain}:sent:${fulfilment.externalId}`.slice(0, 120),
+      key: sentKey(input.storeDomain, fulfilment.externalId),
     });
-    await tx.query(
-      `insert into sales_platform_sent (connection_id, order_external_id, fulfilment_external_id, sent_on, journal_id) values ($1, $2, $3, $4, $5)`,
-      [input.connectionId, order.externalId, fulfilment.externalId, sentOn, journalId],
-    );
+    await recordSent(tx, { connectionId: input.connectionId, orderId: order.externalId, fulfilmentId: fulfilment.externalId, sentOn, journalId: result.journalId, counted: result.counted });
     number += 1;
   }
   await saveRows(tx, rows);
-  return { counted: number };
+  return { counted: number, reversed };
 }
-
 
 export type HeldOrder = { orderId: string; name: string; invoiceDate: string; held: string; lines: string[] };
 
@@ -410,20 +388,23 @@ export async function markHeldOrderSent(tx: OrgTx, connectionId: string, orderId
   if (open.length === 0) throw new ConflictError(`${name} has nothing left to send.`);
   const held = toFixedString(sum(open.map(stillHeld)), SCALE);
   const lines = open.map((row) => row.description);
-  const journalId = await send(tx, {
+  // Marked again after a cancelled shipment put things back (SPF13): each marking is its own.
+  const before = Number((await tx.query<{ n: string }>(
+    "select count(*)::text as n from sales_platform_sent where connection_id = $1 and order_external_id = $2 and fulfilment_external_id like 'marked:%'",
+    [connectionId, orderId],
+  )).rows[0].n);
+  const marking = before === 0 ? orderId : `${orderId}:${before + 1}`;
+  const { journalId, counted } = await send(tx, {
     rows,
     lines: null,
     date: sentOn,
     orderName: name,
     reference: `${name} marked sent`,
     description: `${name}: marked as sent on ${sentOn} in Tohyee`,
-    key: `sp:${doc.store_domain}:marked-sent:${orderId}`.slice(0, 120),
+    key: `sp:${doc.store_domain}:marked-sent:${marking}`.slice(0, 120),
   });
   await saveRows(tx, rows);
-  await tx.query(
-    `insert into sales_platform_sent (connection_id, order_external_id, fulfilment_external_id, sent_on, journal_id) values ($1, $2, $3, $4, $5)`,
-    [connectionId, orderId, `marked:${orderId}`, sentOn, journalId],
-  );
+  await recordSent(tx, { connectionId, orderId, fulfilmentId: `marked:${marking}`, sentOn, journalId, counted });
   const who = tx.actor.email ?? "someone";
   await writeLog(tx, connectionId, {
     source: "connection",

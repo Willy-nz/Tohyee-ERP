@@ -16037,7 +16037,10 @@ amount paid.
     (3 weeks), that single period is longer than 1 week, so none of it
     counts: her anniversary moves by the whole 21 days, from Wed 1 Apr to
     **Wed 22 Apr 2026** (following the Act's wording). Her AWE
-    divisor stays 52.
+    divisor stays 52. (Superseded 26 Nov 2026 by TXF10: the anniversary
+    now moves only by the part over one week, to Wed 15 Apr 2026. Leave
+    recorded before then keeps the whole-period move until a person
+    reviews it, TXF11.)
   - If they agree, in writing, to count the whole 3 weeks, Tohyee records
     the agreement, the anniversary stays **Wed 1 Apr 2026** and her AWE
     divisor drops from 52 to **50** (the weeks over 1 week, s16(3)). Without
@@ -16696,7 +16699,7 @@ The owner asked Claude to research these questions and make the calls (1 Oct
   HL24).
 - **14** Unpaid leave of more than a week (a single period) moves the
   anniversary by its whole length unless a written agreement to count it
-  is recorded, which cuts the AWE divisor instead (HL10). (Corrected 2 Oct 2026 while building: this summary still had the earlier call, "only by the part beyond one week", which replaced on 1 Oct 2026.)
+  is recorded, which cuts the AWE divisor instead (HL10). (Corrected 2 Oct 2026 while building: this summary still had the earlier call, "only by the part beyond one week", which replaced on 1 Oct 2026.) (Superseded 26 Nov 2026: the owner chose Employment NZ's guidance, so the anniversary moves only by the part over one week; see TXF10 and TXF11.)
 - **15** No hard limit on holidays in advance; a warning above what's been
   earned, and a prompt for the written agreement (HL14).
 - **16** Advance leave worth more than the 8% is deducted only with written
@@ -19521,7 +19524,8 @@ sent** on and Income in advance **2350** (a current liability). Order
 - **SWS7** Whatever's left: when a line has nothing left to send, anything
   still held for it goes to sales (or back), so 2350 always clears.
 - **SWS8** Sent before it's paid: the sale counts on the invoice date. A
-  cancelled fulfilment counts for nothing. A fulfilment is counted once.
+  cancelled fulfilment counts for nothing (one cancelled after it was
+  counted is reversed: SPF13). A fulfilment is counted once.
 - **SWS9** Only orders brought in while Sales when sent is on are held.
   Turning it off leaves orders already held to be counted when sent.
   Journals it posts say they came from Shopify and can't be corrected by
@@ -24363,3 +24367,339 @@ stays in the same books. Records only: nothing is posted. Tested in
   other. Moving tagged animals by tag between mobs on different farms
   points to this step ("use Move to another farm") instead of "sell and
   buy".
+
+## Tax and payroll decisions: unpaid leave, lines and legacy superannuation trusts, provisional tax options (TXF10-TXF18; 26 Nov 2026; owner's decisions, details following common practice, not yet reviewed)
+
+The owner decided the behaviour; the details follow the pages cited, read on
+26 Nov 2026 through a summarising fetch tool (so check the pages). Made-up
+figures and names.
+
+- **TXF10 Unpaid leave of more than a week moves the anniversary only by the
+  part over one week.** Employment NZ says the anniversary moves "by the
+  length of the (continuous) period of leave without pay in excess of one
+  week", and that each continuous period is looked at on its own: two
+  separate weeks don't move it
+  (https://www.employment.govt.nz/leave-and-holidays/leave-without-pay ;
+  https://employment.govt.nz/assets/uploads/documents/leave-and-holidays/holiday-act-guidance-tool-leave-without-pay.pdf ;
+  Holidays Act 2003 s 16: https://legislation.govt.nz/act/public/2003/129/en/latest/).
+  This replaces HL10's whole-period move.
+  - Aroha started Tue 1 Apr 2025 and takes unpaid leave Mon 2 to Sun 22 Feb
+    2026 (21 days). 7 days count; the other **14** move her anniversary
+    from Wed 1 Apr to **Wed 15 Apr 2026** (then 15 Apr each year).
+  - Rangi started Sat 1 Feb 2025 and takes unpaid leave Mon 3 to Tue 18 Nov
+    2025 (16 days). His anniversary moves by 9 days, to **Tue 10 Feb 2026**
+    (Employment NZ's own example moves an anniversary from 1 to 10 February
+    for the same length of leave).
+  - Two separate unpaid weeks (Mon 2 to Sun 8 Feb and Mon 2 to Sun 8 Mar
+    2026) each count in full: the anniversary stays 1 Apr.
+  - Unchanged: statutory unpaid leave always counts, and with a written
+    agreement to count the leave the anniversary stays and the AWE divisor
+    is cut by the weeks over one (HL10, s 16(3)).
+  Tested in `tests/unit/payroll-leave.test.ts` (HL10's test now expects 15
+  Apr 2026; HL43's opening-balance test now expects 18 Mar 2027 instead of
+  25 Mar 2027) and `tests/integration/payroll-leave.test.ts` (Cara's 21
+  days in January 2027 now move her anniversary from 4 May to **18 May
+  2027**, not 25 May).
+- **TXF11 Leave recorded under the earlier rule.** Tohyee works anniversaries
+  out from the unpaid leave records; it doesn't store the dates. Unpaid
+  leave recorded before this change keeps moving the anniversary by its
+  whole length, so nothing already worked out changes by itself. The
+  employee's leave page shows a plain note on each such record: "Recorded
+  under Tohyee's earlier rule, so it moves the anniversary by all 21 days.
+  Employment NZ's guidance moves it only by the 14 days over one week."
+  A person checks it (with the employee, and against any holiday pay
+  already worked out on the later date) and chooses **Use the current
+  rule**. That's recorded in the audit log with who did it; draft pay runs
+  from the leave's start are worked out again; approved pay runs aren't
+  changed. Cara's leave of 4 to 24 Jan 2027, recorded before the change,
+  gives an anniversary of 25 May 2027 with the note; after Use the current
+  rule, **18 May 2027**. New records always use the current rule. Tested in
+  `tests/integration/payroll-leave.test.ts`.
+- **TXF12 Lines trusts (energy consumer trusts) at 33%.** Income Tax Act 2007
+  schedule 1 part A clause 6B gives a basic rate of 0.33 to the trustee of
+  "a lines trust", from 1 April 2024 (the 2025 income year onwards)
+  (https://legislation.govt.nz/act/public/2007/97/en/latest/parts/DLM1523173/).
+  Section YA 1 defines a lines trust as one that was allocated or vested
+  shares in an energy company under the Energy Companies Act 1992 (or
+  under the Southland Electricity Act 1993 provisions) and still holds
+  them or still has the same class of beneficiaries
+  (https://www.legislation.govt.nz/act/public/2007/97/en/latest/parts/DLM1520573/).
+  IRD's trustee tax rates page and the IR6 guide (Q27B) call them energy
+  consumer trusts, at 33%
+  (https://www.ird.govt.nz/income-tax/income-tax-for-businesses-and-organisations/trusts-and-estates/income/trustee-tax-rates ;
+  https://www.ird.govt.nz/-/media/project/ir/home/documents/forms-and-guides/ir1---ir99/ir6g/ir6g-2026.pdf).
+  A new trust kind, "Lines trust (energy consumer trust)". Trustee income
+  of $50,000.00 in the 2027 income year: tax **$16,500.00** (not $19,500.00
+  at 39%). Excess imputation credits of $330.00 become a loss of
+  **$1,000.00** ($330 ÷ 0.33, IR6 guide Q27G). The IR6 has no box or tick
+  for the kind: the rate shows only in the tax worked out (as for an
+  estate). The minor beneficiary rule still applies, as for a family trust
+  (no exclusion for lines trusts was checked).
+- **TXF13 Legacy superannuation funds at 28%.** Schedule 1 part A clause 6(d)
+  gives 0.28 to the trustee of "a legacy superannuation fund", inserted
+  from 1 April 2024. Section YA 1: a scheme that used to be a widely-held
+  superannuation fund and is a restricted workplace savings scheme (or a
+  scheme treated as registered under the National Provident Fund
+  Restructuring Act 1990, s 59A(1)(b)). The IR6 guide (Q27B, Q27G) uses
+  28% for "a legacy superannuation fund trust". A new trust kind, "Legacy
+  superannuation fund". Trustee income $50,000.00: tax **$14,000.00**;
+  excess imputation credits of $280.00: loss **$1,000.00**. It's 28%
+  whatever the income: Tohyee doesn't apply the $10,000 test to it (whether
+  the 33% rule for a trust with $10,000 or less could apply instead wasn't
+  checked). The screen says IRD's registered superannuation funds page
+  says registered funds file an IR44, which Tohyee doesn't produce
+  (https://ird.govt.nz/income-tax/income-tax-for-businesses-and-organisations/income-tax-for-registered-superannuation-funds),
+  so this kind is for a fund that files an IR6. Tested (TXF12, TXF13) in
+  `tests/unit/trust-tax.test.ts` and `tests/integration/trust-tax.test.ts`.
+- **TXF14 A provisional tax option for each income year.** Standard until a
+  person chooses another: estimation, ratio, or AIM (through other
+  software). The choice is per income year: IRD moves AIM users back to
+  standard at the start of each year unless they choose AIM again
+  (https://www.ird.govt.nz/income-tax/provisional-tax/provisional-tax-options/accounting-income-method-aim).
+  Choosing here doesn't tell IRD; the screen says so. The instalments, due
+  dates, end-of-year tax, interest estimate and the AI's figures all follow
+  the option. Tested in `tests/integration/provisional-options.test.ts`.
+- **TXF15 Estimation option.** Anyone liable for provisional tax can estimate
+  their residual income tax (RIT), and estimate again, on or before an
+  instalment date, up to the last one (Income Tax Act 2007 s RC 7;
+  https://www.ird.govt.nz/income-tax/provisional-tax/provisional-tax-options/estimation-option).
+  The estimate must be fair and reasonable (s RC 7(4)); Tohyee says so but
+  can't judge it. Each instalment is (the estimate × the instalment's number
+  ÷ the number of instalments) less the provisional tax for the earlier
+  instalments (s RC 10, https://legislation.govt.nz/act/public/2007/97/en/latest/parts/DLM1519723/):
+  3 instalments, or 2 for a six-monthly GST filer, on the standard dates.
+  An instalment before the first estimate keeps its standard amount.
+  - Harakeke Ltd, 31 March balance date, 2027 income year. Estimate
+    $30,000.00 typed on 1 Aug 2026: instalment 1 (Fri 28 Aug 2026)
+    **$10,000.00**. Estimate again on 10 Jan 2027, $60,000.00: instalment 2
+    (Fri 15 Jan 2027) 60,000 × 2 ÷ 3 − 10,000 = **$30,000.00**; instalment 3
+    (Fri 7 May 2027) 60,000 − 40,000 = **$20,000.00**.
+  - An estimate after the last instalment date (7 May 2027) is refused.
+  - **Interest:** IRD charges interest on the difference between what was
+    paid and the year's actual RIT spread equally over the instalments, from
+    the day after each instalment date, even when the estimate was paid in
+    full and on time; there's no $60,000 rule
+    (https://www.ird.govt.nz/income-tax/provisional-tax/interest-on-provisional-tax,
+    its "Mary" example). Harakeke's RIT turns out $57,000.00, so $19,000.00
+    is required by each date. Paid $10,000 on 28 Aug, $30,000 on 15 Jan and
+    $20,000 on 7 May: $9,000.00 unpaid from 29 Aug 2026 to 15 Jan 2027 (140
+    days at 8.97%): **$309.65**. After that more than the share is paid, so
+    nothing more; interest IRD pays on the overpaid part isn't worked out
+    (as before).
+  Tested in `tests/unit/provisional-options.test.ts`.
+- **TXF16 Ratio option.** Who can use it (s RC 16, RC 17;
+  https://www.ird.govt.nz/income-tax/provisional-tax/provisional-tax-options/ratio-option):
+  last year's RIT more than $5,000 and no more than $150,000; registered
+  for GST for the whole of last year; filing GST monthly or two-monthly;
+  not a partnership; a ratio between 0% and 100%. It's chosen with IRD
+  before the income year starts (s RC 15), and IRD tells the taxpayer the
+  ratio: last year's RIT ÷ last year's total taxable supplies, GST
+  included (s RC 8(2), RC 8(8)). Tohyee takes the ratio IRD gave, typed.
+  - Each instalment is the ratio × total taxable supplies for the two
+    months before it (s RC 11): GST return Box 5 (sales including GST and
+    zero-rated sales), from the filed return, or worked out from the books
+    when it isn't filed yet. A monthly filer's two returns are added
+    together. Six instalments; for a 31 March balance date 28 Jun, 28 Aug,
+    28 Oct, 15 Jan, 28 Feb and 7 May
+    (https://www.ird.govt.nz/income-tax/provisional-tax/paying-your-provisional-tax/payment-dates-for-provisional-tax),
+    each for the two months ending the month before. Rounded to the cent.
+  - Kōura Ltd's ratio is 8%. Box 5 for April and May 2026 is $13,000.00, so
+    instalment 1 (Sun 28 Jun 2026, on time by Mon 29 Jun) is **$1,040.00**
+    (IRD's own example has the same figures). An instalment whose two months
+    haven't ended says "Not known yet".
+  - Refused: a six-monthly GST filer; last year's RIT (IRD's figure) of
+    $160,000.00 or $4,000.00; not registered for GST for all of last year; a
+    ratio of 0% or 100%; a balance date other than 31 March (the dates are
+    checked for 31 March only).
+  - **Interest:** used correctly and paid on time, IRD charges no interest on
+    the instalments; interest runs only on what's unpaid after the
+    end-of-year tax date, and IRD pays none on an overpayment (IRD,
+    "Interest on provisional tax"). Kōura's 2027 RIT of $30,000.00 with
+    $26,000.00 paid in instalments: interest on $4,000.00 from Tue 8 Feb
+    2028 (7 Feb 2028 is the end-of-year date) if it's still unpaid. The
+    screen says that late or short ratio instalments can still bring
+    penalties and interest, which Tohyee doesn't estimate.
+  Tested in `tests/unit/provisional-options.test.ts` and
+  `tests/integration/provisional-options.test.ts`.
+- **TXF17 AIM, through other software.** AIM is for individuals and
+  companies with turnover under $5 million, and needs AIM-capable
+  accounting software (IRD's AIM page). Tohyee isn't AIM software, so it
+  doesn't work out AIM instalments. Choosing "AIM, through other software"
+  takes the standard instalments and the interest estimate away (they'd be
+  wrong), and the screen says plainly: "Your AIM software works out these
+  instalments; Tohyee doesn't." End-of-year tax is the RIT less what's been
+  paid. For a trust the screen adds that IRD's AIM page describes AIM for
+  individuals and companies.
+- **TXF18 The AI's income tax figures.** `get_income_tax_figures` returns the
+  year's provisional tax option (and the ratio or estimates) with the
+  typed figures, so an AI doesn't assume the standard option. Tested in
+  `tests/integration/provisional-options.test.ts`.
+
+Not built (listed for the owner): the ratio option's election to leave out a
+large asset sale (s RC 19), what happens when a two-month Box 5 is negative
+(Tohyee shows nil with a note), stopping the ratio partway through the year
+(interest from the stop date), ratio dates for balance dates other than 31
+March, and next year's option on the IR4 (box 33A) and IR3.
+
+## Shopify shipments cancelled after they were counted (SPF13-SPF20; 26 Nov 2026; following common practice, not yet reviewed)
+
+The owner decided that when a Shopify fulfilment (a shipment) is cancelled
+after Sales when sent counted it, Tohyee reverses it: the sale goes back to
+"paid, still to send". The details below follow common practice and are not
+yet reviewed. This changes SWS8 for a fulfilment Tohyee had already counted;
+one cancelled before Tohyee counted it still counts for nothing. Tested in
+`tests/integration/sales-platform-cancelled-fulfilment.test.ts`.
+
+Made-up store as in SWS1: GST registered (invoice basis), prices include
+GST, clearing account 1010, sales and shipping 4000, Income in advance 2350,
+inventory 1400, cost of goods sold 5000. Order #1001, paid on 1 Nov:
+Paw pendant (a stock item, cost **20.00**) **115.00**, Impression kit (not
+stock) **23.00** and shipping **11.50**; total **149.50**, GST **19.50**.
+It's invoiced on 1 Nov with **130.00** held in 2350 (SWS1).
+
+- **SPF13 A shipment cancelled.** Shipment A on 3 Nov sends the pendant and
+  the kit: Dr 2350 **130.00** / Cr 4000 **130.00** (pendant 100.00, kit
+  20.00, shipping 10.00 with the first thing sent), and the pendant comes
+  out of stock, Dr 5000 **20.00** / Cr 1400 **20.00** (SWS2-SWS3). On 5 Nov
+  the shipment is cancelled in Shopify. At the next sync (or the order's
+  webhook) Tohyee undoes exactly what counting A did, dated **3 Nov**, the
+  day A was counted, because the sale should never have counted: Dr 4000
+  **130.00** / Cr 2350 **130.00**, and the pendant comes back into stock at
+  the cost it went out at, Dr 1400 **20.00** / Cr 5000 **20.00**. Sales are
+  **0.00**, 2350 holds **130.00** and stock is **1 worth 20.00** again. GST
+  doesn't move: it was counted on the invoice when the order was paid, and
+  the invoice and the payment still stand, so the GST return is the same on
+  either the invoice or the payments basis. The order is back on Sales ›
+  To send and in the held orders list (and the AI's list_held_orders) with
+  **130.00** held, and Mark as sent (mark_order_sent) works on it again. The
+  sync log says: "#1001: shipment A was cancelled in Shopify, so what it
+  sent is back to paid, still to send: 130.00 moved from sales back to
+  Income in advance, and 1 Paw pendant back into stock."
+- **SPF14 Seen twice, then sent again.** The same cancellation seen again
+  at the next sync, or in a webhook, reverses nothing more. When the
+  pendant and kit go in a new shipment B on 7 Nov, B is counted as usual on
+  7 Nov: Dr 2350 **130.00** / Cr 4000 **130.00**, and the pendant out of
+  stock at **20.00**.
+- **SPF15 Only the cancelled shipment.** Two pendants (**230.00**,
+  **200.00** net), the kit and shipping; total **264.50**, held **230.00**.
+  Shipment A (3 Nov) sends one pendant and the kit: **130.00** to sales
+  (with the shipping). Shipment B (4 Nov) sends the second pendant:
+  **100.00**. B is cancelled: Dr 4000 **100.00** / Cr 2350 **100.00**, dated
+  4 Nov, and one pendant back into stock at 20.00. A's lines aren't
+  touched, and the shipping stays in sales because A still stands. If A is
+  cancelled instead, **120.00** (pendant and kit) goes back and the shipping
+  stays, because B still stands. Once no counted shipment is left standing,
+  the last one cancelled takes the shipping back too (**10.00**), so it
+  counts again with the next thing sent.
+- **SPF16 Not GST registered.** The same order for an organisation that
+  isn't registered: the invoice is **149.50** with no GST, and 2350 holds
+  the full prices, **149.50** (pendant 115.00, kit 23.00, shipping 11.50).
+  Shipment A counts **149.50** to sales; when it's cancelled, Dr 4000
+  **149.50** / Cr 2350 **149.50**, and the pendant comes back at **20.00**.
+  No GST anywhere.
+- **SPF17 A locked period.** Paid 1 Oct, shipment A counted on 3 Oct
+  (**130.00** to sales, the pendant out at 20.00). October's GST return is
+  filed and the books are locked up to 31 Oct. A is cancelled on 4 Nov.
+  October's journals aren't changed or voided. The reversal is dated
+  **1 Nov**, the earliest day allowed: Dr 4000 **130.00** / Cr 2350
+  **130.00**, and the pendant back into stock on 1 Nov at 20.00. The
+  journal and the sync log say plainly that it's dated 1 Nov, not 3 Oct,
+  because the books are locked up to 31 Oct. Stock that can't go back to
+  that day (the item moved since) comes back on the earliest day allowed,
+  as SPF2.
+- **SPF18 Refunds and a cancelled shipment: never reversed twice.** Which
+  came first is Shopify's own time for each (the refund's time and the time
+  the shipment was last changed).
+  - *Cancelled, then refunded.* A is reversed as SPF13. The pendant is then
+    refunded (115.00): it's unsent, so it comes out of 2350 as SWS5, Dr 2350
+    **100.00**, Dr GST **15.00** / Cr 1010 **115.00**, with nothing from
+    stock (the pendant is already back). 2350 holds **30.00**; sales
+    **0.00**.
+  - *Refunded, then cancelled.* After A was counted the pendant is refunded
+    and restocked: as SPC14, Dr 4000 **100.00**, Dr GST **15.00** / Cr 1010
+    **115.00**, and the pendant back into stock. A is then cancelled. The
+    pendant was refunded already, so only the kit and the shipping go back:
+    Dr 4000 **30.00** / Cr 2350 **30.00**, and no stock moves. Sales
+    **0.00**, 2350 **30.00**, stock **1 worth 20.00**: the pendant comes out
+    of sales once and back into stock once. The same when both happen
+    between two syncs: they're dealt with in Shopify's order. (The pendant's
+    stock left when it was sent, not with the invoice, so the credit note
+    carries no item and the pendant comes back against what was sent, at
+    the cost it went out at. Before this change a restocked refund like
+    this was refused at every sync.)
+  - *Part refunded.* Two pendants sent in A, one refunded and restocked
+    after A was counted, then A cancelled: one pendant (**100.00**) goes
+    back to 2350 and one back into stock; the refunded one stays refunded.
+    The rule: a cancelled shipment takes back at most what's still counted
+    as sent and not refunded from sales on each line.
+  - *An amount refunded, not a quantity.* A goodwill refund (57.50) on the
+    pendant after A was counted comes out of sales (SPC14). If A is then
+    cancelled, the pendant's full **100.00** goes back to 2350 and sales
+    show **50.00** less until it's sent again, when the 100.00 comes back
+    and the pendant's sales are **50.00**.
+- **SPF19 Orders held after they were invoiced.** For an order held after
+  invoicing (SWS12-SWS14), the stock came off with the invoice, so a
+  cancelled shipment moves the sale back to 2350 but no stock, as sending it
+  moved none. A shipment Shopify had already sent before Sales when sent
+  applied to the order was counted by the invoice, not out of 2350, so
+  nothing is reversed: the sync log says so and asks a person to check it.
+  Shipments counted before this change are reversed the same way, at each
+  line's average amount counted per item.
+- **SPF20 WooCommerce.** Sales when sent isn't available for WooCommerce
+  (SWS9): its sales count when they're invoiced, and an order moved back
+  from completed to processing changes nothing in Tohyee. So there's
+  nothing to reverse, and it isn't covered.
+
+## Signed updates (UPD14-UPD19; 26 Nov 2026; asked for by the owner, the details following common practice, not yet reviewed)
+
+Tested on Windows in `installer/windows/test-release-signature.ps1` (with
+Windows PowerShell 5.1 and PowerShell 7, and the server app's own check),
+run again by `installer/windows/test-install.ps1` on the installed copies,
+and in `tests/unit/release-signing.test.ts` and
+`tests/unit/server-update-checker.test.ts`. The keys in the tests are
+throwaway keys made during the test. A Windows server runs v1.1.0 and
+v1.2.0 is out. Nothing here changes the books.
+
+- **UPD14 A signed update installs.** The release build signs
+  TohyeeSetup-1.2.0.exe with the owner's private key (a GitHub secret) and
+  puts TohyeeSetup-1.2.0.exe.sig beside it. v1.1.0 was installed with
+  `release-keys.txt` listing the owner's public key. Update now (and the
+  server app's Install) download both, check the SHA-256, then the
+  signature, and install. The page says "Its SHA-256 and signature are
+  right".
+- **UPD15 A changed installer is refused.** If even one byte of the
+  installer differs from what was signed, or the .sig names
+  TohyeeSetup-1.1.0.exe (an older signed installer under a newer name), or
+  it was signed by a key v1.1.0 doesn't list, nothing is run. The download
+  is deleted and the page says why, ending "Nothing was changed". v1.1.0
+  keeps running.
+- **UPD16 An unsigned release is refused.** If v1.2.0 has no .sig (the
+  signing key wasn't set up when it was built), a server that lists a key
+  says "Release v1.2.0 isn't signed, and this Tohyee only installs signed
+  updates" before downloading anything. The release notes also say the
+  installer isn't signed. Someone at the server computer can still run the
+  installer by hand.
+- **UPD17 A server from before signing.** A server installed before signing
+  existed has no public key. Its old updater doesn't look for a .sig at
+  all, and a newer one with an empty `release-keys.txt` checks only the
+  SHA-256 and says the update "wasn't checked for a signature, because this
+  Tohyee was installed before releases were signed". It isn't refused, so
+  the first signed version installs; that version brings the public key,
+  and from then on every update must be signed.
+- **UPD18 Replacing the key.** `release-keys.txt` can list more than one
+  key, and an update signed by any of them is accepted. To move to a new
+  key: add the new public key on a new line and make a release still signed
+  with the old key (servers trust it and pick up the new key); then put the
+  new private key in the secret and remove the old line. If the private key
+  is lost before that, servers that trust only it refuse every later
+  update: install the new version by hand on each server computer once,
+  which brings the new key list. If the key is stolen, do the same with a
+  new key straight away.
+- **UPD19 The Android app updates in place.** Every release APK is signed
+  with one permanent key from the secrets, and the release build stops if
+  the certificate differs from the previous release's APK, so a phone can
+  install v1.2.0 over v1.1.0 and keep its address and saved work. With no
+  key set up, the release has only the test build (its own throwaway key,
+  installed as "Tohyee (test)"), and the release notes say it can't be
+  installed over an earlier version: uninstall that first, which loses
+  what it saved on the phone.

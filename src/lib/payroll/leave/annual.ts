@@ -24,7 +24,16 @@ export type UnpaidLeave = {
   statutory: boolean;
   /** A written agreement to count leave of more than a week (s 16(2)(b), s 16(3)). */
   agreedToCount: boolean;
+  /**
+   * How far leave that doesn't count moves the anniversary (TXF10, TXF11): by the part over one week (Employment NZ's
+   * guidance, the default), or by the whole period, for leave recorded under Tohyee's earlier rule until a person
+   * switches it.
+   */
+  anniversaryRule?: AnniversaryRule;
 };
+
+export const ANNIVERSARY_RULES = ["over_one_week", "whole_period"] as const;
+export type AnniversaryRule = (typeof ANNIVERSARY_RULES)[number];
 
 /** Whether unpaid leave counts towards the 12 months: statutory leave, a single period of a week or less, or agreed (s 16(2)). */
 export function unpaidLeaveCounts(leave: UnpaidLeave): boolean {
@@ -32,11 +41,22 @@ export function unpaidLeaveCounts(leave: UnpaidLeave): boolean {
 }
 
 /**
+ * The days a period of unpaid leave moves the anniversary (TXF10, TXF11): none when it counts; otherwise the days
+ * over one week (Employment NZ: "the length of the (continuous) period of leave without pay in excess of one week"),
+ * or the whole period under the earlier rule. Aroha's 21 days: 14 (21 under the earlier rule).
+ */
+export function anniversaryMoveDays(leave: UnpaidLeave): number {
+  if (unpaidLeaveCounts(leave)) return 0;
+  const days = daysInclusive(leave.start, leave.end);
+  return leave.anniversaryRule === "whole_period" ? days : days - 7;
+}
+
+/**
  * The dates each 4 weeks' annual holidays arise, up to `until` (s 16(1);
- * HL10). After each completed 12 months: started Tue 1 Apr 2025, entitled
- * Wed 1 Apr 2026. Unpaid leave that doesn't count moves every later
- * anniversary by its whole length: 3 weeks' unpaid leave in
- * Feb 2026 makes it Wed 22 Apr 2026.
+ * HL10, TXF10). After each completed 12 months: started Tue 1 Apr 2025,
+ * entitled Wed 1 Apr 2026. Unpaid leave that doesn't count moves every
+ * later anniversary by the part over one week: 3 weeks' unpaid leave in
+ * Feb 2026 makes it Wed 15 Apr 2026.
  */
 export function annualEntitlementDates(startDate: string, unpaid: readonly UnpaidLeave[], until: string): string[] {
   const moving = unpaid.filter((leave) => !unpaidLeaveCounts(leave)).sort((a, b) => (a.start < b.start ? -1 : 1));
@@ -45,7 +65,7 @@ export function annualEntitlementDates(startDate: string, unpaid: readonly Unpai
     let shift = 0;
     let candidate = addMonths(startDate, 12 * year);
     for (;;) {
-      const counted = moving.filter((leave) => leave.start < candidate).reduce((days, leave) => days + daysInclusive(leave.start, leave.end), 0);
+      const counted = moving.filter((leave) => leave.start < candidate).reduce((days, leave) => days + anniversaryMoveDays(leave), 0);
       if (counted === shift) break;
       shift = counted;
       candidate = addDays(addMonths(startDate, 12 * year), shift);

@@ -34,7 +34,7 @@ export type LineFixture = {
   requiresShipping?: boolean;
 };
 /** A fulfilment and the lines it sent (Fulfillment.fulfillmentLineItems), for sales when sent (SWS2). */
-export type FulfilmentFixture = { id: number; createdAt: string; status?: string; lines: Array<{ lineId: number; quantity: number }> };
+export type FulfilmentFixture = { id: number; createdAt: string; updatedAt?: string; status?: string; lines: Array<{ lineId: number; quantity: number }> };
 export type ShippingFixture = { id: number; title: string; amount: string; tax?: TaxFixture[]; removed?: boolean };
 export type TransactionFixture = { id: number; kind: string; status?: string; gateway?: string; amount: string; processedAt: string; test?: boolean };
 export type RefundFixture = {
@@ -184,6 +184,7 @@ export function orderNode(o: OrderFixture) {
       id: gid("Fulfillment", f.id),
       status: f.status ?? "SUCCESS",
       createdAt: f.createdAt,
+      updatedAt: f.updatedAt ?? f.createdAt,
       fulfillmentLineItems: { nodes: f.lines.map((line) => ({ lineItem: { id: gid("LineItem", line.lineId) }, quantity: line.quantity })), pageInfo: { hasNextPage: false } },
     })),
   };

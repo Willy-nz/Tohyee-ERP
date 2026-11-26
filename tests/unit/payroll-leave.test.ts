@@ -3,6 +3,7 @@ import { dec, mul, sum, toFixedString, toPlainString } from "@/lib/money/decimal
 import {
   annualEntitlement,
   annualEntitlementDates,
+  anniversaryMoveDays,
   annualHolidayPay,
   checkCashUp,
   divisorReduction,
@@ -179,10 +180,19 @@ describe("the pay rates (HL1-HL8)", () => {
 describe("annual holidays (HL10-HL16)", () => {
   const unpaid = { start: "2026-02-02", end: "2026-02-22", statutory: false, agreedToCount: false };
 
-  it("HL10: 4 weeks after each 12 months; 3 weeks' unpaid leave moves the anniversary by the whole 21 days", () => {
+  it("HL10, TXF10: 4 weeks after each 12 months; 3 weeks' unpaid leave moves the anniversary by the 14 days over one week", () => {
     expect(annualEntitlementDates("2025-04-01", [], "2027-12-31")).toEqual(["2026-04-01", "2027-04-01"]);
     expect(unpaidLeaveCounts(unpaid)).toBe(false);
-    expect(annualEntitlementDates("2025-04-01", [unpaid], "2027-12-31")).toEqual(["2026-04-22", "2027-04-22"]);
+    // Changed 26 Nov 2026 (TXF10, owner's decision): was 22 Apr (the whole 21 days).
+    expect(annualEntitlementDates("2025-04-01", [unpaid], "2027-12-31")).toEqual(["2026-04-15", "2027-04-15"]);
+    // Leave recorded under the earlier rule still moves it by the whole period until a person switches it (TXF11).
+    expect(annualEntitlementDates("2025-04-01", [{ ...unpaid, anniversaryRule: "whole_period" }], "2027-12-31")).toEqual(["2026-04-22", "2027-04-22"]);
+    // Rangi: 16 days from Mon 3 Nov 2025 move 1 Feb 2026 by 9 days (Employment NZ's example).
+    expect(annualEntitlementDates("2025-02-01", [{ ...unpaid, start: "2025-11-03", end: "2025-11-18" }], "2026-12-31")).toEqual(["2026-02-10"]);
+    // Two separate unpaid weeks each count.
+    expect(annualEntitlementDates("2025-04-01", [{ ...unpaid, end: "2026-02-08" }, { ...unpaid, start: "2026-03-02", end: "2026-03-08" }], "2026-12-31")).toEqual(["2026-04-01"]);
+    expect(anniversaryMoveDays(unpaid)).toBe(14);
+    expect(anniversaryMoveDays({ ...unpaid, anniversaryRule: "whole_period" })).toBe(21);
     // A week or less counts (s 16(2)(a)(vi)), and so does unpaid sick leave (s 16(2)(a)(v)).
     expect(annualEntitlementDates("2025-04-01", [{ ...unpaid, end: "2026-02-08" }], "2026-12-31")).toEqual(["2026-04-01"]);
     expect(annualEntitlementDates("2025-04-01", [{ ...unpaid, statutory: true }], "2026-12-31")).toEqual(["2026-04-01"]);

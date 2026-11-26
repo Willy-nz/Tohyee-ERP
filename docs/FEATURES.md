@@ -1947,6 +1947,18 @@ that something happened.
   out. Tested on GitHub's Windows machines (a held file, and a failure on
   purpose before the start), not yet on a real Windows computer or with a
   restart in the middle.
+  **Signed updates** (UPD14-UPD19): the release build signs the Windows
+  installer with the owner's own key (kept offline; a GitHub secret signs
+  each release) and uploads a `.sig` beside it. Update now and the server
+  app's Install check it against the public keys each install shipped with,
+  and refuse an update that isn't signed or doesn't match. A server installed
+  before signing keeps the SHA-256 check and says "not signed", so the first
+  signed version still installs. Keys can be replaced (the file lists more
+  than one). Android release APKs are signed with one permanent key from the
+  secrets, checked against the previous release's; without it the release
+  has the test build and its notes say so. Setting it up:
+  `docs/OWNER-SETUP-SIGNING.md`. Checked on GitHub's Windows machines with
+  throwaway keys, not yet with the real key or on a real server.
 - **Server stats** in the Windows server app: CPU, memory,
   requests, people using Tohyee, database connections, disk space and each
   organisation's database size, with graphs of the last 24 hours.
@@ -3200,6 +3212,17 @@ that something happened.
   everything's paid on its due date, at IRD's dated rates, simple and daily,
   with the $60,000 rules for the standard option and nothing on $100 or
   less. Overpayment interest isn't worked out.
+- **Provisional tax options** (examples TXF14-TXF18, 26 Nov 2026, not yet reviewed): each income year can use the
+  standard option (the default), the estimation option (estimates with their dates; instalments under s RC 10), the
+  ratio option (IRD's ratio × GST Box 5 for each two months, six instalments, 31 March balance dates only, with the
+  eligibility checks Tohyee can make), or AIM through other software (no instalments or interest worked out). The
+  interest estimate and the AI's `get_income_tax_figures` follow the option. Not built: the ratio's asset-sale
+  election, stopping the ratio partway through a year, and next year's option on the IR4 and IR3.
+- **More trust kinds** (TXF12, TXF13): lines trusts (energy consumer trusts) at 33% and legacy superannuation funds at
+  28%.
+- **Unpaid leave and the anniversary** (TXF10, TXF11): leave of more than a week that doesn't count moves the
+  anniversary only by the days over one week. Leave recorded before 26 Nov 2026 keeps the whole-period move, with a
+  note on the employee, until a person chooses "Use the current rule".
 - **IR4 imputation return boxes** (ITX49): a company's imputation credit
   account fills boxes 41-45 of the IR4's annual imputation return.
 - **IR4 income and tax boxes** (ITX50-ITX53): once a

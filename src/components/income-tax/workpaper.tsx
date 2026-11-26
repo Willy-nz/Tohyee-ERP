@@ -68,7 +68,16 @@ export function Settings({ organisationId, settings, onSaved }: { organisationId
         {isTrust ? (
           // TRU1, TRU5, TRU6: the kind of trust sets the trustee's rate.
           <>
-            <Field label="Kind of trust">
+            <Field
+              label="Kind of trust"
+              hint={
+                trustKind === "lines_trust"
+                  ? "A trust that was given shares in an electricity lines company: 33% on its trustee income."
+                  : trustKind === "legacy_superannuation"
+                    ? "A former widely-held superannuation fund that's now a restricted scheme: 28% on its trustee income."
+                    : undefined
+              }
+            >
               <select value={trustKind} onChange={(event) => setTrustKind(event.target.value as TrustKind)}>
                 {TRUST_KINDS.map((kind) => (
                   <option key={kind} value={kind}>

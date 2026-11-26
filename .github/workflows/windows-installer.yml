@@ -2,7 +2,13 @@ name: Windows installer
 
 # Builds TohyeeSetup-<version>.exe on Windows, installs it on the runner and
 # checks it end to end (installer/windows/test-install.ps1). On a v* tag it
-# also attaches the installer to the GitHub release.
+# also signs the installer (UPD14-UPD19) and attaches it, its .sha256 and
+# its .sig to the GitHub release.
+#
+# Signing: the sign job has the TOHYEE_RELEASE_SIGNING_KEY secret (the
+# owner's private key, docs/OWNER-SETUP-SIGNING.md) and runs only
+# installer/windows/sign-installer.ps1 on the tested installer: no npm, no
+# build. Without the secret the release has no .sig and its notes say so.
 #
 # The token is read-only by default. The build job (which runs npm ci, so
 # third-party install scripts) never gets write access; only the small jobs
@@ -51,6 +57,14 @@ jobs:
         with:
           dotnet-version: 8.0.x
 
+      # Throwaway keys made and thrown away inside the check; never the real key.
+      - name: Check the installer signature rules (Windows PowerShell 5.1, as on a server)
+        shell: powershell
+        run: ./installer/windows/test-release-signature.ps1
+
+      - name: Check the installer signature rules (PowerShell 7)
+        run: ./installer/windows/test-release-signature.ps1
+
       - name: Install dependencies
         run: npm ci
 
@@ -62,6 +76,10 @@ jobs:
 
       - name: Build the installer
         run: ./installer/windows/build.ps1
+
+      - name: Check the server app checks signatures the same way
+        shell: powershell
+        run: ./installer/windows/test-release-signature.ps1 -TrayExe (Join-Path $PWD 'dist\windows\stage\tray\TohyeeTray.exe')
 
       - name: Pictures of the server app (sample data, as on Windows)
         timeout-minutes: 5
@@ -140,12 +158,74 @@ jobs:
           git commit -q -m "Server app pictures from ${GITHUB_SHA}"
           git push -f -q "https://x-access-token:${GH_TOKEN}@github.com/${GITHUB_REPOSITORY}.git" ci/tray-screenshots
 
+  # Signs the tested installer for a v* tag with the owner's key (UPD14).
+  # Windows PowerShell 5.1, the same as the servers that check it. The job
+  # only gets the signing scripts and the keys file, never npm or the build.
+  # On other runs it does the same with a throwaway key made in the job (and
+  # thrown away with it), to check the job works before a release needs it.
+  sign:
+    needs: installer
+    runs-on: windows-latest
+    permissions:
+      contents: read
+    outputs:
+      signed: ${{ steps.sign.outputs.signed }}
+    steps:
+      - name: Checkout the signing scripts
+        uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+          sparse-checkout: |
+            installer/windows/sign-installer.ps1
+            installer/windows/release-signature.ps1
+            installer/windows/release-keys.txt
+          sparse-checkout-cone-mode: false
+
+      - name: Get the installer
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: TohyeeSetup
+          path: dist/windows
+
+      - name: Sign it (when the key is set up)
+        id: sign
+        if: startsWith(github.ref, 'refs/tags/v')
+        shell: powershell
+        env:
+          TOHYEE_RELEASE_SIGNING_KEY: ${{ secrets.TOHYEE_RELEASE_SIGNING_KEY }}
+        run: |
+          $setup = Get-ChildItem 'dist\windows\TohyeeSetup-*.exe' | Select-Object -First 1
+          ./installer/windows/sign-installer.ps1 -Setup $setup.FullName
+
+      - name: Check signing works (a throwaway key, not the release key)
+        if: ${{ !startsWith(github.ref, 'refs/tags/v') }}
+        shell: powershell
+        run: |
+          $rsa = New-Object System.Security.Cryptography.RSACryptoServiceProvider 3072
+          $keys = Join-Path $env:RUNNER_TEMP 'throwaway-keys.txt'
+          [System.IO.File]::WriteAllText($keys, $rsa.ToXmlString($false))
+          $env:TOHYEE_RELEASE_SIGNING_KEY = $rsa.ToXmlString($true)
+          $env:GITHUB_OUTPUT = Join-Path $env:RUNNER_TEMP 'throwaway-output.txt'
+          $setup = Get-ChildItem 'dist\windows\TohyeeSetup-*.exe' | Select-Object -First 1
+          ./installer/windows/sign-installer.ps1 -Setup $setup.FullName -KeysFile $keys
+          if (-not (Test-Path "$($setup.FullName).sig")) { throw 'No .sig was written.' }
+          Get-Content "$($setup.FullName).sig" | Select-Object -First 4 | Write-Host
+          Remove-Item "$($setup.FullName).sig", $keys -Force
+
+      - name: Keep the signature
+        if: steps.sign.outputs.signed == 'true'
+        uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
+        with:
+          name: TohyeeSetup-signature
+          if-no-files-found: error
+          path: dist/windows/TohyeeSetup-*.exe.sig
+
   # Attaches the tested installer to the release for a v* tag. Never replaces
   # a file that's already on the release (no --clobber): a tag's installer is
   # what servers update to, so a second upload under the same name fails
   # instead. To redo one, delete the asset from the release by hand first.
   release:
-    needs: installer
+    needs: [installer, sign]
     if: startsWith(github.ref, 'refs/tags/v')
     runs-on: ubuntu-latest
     permissions:
@@ -158,6 +238,13 @@ jobs:
           name: TohyeeSetup
           path: dist/windows
 
+      - name: Get the signature
+        if: needs.sign.outputs.signed == 'true'
+        uses: actions/download-artifact@9000827ccba6bdab643e8b6fd33ac0654aef8333 # v8.0.2
+        with:
+          name: TohyeeSetup-signature
+          path: dist/windows
+
       - name: Attach to the release
         env:
           GH_TOKEN: ${{ github.token }}
@@ -168,16 +255,32 @@ jobs:
             # The server bundle workflow may be creating it at the same time.
             gh release create "$tag" --latest=false --title "$tag" --generate-notes || sleep 30
           fi
-          gh release upload "$tag" dist/windows/TohyeeSetup-*
+          # The signature first: the release can become the latest as soon
+          # as the installer is there, and servers then look for its .sig.
+          for sig in dist/windows/TohyeeSetup-*.exe.sig; do
+            if [ -e "$sig" ]; then gh release upload "$tag" "$sig"; fi
+          done
+          gh release upload "$tag" dist/windows/TohyeeSetup-*.exe dist/windows/TohyeeSetup-*.exe.sha256
 
-      # Only the promote script: nothing that npm or Gradle would run.
+      # Only the promote and release-note scripts: nothing that npm or Gradle would run.
       - name: Checkout the promote script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: scripts/promote-release.sh
+          sparse-checkout: |
+            scripts/promote-release.sh
+            scripts/add-release-note.sh
           sparse-checkout-cone-mode: false
           path: promote
+
+      - name: Say in the release notes that the installer isn't signed
+        if: needs.sign.outputs.signed != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          bash promote/scripts/add-release-note.sh "**Windows installer not signed.** TohyeeSetup-${TAG#v}.exe has no signature (.sig) because the signing key isn't set up. A Tohyee server that trusts a signing key won't install it with Update now or the server app's Install; servers installed before signing existed still can (checked against its SHA-256 only)."
 
       - name: Log in to GitHub Container Registry (to move :latest)
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0

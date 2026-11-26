@@ -33,6 +33,7 @@ import {
   planRefund,
 } from "@/lib/sales-platforms/orders";
 import { SALES_PLATFORM_LABELS, type SalesPlatform, type SyncResult } from "@/lib/sales-platforms/types";
+import { restockSent } from "@/lib/sales-platforms/sent-cancelled";
 import { closeHeld, countSent, holdAfterInvoicing, holdLines, refundHeld, saveHeld, takeRefundFromHeld } from "@/lib/sales-platforms/when-sent";
 
 export { ordersHeld } from "@/lib/sales-platforms/when-sent";
@@ -854,6 +855,11 @@ export async function postOrder(tx: OrgTx, context: PostingContext, order: Platf
         message: `Counted what ${order.name} sent as sales (${counted.value.counted} ${counted.value.counted === 1 ? "fulfilment" : "fulfilments"}), out of Income in advance.`,
       });
     }
+    // SPF13: a counted shipment Shopify cancelled, reversed.
+    for (const message of counted.value.reversed) {
+      context.counts.posted = (context.counts.posted ?? 0) + 1;
+      await log(tx, context, { action: "posted", recordKind: kind, externalId: id, contactId: doc!.contact_id, message });
+    }
     return true;
   };
 
@@ -909,6 +915,8 @@ export async function postOrder(tx: OrgTx, context: PostingContext, order: Platf
         { source: SOURCE, idempotencyKey: keyFor(posting, "refund", refund.externalId, "approve") },
         { stockOnEarliestDate: true },
       );
+      // SPF18: what was sent of a line held from the start, refunded and restocked, comes back against what was sent.
+      await restockSent(tx, { connectionId: posting.connectionId, storeDomain: posting.storeDomain, order, refundId: refund.externalId, date, lines: plan.restockSent });
       await takeRefundFromHeld(tx, {
         connectionId: posting.connectionId,
         order,

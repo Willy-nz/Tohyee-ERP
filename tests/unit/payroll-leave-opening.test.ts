@@ -68,7 +68,7 @@ describe("Opening balances (HL43-HL48)", () => {
       { start: "2025-06-02", end: "2025-06-29", statutory: false, agreedToCount: false },
       { start: "2026-11-02", end: "2026-11-22", statutory: false, agreedToCount: false },
     ];
-    expect(annualDatesWithOpening({ startDate: START, unpaid, until: "2027-03-31", asAt: AS_AT, lastEntitled: "2026-03-04" })).toEqual(["2026-03-04", "2027-03-25"]);
+    expect(annualDatesWithOpening({ startDate: START, unpaid, until: "2027-03-31", asAt: AS_AT, lastEntitled: "2026-03-04" })).toEqual(["2026-03-04", "2027-03-18"]); // TXF10: was 25 Mar (all 21 days); now the 14 over one week
     expect(sickEntitlementDates(START, "2026-10-04").at(-1)).toBe("2026-09-04");
   });
 

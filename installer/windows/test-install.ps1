@@ -2,7 +2,8 @@
 # machine and checks it end to end: services, health, first-time setup
 # (including two-step sign-in), creating an organisation, the Tohyee server
 # app (tray) reaching its server settings, surviving a service
-# restart, updating in place (signing in with a backup code), updates that
+# restart, updating in place (signing in with a backup code), update
+# signatures with the installed copies (UPD14-UPD19), updates that
 # fail (nothing changed, or the old version put back: UPD10-UPD13), the
 # bundled cloudflared, an analytics CSV load through the installed DuckDB, and
 # uninstalling. Needs Administrator (GitHub's Windows runners are).
@@ -269,6 +270,19 @@ try {
   }
   if (Test-Path $trayResult) { Get-Content $trayResult | Write-Host }
   if ($tray.ExitCode -ne 0) { throw "The Tohyee server app's self-test failed (exit code $($tray.ExitCode))." }
+
+  Write-Host '== Update signatures, with the installed copies (UPD14-UPD19)'
+  # The updater's check (scripts\release-signature.ps1, run as the updater
+  # runs it: Windows PowerShell 5.1) and the server app's (TohyeeTray.exe),
+  # with throwaway keys made inside the check: a good signature is accepted,
+  # a changed file is refused.
+  foreach ($file in @('scripts\release-signature.ps1', 'scripts\release-keys.txt', 'scripts\tohyee-updater.ps1')) {
+    if (-not (Test-Path -LiteralPath (Join-Path $installDir $file))) { throw "$file was not installed." }
+  }
+  $powershell = Join-Path $env:SystemRoot 'System32\WindowsPowerShell\v1.0\powershell.exe'
+  & $powershell -NoProfile -ExecutionPolicy Bypass -File (Join-Path $PSScriptRoot 'test-release-signature.ps1') `
+    -Library (Join-Path $installDir 'scripts\release-signature.ps1') -ShippedKeys (Join-Path $installDir 'scripts\release-keys.txt') -TrayExe $trayExe
+  if ($LASTEXITCODE -ne 0) { throw "The installed signature checks failed (exit code $LASTEXITCODE)." }
 
   Write-Host '== Restart both services (as after a reboot)'
   Stop-Service Tohyee

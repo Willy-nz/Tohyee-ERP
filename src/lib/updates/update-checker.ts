@@ -100,7 +100,19 @@ export type WindowsSetup = {
   sha256: string;
   /** Where the fingerprint came from. */
   sha256From: "github-digest" | "sha256-file";
+  /**
+   * The release's TohyeeSetup-<version>.exe.sig, or null if it has none
+   * (UPD14-UPD19). The server app downloads it and checks it against the
+   * keys it was installed with; this server doesn't check it itself.
+   */
+  signatureUrl: string | null;
 };
+
+/** The .sig file the release build uploads beside the installer, if it's there. */
+export function findSetupSignatureAsset(check: LatestReleaseCheck, setupName: string): ReleaseAsset | null {
+  const wanted = `${setupName.toLowerCase()}.sig`;
+  return check.release.assets.find((asset) => asset.name.toLowerCase() === wanted) ?? null;
+}
 
 const SHA256_HEX = /^[0-9a-f]{64}$/;
 
@@ -144,9 +156,12 @@ export async function windowsSetupFor(
   if (!asset) {
     return { problem: `Release v${check.latestVersion} has no TohyeeSetup-${check.latestVersion}.exe, so it can't be installed from here.` };
   }
+  const signatureUrl = findSetupSignatureAsset(check, asset.name)?.downloadUrl ?? null;
   const fromDigest = sha256FromDigest(asset.digest);
   if (fromDigest) {
-    return { setup: { name: asset.name, downloadUrl: asset.downloadUrl, size: asset.size, sha256: fromDigest, sha256From: "github-digest" } };
+    return {
+      setup: { name: asset.name, downloadUrl: asset.downloadUrl, size: asset.size, sha256: fromDigest, sha256From: "github-digest", signatureUrl },
+    };
   }
   const sidecar = check.release.assets.find((other) => other.name.toLowerCase() === `${asset.name.toLowerCase()}.sha256`);
   if (sidecar) {
@@ -159,7 +174,9 @@ export async function windowsSetupFor(
       if (response.ok) {
         const hash = sha256FromFile(await response.text(), asset.name);
         if (hash) {
-          return { setup: { name: asset.name, downloadUrl: asset.downloadUrl, size: asset.size, sha256: hash, sha256From: "sha256-file" } };
+          return {
+            setup: { name: asset.name, downloadUrl: asset.downloadUrl, size: asset.size, sha256: hash, sha256From: "sha256-file", signatureUrl },
+          };
         }
       }
     } catch (error) {

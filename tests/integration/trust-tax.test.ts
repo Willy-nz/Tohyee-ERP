@@ -40,6 +40,11 @@ describeWithDatabase("income tax for trusts", () => {
     expect(estate).toMatchObject({ trustKind: "deceased_estate", dateOfDeath: "2023-12-30" });
     await as((tx) => updateIncomeTaxSettings(tx, { taxpayerType: "trust", agentExtension: false, version: estate.version, trustKind: "family" }));
     expect(await as((tx) => getIncomeTaxSettings(tx))).toMatchObject({ trustKind: "family", dateOfDeath: null });
+    // TXF12, TXF13: the two kinds can be saved (the database allows them).
+    for (const trustKind of ["lines_trust", "legacy_superannuation", "family"]) {
+      const current = await as((tx) => getIncomeTaxSettings(tx));
+      expect(await as((tx) => updateIncomeTaxSettings(tx, { taxpayerType: "trust", agentExtension: false, version: current.version, trustKind }))).toMatchObject({ trustKind });
+    }
   });
 
   it("TRU2: beneficiaries, and one with income is archived rather than deleted", async () => {

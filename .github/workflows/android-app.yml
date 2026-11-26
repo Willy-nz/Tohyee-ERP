@@ -6,7 +6,11 @@ name: Android app
 #   workflows): Tohyee-<version>.apk and its .sha256, signed with the release
 #   key from the repository's secrets, attached to the GitHub release. With
 #   no key set up yet, it attaches Tohyee-<version>-test.apk instead: a test
-#   build, installed as "Tohyee (test)", that can't update to a real one.
+#   build, installed as "Tohyee (test)", that can't update to a real one, and
+#   the release notes say so. Each test build has its own throwaway key, so
+#   a newer test build can't be installed over an older one either (M9).
+#   With the key, the sign job also checks the APK has the same certificate
+#   as the previous release's, so phones can install it over the old one.
 # - Run by hand (workflow_dispatch) on any branch, or on a pull request that
 #   changes the app: a test APK as a workflow artifact. Never signed with
 #   the release key.
@@ -328,6 +332,44 @@ jobs:
           rm -f "dist/android/Tohyee-${VERSION}-unsigned.apk"
           echo "signed=true" >> "$GITHUB_OUTPUT"
 
+      # Phones only install an update signed with the same key as the app
+      # they have. If the previous release has a real APK, this one's
+      # certificate must match it, or the secrets hold a different key.
+      - name: Same key as the previous release
+        if: steps.sign.outputs.signed == 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          VERSION: ${{ needs.build.outputs.version }}
+          # Set the repository variable to "yes" for the one release that
+          # moves to a new key on purpose (the old one was lost or stolen).
+          ALLOW_NEW_KEY: ${{ vars.ANDROID_ALLOW_NEW_KEY }}
+        run: |
+          tools="$(ls -d "$ANDROID_HOME"/build-tools/* | sort -V | tail -1)"
+          cert() { "${tools}/apksigner" verify --print-certs "$1" | awk '/certificate SHA-256 digest/ && !found { print $NF; found = 1 }'; }
+          ours="$(cert "dist/android/Tohyee-${VERSION}.apk")"
+          echo "::notice title=Android signing certificate::SHA-256 ${ours}"
+          previous="$(gh release view --json tagName --jq .tagName 2>/dev/null || true)"
+          if [ -z "${previous}" ] || [ "${previous}" = "${GITHUB_REF_NAME}" ]; then
+            echo "No earlier release to compare with."
+            exit 0
+          fi
+          mkdir -p "${RUNNER_TEMP}/previous"
+          if ! gh release download "${previous}" --pattern "Tohyee-${previous#v}.apk" --dir "${RUNNER_TEMP}/previous" 2>/dev/null; then
+            echo "${previous} has no release-signed APK (only a test build), so there's nothing to compare with."
+            exit 0
+          fi
+          theirs="$(cert "${RUNNER_TEMP}/previous/Tohyee-${previous#v}.apk")"
+          if [ "${ours}" != "${theirs}" ] && [ "${ALLOW_NEW_KEY}" = "yes" ]; then
+            echo "::warning title=New Android key::This APK's certificate (${ours}) isn't the one ${previous} was signed with (${theirs}), and ANDROID_ALLOW_NEW_KEY is yes. Phones must uninstall the old app to install this one. Delete the variable after this release."
+            exit 0
+          fi
+          if [ "${ours}" != "${theirs}" ]; then
+            echo "::error title=Different Android key::This APK's certificate (${ours}) isn't the one ${previous} was signed with (${theirs}). Phones won't install it as an update. Check the ANDROID_KEYSTORE_BASE64 secret holds the original keystore (docs/OWNER-SETUP-SIGNING.md)."
+            exit 1
+          fi
+          echo "Same certificate as ${previous}: phones can install it over that version."
+
       - name: Keep the signed APK
         if: steps.sign.outputs.signed == 'true'
         uses: actions/upload-artifact@cf430e030ddbb5b0abf93d22962f4752f3646cd9 # v7.0.2
@@ -380,14 +422,25 @@ jobs:
           ls -l dist/android
           gh release upload "${GITHUB_REF_NAME}" dist/android/*.apk dist/android/*.apk.sha256
 
-      # Only the promote script: nothing that npm or Gradle would run.
+      # Only the promote and release-note scripts: nothing that npm or Gradle would run.
       - name: Checkout the promote script
         uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
         with:
           persist-credentials: false
-          sparse-checkout: scripts/promote-release.sh
+          sparse-checkout: |
+            scripts/promote-release.sh
+            scripts/add-release-note.sh
           sparse-checkout-cone-mode: false
           path: promote
+
+      - name: Say in the release notes that the Android app is a test build
+        if: needs.sign.outputs.signed != 'true'
+        env:
+          GH_TOKEN: ${{ github.token }}
+          GH_REPO: ${{ github.repository }}
+          TAG: ${{ github.ref_name }}
+        run: |
+          bash promote/scripts/add-release-note.sh "**Android app: test build only.** The Android release key isn't set up, so this release has Tohyee-${TAG#v}-test.apk, signed with a key made just for this build. It can't be installed over an earlier version of the app: uninstall that first (what the app saved on the phone, such as its Tohyee address, is lost)."
 
       - name: Log in to GitHub Container Registry (to move :latest)
         uses: docker/login-action@8aa5831fb8d48d8f76594c7ddde61ae58019f550 # v4.8.0

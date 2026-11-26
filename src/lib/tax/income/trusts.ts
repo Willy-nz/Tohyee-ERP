@@ -8,12 +8,14 @@ import { add, cmp, dec, type Decimal, isPositive, isZero, mul, roundHalfUp, sub,
  * common practice, not yet reviewed). Pure: the service loads the figures.
  */
 
-export const TRUST_KINDS = ["family", "deceased_estate", "disabled_beneficiary"] as const;
+export const TRUST_KINDS = ["family", "deceased_estate", "disabled_beneficiary", "lines_trust", "legacy_superannuation"] as const;
 export type TrustKind = (typeof TRUST_KINDS)[number];
 export const TRUST_KIND_LABELS: Record<TrustKind, string> = {
   family: "Family trust (most trusts)",
   deceased_estate: "Deceased estate",
   disabled_beneficiary: "Disabled beneficiary trust",
+  lines_trust: "Lines trust (energy consumer trust)",
+  legacy_superannuation: "Legacy superannuation fund",
 };
 
 export type Beneficiary = {
@@ -31,6 +33,8 @@ export type Beneficiary = {
 
 const TRUSTEE_RATE = dec("0.39");
 const LOWER_RATE = dec("0.33");
+/** A legacy superannuation fund's rate: Income Tax Act 2007 sch 1 pt A cl 6(d), from 1 April 2024 (TXF13). */
+const LEGACY_SUPERANNUATION_RATE = dec("0.28");
 const DE_MINIMIS = dec("10000");
 const MINOR_LIMIT = dec("1000");
 /** The income year the 39% trustee rate starts (1 April 2024 to 31 March 2025 for a 31 March balance date). */
@@ -78,8 +82,14 @@ function ageOn(dateOfBirth: string, date: string): number {
 
 /** The trustee's rate and why (TRU4-TRU6). */
 export function trusteeRate(input: { kind: TrustKind; year: number; endMonth: number; dateOfDeath: string | null; trusteeNetIncome: Decimal }): { rate: Decimal; reason: string } {
+  if (input.kind === "legacy_superannuation") {
+    // Clause 6(d) was inserted from 1 April 2024; earlier years weren't checked (Tohyee starts at the 2025 income year).
+    if (input.year < TRUSTEE_RATE_FROM) throw new Error("A legacy superannuation fund's rate before the 2025 income year isn't supported.");
+    return { rate: LEGACY_SUPERANNUATION_RATE, reason: "28%: a legacy superannuation fund (Income Tax Act 2007 schedule 1 part A clause 6(d))." };
+  }
   if (input.year < TRUSTEE_RATE_FROM) return { rate: LOWER_RATE, reason: "33%: the trustee rate before the 2025 income year." };
   if (input.kind === "disabled_beneficiary") return { rate: LOWER_RATE, reason: "33%: a disabled beneficiary trust." };
+  if (input.kind === "lines_trust") return { rate: LOWER_RATE, reason: "33%: a lines trust, also called an energy consumer trust (schedule 1 part A clause 6B)." };
   if (input.kind === "deceased_estate" && input.dateOfDeath) {
     const deathYear = incomeYearOf(input.dateOfDeath, input.endMonth);
     if (input.year <= deathYear + 3) return { rate: LOWER_RATE, reason: `33%: a deceased estate in the income year of the death (${deathYear}) or the three after it.` };
@@ -110,7 +120,8 @@ export function trustTax(input: {
   const lines: BeneficiaryLine[] = [];
   let ordinary = ZERO_DECIMAL;
   let minorCorporate = ZERO_DECIMAL;
-  const minorRuleApplies = input.kind === "family";
+  // TXF12, TXF13: the rule's exclusions checked are disabled beneficiary trusts and estates; it still applies to the others.
+  const minorRuleApplies = input.kind !== "deceased_estate" && input.kind !== "disabled_beneficiary";
   for (const { beneficiary, amount, fromMaoriAuthority } of input.allocations) {
     if (!isPositive(amount)) continue;
     let taxedByTrustee = false;
@@ -161,6 +172,12 @@ export function trustTax(input: {
     trusteeIncome = ZERO_DECIMAL;
   }
   const { rate, reason } = trusteeRate({ kind: input.kind, year: input.year, endMonth: input.endMonth, dateOfDeath: input.dateOfDeath, trusteeNetIncome });
+  if (input.kind === "legacy_superannuation") {
+    notes.push(
+      "IRD's registered superannuation funds page says a registered fund files an IR44, which Tohyee doesn't produce. Use this kind for a legacy superannuation fund that files an IR6. Tohyee uses 28% on all its trustee income, without the $10,000 test.",
+    );
+    if (isPositive(beneficiaryIncome)) notes.push("Tohyee hasn't checked how beneficiary income works for a superannuation fund. Check the allocations.");
+  }
   if (input.kind === "deceased_estate" && !input.dateOfDeath) notes.push("The date of death isn't set, so the estate is taxed as a family trust. Set it under Tax settings.");
   // Whole dollars, as the other returns (ITX50).
   const trusteeTax = isPositive(trusteeIncome) ? roundHalfUp(mul(truncate(trusteeIncome, 0), rate), 2) : ZERO_DECIMAL;
