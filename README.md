@@ -49,8 +49,8 @@ before connecting an assistant.
 > organisation and review accounting outputs. Tohyee is provided as is, without
 > warranty; see the [licence](LICENSE).
 
-Latest release: [v0.45.0](https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.45.0)
-([notes](docs/releases/0.45.0.md)). Get the installer and what each download
+Latest release: [v0.46.0](https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.46.0)
+([notes](docs/releases/0.46.0.md)). Get the installer and what each download
 includes from the [latest release](https://github.com/Willy-nz/Tohyee-ERP/releases/latest).
 The [feature register](docs/FEATURES.md) records implemented features and limits;
 [release notes](docs/releases) describe packaged versions.
@@ -130,7 +130,8 @@ real phone or in a paddock yet.
 
 | Release | What's new |
 | --- | --- |
-| [**0.45.0**](docs/releases/0.45.0.md) | Late fees: an option to charge a fee and daily interest on overdue invoices, with GST done the NZ way, each on an invoice of its own. |
+| [**0.46.0**](docs/releases/0.46.0.md) | Farm water (pipe sizing, stock water, pump matching), moving stock between farms, task categories, provisional tax options, signed Windows updates, and fixes from six reviews of the books, tax, sales platforms, farm screens and security. |
+| [0.45.0](docs/releases/0.45.0.md) | Late fees: an option to charge a fee and daily interest on overdue invoices, with GST done the NZ way, each on an invoice of its own. |
 | [0.44.0](docs/releases/0.44.0.md) | Update a Windows server from any device; chart mapping for consolidation groups, with fixes from a three-currency review; frost, rain, wind, sun and cloud pictures on the farm forecast. |
 | [0.43.0](docs/releases/0.43.0.md) | Saved searches: filtered lists kept under a name, on Home or emailed to you, with calculated columns; tracking and custom fields on Spreading; Shopify orders' regions; an Analytics fix. |
 | [0.42.0](docs/releases/0.42.0.md) | Spreading: one worksheet for prepayments, income in advance and accruals, with Spread this on bills, invoices and bank lines; sorting and counts on Invoices and Bills; CRM bars over time. |
