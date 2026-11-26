@@ -11,8 +11,9 @@ import { MAX_FLOW_LPM, type PipeInput, pipeFlow } from "@/lib/farming/water-rule
 /**
  * Litres a head a day for each class of stock: the daily allowances
  * regional councils' plans use for stock water (the Canterbury figures,
- * which district rural water schemes also publish). They're a starting
- * point: hot weather and dry feed push them up, so the screen lets each be
+ * which district rural water schemes also publish; deer from the deer
+ * industry's drought advice, a supply of at least 20 litres an adult red
+ * stag a day). They're a starting point: hot weather and dry feed push them up, so the screen lets each be
  * changed.
  */
 export const STOCK_WATER_CLASSES = [
@@ -23,8 +24,40 @@ export const STOCK_WATER_CLASSES = [
   { key: "ewes_milk", label: "Ewes with lambs", litres: 15 },
   { key: "sheep", label: "Other sheep", litres: 6 },
   { key: "lambs", label: "Lambs", litres: 2 },
+  { key: "deer", label: "Deer", litres: 20 },
   { key: "horses", label: "Horses", litres: 35 },
 ] as const;
+export type StockWaterClass = (typeof STOCK_WATER_CLASSES)[number]["key"];
+
+/**
+ * The water class a mob's kind and class most likely is (FW12), or null
+ * when there's no allowance for it (goats and pigs). It can't know whether
+ * cows are milking or ewes have lambs at foot, so breeding females take
+ * the bigger allowance: the line has to cope when they are. The screen
+ * shows the head it put in each class, and each can be changed.
+ */
+export function waterClassFor(kind: string, classCode: string): StockWaterClass | null {
+  const young = classCode.startsWith("r1_");
+  if (kind === "dairy_cattle") return young ? "calves" : classCode === "ma_cows" || classCode === "r2_heifers" ? "dairy_milking" : "dairy_dry";
+  if (kind === "beef_cattle") return young ? "calves" : "beef";
+  if (kind === "sheep") return classCode.endsWith("_ewes") ? "ewes_milk" : "sheep";
+  if (kind === "deer_red" || kind === "deer_other") return "deer";
+  return null;
+}
+
+export type MobStock = { classes: { key: StockWaterClass; head: number }[]; leftOutHead: number };
+
+/** A farm's mobs as head in each water class (FW12), in the classes' own order, and the head with no class. */
+export function stockFromMobs(mobs: { kind: string; classCode: string; head: number }[]): MobStock {
+  const heads = new Map<StockWaterClass, number>();
+  let leftOutHead = 0;
+  for (const mob of mobs) {
+    const key = waterClassFor(mob.kind, mob.classCode);
+    if (key === null) leftOutHead += mob.head;
+    else heads.set(key, (heads.get(key) ?? 0) + mob.head);
+  }
+  return { classes: STOCK_WATER_CLASSES.filter((stock) => (heads.get(stock.key) ?? 0) > 0).map((stock) => ({ key: stock.key, head: heads.get(stock.key)! })), leftOutHead };
+}
 
 /**
  * Stock drink most of a day's water in a few hours. The dairy welfare
@@ -79,7 +112,7 @@ export const MAX_PUMP_POINTS = 12;
 
 /** Head the pipe needs at a flow: rise, friction and the pressure wanted at the end. */
 function needed(pipe: PumpPipe, flowLpm: number): number | null {
-  const result = pipeFlow({ insideMm: pipe.insideMm, lengthM: pipe.lengthM, riseM: pipe.riseM, flowLpm });
+  const result = pipeFlow({ ...pipe, flowLpm });
   return result ? result.totalM + pipe.endHeadM : null;
 }
 
@@ -120,6 +153,6 @@ export function matchPump(given: PumpPoint[], pipe: PumpPipe): PumpMatch | null 
     else high = middle;
   }
   const flowLpm = round1((low + high) / 2);
-  const result = pipeFlow({ insideMm: pipe.insideMm, lengthM: pipe.lengthM, riseM: pipe.riseM, flowLpm })!;
+  const result = pipeFlow({ ...pipe, flowLpm })!;
   return { kind: "meets", flowLpm, headM: round1(pumpHead(points, flowLpm)), velocity: result.velocity, fast: result.fast };
 }

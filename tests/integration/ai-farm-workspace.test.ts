@@ -409,13 +409,15 @@ describeWithDatabase("the AI's farm workspace", () => {
     expect(await read("list_pasture_photo_estimates", { farmId: farm.id })).toMatchObject({ waiting: expect.any(Array), decided: expect.any(Array), more: false });
     expect(await read("pasture_photo_calibration", { farmId: farm.id })).toBeTruthy();
     expect(await read("list_farm_map_assets", { farmId: farm.id })).toMatchObject({ assets: expect.any(Array), more: false });
-    expect(await read("get_farm_water", { farmId: farm.id })).toMatchObject({ water: { pipes: expect.any(Array), counts: expect.any(Object) } });
+    expect(await read("get_farm_water", { farmId: farm.id })).toMatchObject({ water: { pipes: expect.any(Array), counts: expect.any(Object), stock: { classes: expect.any(Array) }, materials: { sizes: expect.any(Array) } } });
     // FW5: 110 L/min over 450 m on the flat suggests 50 mm; FW1 for a pipe of your own.
     expect(await read("size_farm_pipe", { flowLpm: 110, lengthM: 450 })).toMatchObject({ suggestedOutsideMm: 50 });
     // FW7 and FW8.
     expect(await read("stock_water_demand", { stock: [{ class: "dairy_milking", head: 300 }] })).toMatchObject({ litresPerDay: 21000, peakLpm: 70 });
-    expect(await read("match_farm_pump", { points: [{ flowLpm: 20, headM: 62 }, { flowLpm: 60, headM: 55 }, { flowLpm: 100, headM: 42 }, { flowLpm: 140, headM: 22 }], insideMm: 40.8, lengthM: 450, riseM: 12, endHeadM: 10 })).toMatchObject({ match: { kind: "meets", flowLpm: 100, headM: 42 } });
-    expect(await read("size_farm_pipe", { flowLpm: 110, lengthM: 450, insideMm: 40.8 })).toMatchObject({ result: { velocity: 1.4, frictionM: 23.7, totalKpa: 232 } });
+    expect(await read("match_farm_pump", { points: [{ flowLpm: 20, headM: 62 }, { flowLpm: 60, headM: 55 }, { flowLpm: 100, headM: 42 }, { flowLpm: 140, headM: 22 }], insideMm: 40.8, lengthM: 450, riseM: 12, endHeadM: 10, fittingsPct: 0 })).toMatchObject({ match: { kind: "meets", flowLpm: 100, headM: 42 } });
+    expect(await read("size_farm_pipe", { flowLpm: 110, lengthM: 450, insideMm: 40.8, fittingsPct: 0 })).toMatchObject({ result: { velocity: 1.4, frictionM: 23.7, totalKpa: 232 } });
+    // FW11: a tenth more friction for fittings unless told otherwise.
+    expect(await read("size_farm_pipe", { flowLpm: 110, lengthM: 450, insideMm: 40.8 })).toMatchObject({ fittingsPct: 10, result: { velocity: 1.4, frictionM: 26.1 } });
     expect(((await read("farm_team", { farmId: farm.id })).people as Json[]).map((person) => person.role)).toContain("owner");
     expect(await read("farm_terms")).toMatchObject({ terms: expect.any(Object) });
     const farming = await read("farming_settings");

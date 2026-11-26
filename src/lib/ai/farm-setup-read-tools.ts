@@ -14,7 +14,7 @@ import { readFarmLocations } from "@/lib/farming/locations";
 import { listMapAssets } from "@/lib/farming/map-assets";
 import { getFarmWater } from "@/lib/farming/water";
 import { matchPump, PEAK_HOURS, STOCK_WATER_CLASSES, stockDemand } from "@/lib/farming/water-demand-rules";
-import { PIPE_SDRS, pipeFlow, sizeOptions, VELOCITY_GUIDE } from "@/lib/farming/water-rules";
+import { FITTINGS_PCT, PIPE_SDRS, pipeFlow, sizeOptions, VELOCITY_GUIDE } from "@/lib/farming/water-rules";
 import { linkableBillLines } from "@/lib/farming/fertiliser";
 import { linkableMovements, listMobs, listStockUnitFactors, untypedMobs } from "@/lib/farming/mobs";
 import { paddockStatuses } from "@/lib/farming/paddock-status";
@@ -36,6 +36,7 @@ import { requireId } from "@/lib/validation";
  */
 
 const FARM_ID: JsonSchema = { type: "string", description: "The farm, from list_farms_and_paddocks. Leave out when there's only one." };
+const FITTINGS: JsonSchema = { type: "number", minimum: 0, maximum: 100, description: `Percent added to the pipe's friction for bends and fittings (default ${FITTINGS_PCT}; 0 leaves them out).` };
 const PAGE = { limit: limitInput(100, 500), cursor: CURSOR };
 const YEAR_END: JsonSchema = { ...DATE, description: "The financial year's last day (YYYY-MM-DD)." };
 
@@ -171,7 +172,7 @@ export const FARM_SETUP_READ_TOOLS: AiTool[] = [
   {
     name: "get_farm_water",
     title: "A farm's water pipes",
-    description: "The water pipes drawn on a farm's map: each one's name, its length from the map (m) and, where someone has set them, its inside diameter (mm), the flow it's for (L/min) and its rise (m), with the water's speed, the friction and the pressure needed worked out. Also how many troughs, tanks, bores and water points are on the map. An estimate that leaves out bends and fittings.",
+    description: "The water pipes drawn on a farm's map: each one's name, its length from the map (m) and, where someone has set them, its inside diameter (mm), the flow it's for (L/min) and its rise (m), with the water's speed, the friction and the pressure needed worked out (a tenth is added to the pipe's friction for bends and fittings). Also how many troughs, tanks, bores and water points are on the map, the farm's mobs as head in each stock water class (a best guess from each mob's class, for stock_water_demand), and the metres of each size of pipe. An estimate, not a design.",
     level: "read",
     inputSchema: schema({ farmId: FARM_ID }),
     run: async (tx, args) => ({ water: await getFarmWater(tx, requireId(await farmFor(tx, args.farmId), "farmId")) }),
@@ -179,7 +180,7 @@ export const FARM_SETUP_READ_TOOLS: AiTool[] = [
   {
     name: "size_farm_pipe",
     title: "Size a water pipe",
-    description: `Works out a water pipe as Farm › Water does, saving nothing: for a flow (L/min), a length (m) and a rise to the far end (m, minus for downhill), each polyethylene size's inside diameter, the water's speed (m/s), the friction (m) and the pressure needed at the start (m and kPa), and the smallest size that keeps the water at or under ${VELOCITY_GUIDE} m/s. Give insideMm to work out one pipe of your own instead. A guide, not a design: bends, valves, fittings and the pump aren't counted, so say that when you give the answer.`,
+    description: `Works out a water pipe as Farm › Water does, saving nothing: for a flow (L/min), a length (m) and a rise to the far end (m, minus for downhill), each polyethylene size's inside diameter, the water's speed (m/s), the friction (m) and the pressure needed at the start (m and kPa), and the smallest size that keeps the water at or under ${VELOCITY_GUIDE} m/s. Give insideMm to work out one pipe of your own instead. ${FITTINGS_PCT}% is added to the pipe's friction for bends and fittings unless fittingsPct says otherwise (0 leaves them out). A guide, not a design: fittings aren't counted one by one and the pump isn't known, so say that when you give the answer.`,
     level: "read",
     inputSchema: schema(
       {
@@ -188,19 +189,21 @@ export const FARM_SETUP_READ_TOOLS: AiTool[] = [
         riseM: { type: "number", description: "How far the far end is above the start, metres. Minus for downhill. Default 0." },
         sdr: { type: "number", enum: PIPE_SDRS.map((each) => each.sdr), description: "The pipe's wall (SDR). Default the thickest listed." },
         insideMm: { type: "number", description: "A pipe's own inside diameter in mm, to work out just that pipe." },
+        fittingsPct: FITTINGS,
       },
       ["flowLpm", "lengthM"],
     ),
     run: async (_tx, args) => {
-      const job = { flowLpm: Number(args.flowLpm), lengthM: Number(args.lengthM), riseM: args.riseM === undefined || args.riseM === null ? 0 : Number(args.riseM) };
+      const fittingsPct = args.fittingsPct === undefined || args.fittingsPct === null ? FITTINGS_PCT : Number(args.fittingsPct);
+      const job = { flowLpm: Number(args.flowLpm), lengthM: Number(args.lengthM), riseM: args.riseM === undefined || args.riseM === null ? 0 : Number(args.riseM), fittingsPct };
       if (args.insideMm !== undefined && args.insideMm !== null) {
         const result = pipeFlow({ ...job, insideMm: Number(args.insideMm) });
         if (!result) throw new ValidationError("Those figures are outside what this can work out.");
-        return { insideMm: Number(args.insideMm), result, guideMs: VELOCITY_GUIDE };
+        return { insideMm: Number(args.insideMm), result, guideMs: VELOCITY_GUIDE, fittingsPct };
       }
       const sized = sizeOptions(job, args.sdr === undefined || args.sdr === null ? PIPE_SDRS[0].sdr : Number(args.sdr));
       if (sized.options.length === 0) throw new ValidationError("Those figures are outside what this can work out.");
-      return { sizes: sized.options, suggestedOutsideMm: sized.suggested, guideMs: VELOCITY_GUIDE };
+      return { sizes: sized.options, suggestedOutsideMm: sized.suggested, guideMs: VELOCITY_GUIDE, fittingsPct };
     },
   },
   {
@@ -233,7 +236,7 @@ export const FARM_SETUP_READ_TOOLS: AiTool[] = [
   {
     name: "match_farm_pump",
     title: "Match a pump to a pipe",
-    description: "Finds the flow a pump would push through a pipe, as Farm › Water does, saving nothing. Give two or more points from the pump's chart (at each flow in L/min, the head in metres it gives) and the pipe: inside diameter (mm), length (m), rise to the far end (m, minus for downhill) and the pressure wanted at the far end (m, default 0). The answer is where they meet, or that the pump can't make the head, or that the answer is past the last point given. The curve is straight lines between the points, and bends and fittings aren't counted: a guide, not a design.",
+    description: "Finds the flow a pump would push through a pipe, as Farm › Water does, saving nothing. Give two or more points from the pump's chart (at each flow in L/min, the head in metres it gives) and the pipe: inside diameter (mm), length (m), rise to the far end (m, minus for downhill) and the pressure wanted at the far end (m, default 0). The answer is where they meet, or that the pump can't make the head, or that the answer is past the last point given. The curve is straight lines between the points. A tenth is added to the pipe's friction for bends and fittings unless fittingsPct says otherwise. A guide, not a design.",
     level: "read",
     inputSchema: schema(
       {
@@ -242,14 +245,15 @@ export const FARM_SETUP_READ_TOOLS: AiTool[] = [
         lengthM: { type: "number" },
         riseM: { type: "number" },
         endHeadM: { type: "number" },
+        fittingsPct: FITTINGS,
       },
       ["points", "insideMm", "lengthM"],
     ),
     run: async (_tx, args) => {
       const points = (Array.isArray(args.points) ? args.points : []).map((point: { flowLpm?: unknown; headM?: unknown }) => ({ flowLpm: Number(point.flowLpm), headM: Number(point.headM) }));
-      const match = matchPump(points, { insideMm: Number(args.insideMm), lengthM: Number(args.lengthM), riseM: Number(args.riseM ?? 0), endHeadM: Number(args.endHeadM ?? 0) });
+      const match = matchPump(points, { insideMm: Number(args.insideMm), lengthM: Number(args.lengthM), riseM: Number(args.riseM ?? 0), endHeadM: Number(args.endHeadM ?? 0), fittingsPct: args.fittingsPct === undefined || args.fittingsPct === null ? FITTINGS_PCT : Number(args.fittingsPct) });
       if (!match) throw new ValidationError("That can't be worked out: a pump's head goes down as the flow goes up, each point needs its own flow, and the pipe's figures have to be in range.");
-      return { match };
+      return { match, fittingsPct: args.fittingsPct === undefined || args.fittingsPct === null ? FITTINGS_PCT : Number(args.fittingsPct) };
     },
   },
   {

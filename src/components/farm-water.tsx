@@ -1,7 +1,7 @@
 "use client";
 
 import Link from "next/link";
-import { useState } from "react";
+import { useEffect, useState } from "react";
 import { useCanRecordFarmWork } from "@/components/farm-selector";
 import { useApiData } from "@/components/hooks";
 import { Badge, Button, Card, Field, Notice, ui } from "@/components/ui";
@@ -10,6 +10,8 @@ import { distanceText } from "@/lib/farming/map-assets-rules";
 import type { Farm } from "@/lib/farming/paddocks";
 import type { FarmWater as Water, WaterPipe } from "@/lib/farming/water";
 import {
+  FITTINGS_CHOICES,
+  FITTINGS_PCT,
   KPA_PER_METRE,
   nominalInsideMm,
   PIPE_OUTSIDE_MM,
@@ -22,6 +24,7 @@ import {
 import { PumpMatcher, StockWater } from "./farm-water-more";
 import styles from "./farm-water.module.css";
 
+const FITTINGS_KEPT = "tohyee.farmWater.fittingsPct";
 const number = (text: string) =>
   text.trim() === "" ? Number.NaN : Number(text.replaceAll(",", ""));
 const fixed = (value: number, places: number) =>
@@ -90,6 +93,26 @@ export function FarmWater({
   const canRecord = useCanRecordFarmWork();
   const [sized, setSized] = useState<WaterPipe | null>(null);
   const [flow, setFlow] = useState("");
+  const [fittings, setFittings] = useState<number>(FITTINGS_PCT);
+  useEffect(() => {
+    try {
+      const text = window.localStorage.getItem(FITTINGS_KEPT);
+      const kept = text === null ? Number.NaN : Number(text);
+      const known = (FITTINGS_CHOICES as readonly number[]).includes(kept);
+      // eslint-disable-next-line react-hooks/set-state-in-effect -- read once from the device after the page is shown
+      if (known) setFittings(kept);
+    } catch {
+      // Nothing remembered: the usual allowance.
+    }
+  }, []);
+  const chooseFittings = (percent: number) => {
+    setFittings(percent);
+    try {
+      window.localStorage.setItem(FITTINGS_KEPT, String(percent));
+    } catch {
+      // Not remembered this time.
+    }
+  };
   const water = loaded.data?.water;
   const toSizer = () =>
     document
@@ -98,10 +121,14 @@ export function FarmWater({
   return (
     <div className={ui.stack}>
       <Notice tone="info">
-        A guide for choosing pipe, not a design. It leaves out bends, valves and
-        fittings. Check with your supplier before you buy.
+        A guide for choosing pipe, not a design. Bends, valves and fittings are
+        {fittings
+          ? ` allowed for by adding ${fittings}% to the pipe's friction, not counted one by one`
+          : " left out"}
+        . Check with your supplier before you buy.
       </Notice>
       <StockWater
+        fromMobs={water?.stock ?? null}
         onUse={(litresAMinute) => {
           setFlow(litresAMinute);
           toSizer();
@@ -113,12 +140,15 @@ export function FarmWater({
           pipe={sized}
           flow={flow}
           setFlow={setFlow}
+          fittings={fittings}
+          setFittings={chooseFittings}
         />
       </div>
-      <PumpMatcher pipes={water?.pipes ?? []} />
+      <PumpMatcher pipes={water?.pipes ?? []} fittings={fittings} />
       {loaded.error ? <Notice tone="error">{loaded.error}</Notice> : null}
       {water ? (
         <Pipes
+          fittings={fittings}
           organisationId={organisationId}
           water={water}
           canRecord={canRecord}
@@ -141,10 +171,14 @@ function Sizer({
   pipe,
   flow,
   setFlow,
+  fittings,
+  setFittings,
 }: {
   pipe: WaterPipe | null;
   flow: string;
   setFlow: (flow: string) => void;
+  fittings: number;
+  setFittings: (percent: number) => void;
 }) {
   const [length, setLength] = useState(pipe ? String(pipe.lengthM) : "");
   const [rise, setRise] = useState(pipe?.riseM ? String(pipe.riseM) : "0");
@@ -156,6 +190,7 @@ function Sizer({
     flowLpm: number(flow),
     lengthM: number(length),
     riseM: number(rise),
+    fittingsPct: fittings,
   };
   const { options, suggested } = sizeOptions(job, sdr);
   const own = inside.trim()
@@ -214,6 +249,21 @@ function Sizer({
             {PIPE_SDRS.map((each) => (
               <option key={each.sdr} value={each.sdr}>
                 {each.label}
+              </option>
+            ))}
+          </select>
+        </Field>
+        <Field
+          label="Bends and fittings"
+          hint="Without a list of them, a usual estimate is a tenth on top of the pipe's friction. Used for everything on this page."
+        >
+          <select
+            value={fittings}
+            onChange={(event) => setFittings(Number(event.target.value))}
+          >
+            {FITTINGS_CHOICES.map((percent) => (
+              <option key={percent} value={percent}>
+                {percent ? `Add ${percent}%` : "Leave them out"}
               </option>
             ))}
           </select>
@@ -335,12 +385,14 @@ function Sizer({
 
 /** The farm's mapped water pipes. Each can be given a size and a flow, and then shows what it does. */
 function Pipes({
+  fittings,
   organisationId,
   water,
   canRecord,
   onSize,
   onSaved,
 }: {
+  fittings: number;
   organisationId: string;
   water: Water;
   canRecord: boolean;
@@ -348,6 +400,18 @@ function Pipes({
   onSaved: () => void;
 }) {
   const [editing, setEditing] = useState<string | null>(null);
+  // Worked out here, as the server does, so the page's allowance for fittings applies.
+  const worked = (pipe: WaterPipe) =>
+    pipe.insideMm !== null && pipe.flowLpm !== null
+      ? pipeFlow({
+          insideMm: pipe.insideMm,
+          flowLpm: pipe.flowLpm,
+          lengthM: pipe.lengthM,
+          riseM: pipe.riseM ?? 0,
+          fittingsPct: fittings,
+        })
+      : null;
+  const { sizes, unsized } = water.materials;
   const others = [
     [water.counts.troughs, "trough", "troughs"],
     [water.counts.tanks, "tank", "tanks"],
@@ -395,7 +459,7 @@ function Pipes({
               ) : (
                 <div className={ui.muted}>No size or flow yet.</div>
               )}
-              {pipe.result ? <Outcome result={pipe.result} /> : null}
+              {worked(pipe) ? <Outcome result={worked(pipe)!} /> : null}
               {editing === pipe.assetId ? (
                 <PipeForm
                   organisationId={organisationId}
@@ -429,6 +493,33 @@ function Pipes({
           ))}
         </ul>
       )}
+      {sizes.length > 0 ? (
+        <div className={styles.materials}>
+          <strong>Pipe by size</strong>
+          <ul>
+            {sizes.map((size) => (
+              <li key={size.insideMm}>
+                {fixed(size.insideMm, 1)} mm inside:{" "}
+                {distanceText(size.lengthM)}{" "}
+                <span className={ui.muted}>
+                  ({size.pipes} {size.pipes === 1 ? "pipe" : "pipes"})
+                </span>
+              </li>
+            ))}
+            {unsized.pipes > 0 ? (
+              <li>
+                No size yet: {distanceText(unsized.lengthM)}{" "}
+                <span className={ui.muted}>
+                  ({unsized.pipes} {unsized.pipes === 1 ? "pipe" : "pipes"})
+                </span>
+              </li>
+            ) : null}
+          </ul>
+          <p className={ui.muted}>
+            Lengths from the map. Allow more for slope, joins and offcuts.
+          </p>
+        </div>
+      ) : null}
     </Card>
   );
 }
