@@ -103,7 +103,8 @@ describeWithDatabase("team chat", () => {
 
   it("TCH5: unread counts others' messages since you last read", async () => {
     const answer = await get("viewer", unreadRoute, `/api/chat/unread?organisationId=${ORG}`);
-    expect(await answer.json()).toEqual({ enabled: true, unread: 3 });
+    // Since TCH24 the count is every chat the viewer has: the team chat's 3 and the farm chat's 1.
+    expect(await answer.json()).toEqual({ enabled: true, unread: 4 });
     // The owner posted the first and has read up to it; the bookkeeper's and the rep's are new to them.
     expect(await owner((tx) => teamChatUnread(tx))).toEqual({ enabled: true, unread: 2 });
   });

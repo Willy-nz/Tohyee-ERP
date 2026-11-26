@@ -2,6 +2,7 @@ import { describe, expect, it } from "vitest";
 import {
   ALL_SETTINGS_HREF,
   appForPath,
+  CHAT_MENUS,
   CRM_MENUS,
   FARM_MENUS,
   destinations,
@@ -463,7 +464,14 @@ describe("Payroll as an add-on (PAO2)", () => {
 describe("the Chat app's menu (TCH1, TCH6)", () => {
   const modules = { crm: false, reporting: false, notForProfit: false, analytics: false, gst: false, chat: true };
   it("is the one Chat page while Chat is on, and nothing for farm staff or while it's off", () => {
-    expect(visibleMenus("chat", { can: () => true, modules }).map((menu) => [menu.label, menu.href])).toEqual([["Chat", "/chat"]]);
+    expect(visibleMenus("chat", { can: () => true, modules }).map((menu) => [menu.label, menu.href])).toEqual([
+      ["Chat", "/chat"],
+      ["Review chats", "/chat/review"],
+    ]);
+    // Review chats is for owners and admins (TCH20).
+    expect(visibleMenus("chat", { can: (role) => role !== "admin" && role !== "owner", modules }).map((menu) => menu.label)).toEqual(["Chat"]);
+    expect(inArea("/chat/review", CHAT_MENUS[0])).toBe(false);
+    expect(inArea("/chat/review", CHAT_MENUS[1])).toBe(true);
     expect(visibleMenus("chat", { can: () => true, modules: { ...modules, chat: false } })).toEqual([]);
     expect(visibleMenus("chat", { can: () => false, modules, farmWorker: true })).toEqual([]);
   });
