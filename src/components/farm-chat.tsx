@@ -11,19 +11,25 @@ import { api, errorMessage, newIdempotencyKey } from "@/lib/client/api";
 import type { ChatLink, ChatLinkKind, ChatMessage } from "@/lib/farming/chat";
 import type { Farm, Paddock } from "@/lib/farming/paddocks";
 import { useVoiceRecorder, voiceLength } from "@/components/voice-recorder";
+import { MentionPicker, type MentionPerson, mentionsStillIn } from "@/components/chat/mention-picker";
 import styles from "./farm-chat.module.css";
 
 /** How often an open chat checks for new messages. */
 const POLL_MS = 15_000;
 
-/** A farm's message, or the team chat's (TCH1), which has no farm or links. */
-type Named = Omit<ChatMessage, "farmId" | "links"> & { farmId?: string; links?: ChatLink[]; postedByName?: string; removedByName?: string };
+/** A farm's message, or a Chat room's (TCH1, TCH10), which has no farm or links. */
+export type Named = Omit<ChatMessage, "farmId" | "links"> & { farmId?: string; links?: ChatLink[]; mentions?: string[]; postedByName?: string; removedByName?: string };
 
-/** Which chat: a farm's (FCH1), or the organisation's team chat (TCH1). */
-export type ChatRoomKind = { kind: "farm"; farm: Farm } | { kind: "team"; name: string };
+/** Which chat: a farm's (FCH1), or one of Chat's rooms: Everyone, a space or a direct message (TCH10). */
+export type ChatRoomKind =
+  | { kind: "farm"; farm: Pick<Farm, "id" | "name"> }
+  | { kind: "room"; roomId: string; name: string; members: MentionPerson[]; readOnlyBecause: string | null };
 
-function chatApi(room: ChatRoomKind): string {
-  return room.kind === "farm" ? "/api/farming/chat" : "/api/chat";
+/** Where a chat's messages, read marker, take-down and files are. */
+function chatApi(room: ChatRoomKind): { list: string; read: string; remove: (id: string) => string; files: string } {
+  if (room.kind === "farm") return { list: "/api/farming/chat", read: "/api/farming/chat/read", remove: (id) => `/api/farming/chat/${id}`, files: "/api/farming/chat" };
+  const base = `/api/chat/rooms/${encodeURIComponent(room.roomId)}`;
+  return { list: `${base}/messages`, read: `${base}/read`, remove: (id) => `/api/chat/${id}`, files: "/api/chat" };
 }
 type LinkChoice = { kind: ChatLinkKind; id: string; label: string };
 
@@ -104,22 +110,24 @@ export function ChatBubble({ message, organisationId, onRemove, api: base = "/ap
  * photos and what they're about; new ones arrive every 15 seconds while
  * it's open, and reading it clears the unread count.
  */
-export function FarmChat({ organisationId, farm, canRemoveAny }: { organisationId: string; farm: Farm; canRemoveAny: boolean }) {
-  return <ChatRoom organisationId={organisationId} room={{ kind: "farm", farm }} canRemoveAny={canRemoveAny} canPost />;
+export function FarmChat({ organisationId, farm, canRemoveAny, canPost = true, inChatApp = false }: { organisationId: string; farm: Pick<Farm, "id" | "name">; canRemoveAny: boolean; canPost?: boolean; inChatApp?: boolean }) {
+  return <ChatRoom organisationId={organisationId} room={{ kind: "farm", farm }} canRemoveAny={canRemoveAny} canPost={canPost} inChatApp={inChatApp} />;
 }
 
-/** The organisation's team chat (TCH1-TCH6): words, photos and voice notes, no links. Viewers read only. */
-export function TeamChat({ organisationId, name, canRemoveAny, canPost }: { organisationId: string; name: string; canRemoveAny: boolean; canPost: boolean }) {
-  return <ChatRoom organisationId={organisationId} room={{ kind: "team", name }} canRemoveAny={canRemoveAny} canPost={canPost} />;
+/** One of Chat's rooms (TCH10-TCH18): words, photos, voice notes and mentions, no links. */
+export function RoomChat({ organisationId, room, canRemoveAny, canPost }: { organisationId: string; room: Extract<ChatRoomKind, { kind: "room" }>; canRemoveAny: boolean; canPost: boolean }) {
+  return <ChatRoom organisationId={organisationId} room={room} canRemoveAny={canRemoveAny} canPost={canPost} inChatApp />;
 }
 
-function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisationId: string; room: ChatRoomKind; canRemoveAny: boolean; canPost: boolean }) {
+function ChatRoom({ organisationId, room, canRemoveAny, canPost, inChatApp }: { organisationId: string; room: ChatRoomKind; canRemoveAny: boolean; canPost: boolean; inChatApp: boolean }) {
   const confirm = useConfirm();
-  const base = chatApi(room);
+  const endpoints = chatApi(room);
+  const base = endpoints.list;
   const farm = room.kind === "farm" ? room.farm : null;
+  const members = room.kind === "room" ? room.members : null;
   const scope: Record<string, string> = farm ? { farmId: farm.id } : {};
-  const roomName = farm ? farm.name : room.kind === "team" ? room.name : "";
-  const farmKey = farm?.id ?? "";
+  const roomName = farm ? farm.name : room.kind === "room" ? room.name : "";
+  const farmKey = farm?.id ?? (room.kind === "room" ? room.roomId : "");
   const chat = useApiData<{ messages: Named[]; more: boolean }>(base, { organisationId, ...scope });
   const paddocks = useApiData<{ paddocks: Paddock[] }>(farm ? `/api/farming/farms/${farm.id}/paddocks` : null, { organisationId });
   const mobs = useApiData<{ mobs: Array<{ id: string; name: string }> }>(farm ? `/api/farming/farms/${farm.id}/mobs` : null, { organisationId });
@@ -129,11 +137,14 @@ function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisatio
   const [body, setBody] = useState("");
   const [photos, setPhotos] = useState<File[]>([]);
   const [links, setLinks] = useState<LinkChoice[]>([]);
+  const [mentioned, setMentioned] = useState<MentionPerson[]>([]);
+  const [caret, setCaret] = useState(0);
+  const textRef = useRef<HTMLTextAreaElement>(null);
   const [busy, setBusy] = useState(false);
   const voice = useVoiceRecorder();
   const [error, setError] = useState<string | null>(null);
   // One key per message until it's sent, so a retry after a lost reply doesn't post it twice.
-  const [sendKey, setSendKey] = useState(() => newIdempotencyKey(farm ? "farm-chat" : "team-chat"));
+  const [sendKey, setSendKey] = useState(() => newIdempotencyKey(farm ? "farm-chat" : "chat"));
   const endRef = useRef<HTMLDivElement>(null);
   const chatRef = useRef<HTMLDivElement>(null);
   const composeRef = useRef<HTMLFormElement>(null);
@@ -161,8 +172,8 @@ function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisatio
   useEffect(() => {
     if (!latest) return;
     endRef.current?.scrollIntoView({ block: "end" });
-    void api(`${base}/read`, { method: "POST", body: { organisationId, ...scope, upTo: latest } }).catch(() => undefined);
-    // eslint-disable-next-line react-hooks/exhaustive-deps -- scope is the farm's id, already in farmKey
+    void api(endpoints.read, { method: "POST", body: { organisationId, ...scope, upTo: latest } }).catch(() => undefined);
+    // eslint-disable-next-line react-hooks/exhaustive-deps -- scope and endpoints follow the chat, already in farmKey
   }, [latest, organisationId, base, farmKey]);
 
   const choices: LinkChoice[] = [
@@ -207,13 +218,15 @@ function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisatio
           photos: encoded,
           voice: recorded,
           ...(farm ? { links: links.map(({ kind, id }) => ({ kind, id })) } : {}),
+          ...(members ? { mentions: mentionsStillIn(body, mentioned).map((person) => person.userId) } : {}),
           idempotencyKey: sendKey,
         },
       });
-      setSendKey(newIdempotencyKey(farm ? "farm-chat" : "team-chat"));
+      setSendKey(newIdempotencyKey(farm ? "farm-chat" : "chat"));
       setBody("");
       setPhotos([]);
       setLinks([]);
+      setMentioned([]);
       voice.clear();
       reload();
     } catch (caught) {
@@ -226,7 +239,7 @@ function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisatio
   async function remove(message: Named) {
     if (!(await confirm("Take this message down? Its words, photos and voice note go for everyone; a note that it was taken down stays."))) return;
     try {
-      await api(`${base}/${message.id}?organisationId=${encodeURIComponent(organisationId)}`, { method: "DELETE" });
+      await api(`${endpoints.remove(message.id)}?organisationId=${encodeURIComponent(organisationId)}`, { method: "DELETE" });
       setOlder((current) => current.filter((entry) => entry.id !== message.id));
       reload();
     } catch (caught) {
@@ -236,7 +249,7 @@ function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisatio
 
   const showOlder = olderMore ?? chat.data?.more ?? false;
   return (
-    <div className={styles.chat} ref={chatRef} data-room={room.kind}>
+    <div className={styles.chat} ref={chatRef} data-room={room.kind} data-in-app={inChatApp ? "chat" : undefined}>
       {error ? <Notice tone="error">{error}</Notice> : null}
       {chat.error ? <Notice tone="error">{chat.error}</Notice> : null}
       <RefreshProblem problem={chat.refreshError} loadedAt={chat.loadedAt} onRetry={reload} />
@@ -246,10 +259,10 @@ function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisatio
             Show older messages
           </button>
         ) : null}
-        {chat.data && messages.length === 0 ? <p className={styles.empty}>{farm ? <>No messages yet. Say what&apos;s happening on {roomName}.</> : <>No messages yet. Say hello to the team.</>}</p> : null}
+        {chat.data && messages.length === 0 ? <p className={styles.empty}>{farm ? <>No messages yet. Say what&apos;s happening on {roomName}.</> : <>No messages yet. Say hello.</>}</p> : null}
         <ol>
           {messages.map((message) => (
-            <ChatBubble key={message.id} api={base} message={message} organisationId={organisationId} onRemove={!message.removed && (message.mine || canRemoveAny) ? remove : undefined} />
+            <ChatBubble key={message.id} api={endpoints.files} message={message} organisationId={organisationId} onRemove={!message.removed && (message.mine || canRemoveAny) ? remove : undefined} />
           ))}
         </ol>
       </div>
@@ -286,13 +299,34 @@ function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisatio
               ))}
             </div>
           ) : null}
+          {members ? (
+            <MentionPicker
+              text={body}
+              caret={caret}
+              people={members}
+              onPick={(next, nextCaret, person) => {
+                setBody(next);
+                setMentioned((current) => (current.some((entry) => entry.userId === person.userId) ? current : [...current, person]));
+                setCaret(nextCaret);
+                requestAnimationFrame(() => {
+                  textRef.current?.focus();
+                  textRef.current?.setSelectionRange(nextCaret, nextCaret);
+                });
+              }}
+            />
+          ) : null}
           <textarea
+            ref={textRef}
             value={body}
             maxLength={4000}
             rows={2}
             placeholder={`Message ${roomName}`}
             aria-label="Message"
-            onChange={(event) => setBody(event.target.value)}
+            onChange={(event) => {
+              setBody(event.target.value);
+              setCaret(event.target.selectionStart ?? event.target.value.length);
+            }}
+            onSelect={(event) => setCaret(event.currentTarget.selectionStart ?? 0)}
             onKeyDown={(event) => {
               if (event.key === "Enter" && (event.ctrlKey || event.metaKey)) {
                 event.preventDefault();
@@ -360,7 +394,7 @@ function ChatRoom({ organisationId, room, canRemoveAny, canPost }: { organisatio
           </div>
         </form>
       ) : (
-        <p className={styles.empty}>You can read this chat. Posting needs the bookkeeper role or higher, or a sales role.</p>
+        <p className={styles.empty}>{room.kind === "room" && room.readOnlyBecause ? room.readOnlyBecause : "You can read this chat. Posting needs the bookkeeper role or higher, or a sales role."}</p>
       )}
       <div ref={endRef} className={styles.end} />
     </div>
