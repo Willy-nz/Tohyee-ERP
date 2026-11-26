@@ -1,0 +1,12 @@
+# The public keys Tohyee trusts to sign its Windows installer (UPD14-UPD19).
+#
+# Every install keeps this file and checks each update (Update now, and the
+# server app's Install) against the keys in it. With no key here, an update
+# is checked only against GitHub's SHA-256 and is called "not signed".
+#
+# One key per line, exactly as docs/OWNER-SETUP-SIGNING.md makes it (a line
+# starting with <RSAKeyValue>). Lines starting with # are notes. Only public
+# keys ever go here: never a line containing <D>.
+#
+# To change keys, add the new key on a new line and release once signed with
+# the old key; then sign with the new key and remove the old line.
