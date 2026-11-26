@@ -19,6 +19,7 @@ import { Settings,Workpaper } from "@/components/income-tax/workpaper";
 import { YearFigures } from "@/components/income-tax/year-figures";
 import { BookPayments } from "@/components/income-tax/payments";
 import { DueDates,Figures,InterestCard,Overview,Provisional } from "@/components/income-tax/overview";
+import { ProvisionalOptionCard } from "@/components/income-tax/provisional-option";
 import { TaxAssets } from "@/components/income-tax/assets";
 import { IcaCard,Ir10Card,TaxReturnCard } from "@/components/income-tax/returns";
 import { IrdDocuments } from "@/components/income-tax/ird";
@@ -67,6 +68,7 @@ function Report({ organisationId, report, reload, view, gst }: { organisationId:
       {view === "payments" ? (
         <>
           <DueDates report={report} incomplete={incomplete} />
+          <ProvisionalOptionCard key={`${report.incomeYear}-${report.provisionalOption.version}-${report.provisionalOption.estimates.length}`} organisationId={organisationId} setting={report.provisionalOption} onSaved={reload} />
           <Provisional report={report} />
           <YearFigures key={`${report.typed.version}-${report.paidTotal}-${report.lastYear.rit}`} organisationId={organisationId} incomeYear={report.incomeYear} type={report.settings.taxpayerType} years={report.years} endMonth={report.endMonth} onSaved={reload} />
           <BookPayments organisationId={organisationId} years={report.years} onChanged={reload} />

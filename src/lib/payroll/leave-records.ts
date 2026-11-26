@@ -7,7 +7,7 @@ import { formatDate } from "@/lib/format";
 import { assertSameRequest, requestHash } from "@/lib/idempotency";
 import { add, cmp, dec, divide, isPositive, mul, parseDecimalInput, sum, toFixedString, toPlainString } from "@/lib/money/decimal";
 import { requirePayrollAccess } from "@/lib/payroll/access";
-import { checkCashUp, earnedTowardsNext } from "@/lib/payroll/leave/annual";
+import { type AnniversaryRule, anniversaryMoveDays, checkCashUp, earnedTowardsNext } from "@/lib/payroll/leave/annual";
 import { addDays, addMonths, daysInclusive, eachDay } from "@/lib/payroll/leave/dates";
 import { observedHolidays } from "@/lib/payroll/leave/public-holidays";
 import type { AnniversaryRegion } from "@/lib/payroll/leave/public-holiday-dates";
@@ -41,7 +41,7 @@ import { optionalString, requireBoolean, requireIdempotencyKey, requireOneOf } f
 
 const UUID_PATTERN = /^[0-9a-f]{8}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{4}-[0-9a-f]{12}$/i;
 
-function uuid(input: unknown, what: string): string {
+export function uuid(input: unknown, what: string): string {
   if (typeof input !== "string" || !UUID_PATTERN.test(input)) throw new NotFoundError(`That ${what} wasn't found.`);
   return input.toLowerCase();
 }
@@ -406,13 +406,19 @@ export type UnpaidLeaveRecord = {
   agreementFileId: string | null;
   /** Whether it moves the anniversary. */
   movesAnniversary: boolean;
+  /** How far it moves it, in days (TXF10). */
+  movesAnniversaryBy: number;
+  /** Recorded under Tohyee's earlier whole-period rule (TXF11), or the current one. */
+  anniversaryRule: AnniversaryRule;
+  /** For leave still on the earlier rule that moves the anniversary: what a person should review (TXF11). */
+  earlierRuleNote: string | null;
   note: string | null;
   status: "active" | "cancelled";
   createdByEmail: string;
   createdAt: string;
 };
 
-type UnpaidRow = {
+export type UnpaidRow = {
   id: string;
   employee_id: string;
   start_date: string;
@@ -420,6 +426,7 @@ type UnpaidRow = {
   reason: UnpaidLeaveRecord["reason"];
   agreed_to_count: boolean;
   agreement_file_id: string | null;
+  anniversary_rule: AnniversaryRule;
   note: string | null;
   status: "active" | "cancelled";
   created_by_email: string;
@@ -427,10 +434,13 @@ type UnpaidRow = {
   request_hash: string;
 };
 
-const UNPAID_COLUMNS = `id::text, employee_id::text, start_date::text, end_date::text, reason, agreed_to_count, agreement_file_id::text, note, status,
+export const UNPAID_COLUMNS = `id::text, employee_id::text, start_date::text, end_date::text, reason, agreed_to_count, agreement_file_id::text, anniversary_rule, note, status,
   created_by_email, created_at::text, request_hash`;
 
-function toUnpaid(row: UnpaidRow): UnpaidLeaveRecord {
+export function toUnpaid(row: UnpaidRow): UnpaidLeaveRecord {
+  const leave = { start: row.start_date, end: row.end_date, statutory: row.reason !== "other", agreedToCount: row.agreed_to_count, anniversaryRule: row.anniversary_rule };
+  const movesBy = anniversaryMoveDays(leave);
+  const current = anniversaryMoveDays({ ...leave, anniversaryRule: "over_one_week" });
   return {
     id: row.id,
     employeeId: row.employee_id,
@@ -439,7 +449,13 @@ function toUnpaid(row: UnpaidRow): UnpaidLeaveRecord {
     reason: row.reason,
     agreedToCount: row.agreed_to_count,
     agreementFileId: row.agreement_file_id,
-    movesAnniversary: row.reason === "other" && daysInclusive(row.start_date, row.end_date) > 7 && !row.agreed_to_count,
+    movesAnniversary: movesBy > 0,
+    movesAnniversaryBy: movesBy,
+    anniversaryRule: row.anniversary_rule,
+    earlierRuleNote:
+      row.status === "active" && row.anniversary_rule === "whole_period" && movesBy > 0
+        ? `Recorded under Tohyee's earlier rule, so it moves the anniversary by all ${movesBy} days. Employment NZ's guidance moves it only by the ${current} days over one week. Check it with the employee, and any holiday pay already worked out on the later date, then use the current rule.`
+        : null,
     note: row.note,
     status: row.status,
     createdByEmail: row.created_by_email,
@@ -456,8 +472,8 @@ export async function listUnpaidLeave(tx: OrgTx, employeeIdInput: unknown): Prom
 }
 
 /**
- * Records unpaid leave (HL10): a single period of other unpaid
- * leave longer than a week moves the anniversary by its whole length, unless
+ * Records unpaid leave (HL10, TXF10): a single period of other unpaid
+ * leave longer than a week moves the anniversary by the part over one week, unless
  * a written agreement to count it is attached, which cuts the AWE divisor
  * instead (s 16(3)).
  */
@@ -492,8 +508,8 @@ export async function addUnpaidLeave(
   const fileId = agreement ? await storeFile(tx, facts.id, "unpaid_leave_agreement", agreement) : null;
   const inserted = await tx.query<UnpaidRow>(
     `insert into payroll_unpaid_leave (idempotency_key, request_hash, employee_id, start_date, end_date, reason, agreed_to_count, agreement_file_id, note,
-                                       created_by_user_id, created_by_email)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning ${UNPAID_COLUMNS}`,
+                                       created_by_user_id, created_by_email, anniversary_rule)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11, 'over_one_week') returning ${UNPAID_COLUMNS}`,
     [idempotencyKey, hash, facts.id, startDate, endDate, reason, agreedToCount, fileId, optionalString(input.note, "Note", { maxLength: 1000 }), tx.actor.userId, tx.actor.email],
   );
   await writeAuditEvent(tx, {

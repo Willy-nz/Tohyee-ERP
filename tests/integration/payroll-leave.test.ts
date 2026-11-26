@@ -8,7 +8,8 @@ import { createEmployee } from "@/lib/payroll/employees";
 import { createPayGroup } from "@/lib/payroll/groups";
 import { addDays } from "@/lib/payroll/leave/dates";
 import { addLeaveSettings, updateOrganisationLeaveSettings } from "@/lib/payroll/leave-settings";
-import { addUnpaidLeave, cancelLeaveBooking, cancelUnpaidLeave, createCashUp, createLeaveBooking, decidePublicHoliday, exchangeAlternativeHoliday } from "@/lib/payroll/leave-records";
+import { applyCurrentAnniversaryRule } from "@/lib/payroll/unpaid-leave-rule";
+import { addUnpaidLeave, cancelLeaveBooking, cancelUnpaidLeave, listUnpaidLeave, createCashUp, createLeaveBooking, decidePublicHoliday, exchangeAlternativeHoliday } from "@/lib/payroll/leave-records";
 import { exportLeaveLiability, exportLeaveRecord, getLeaveRecord, getLeaveSummary, leaveLiabilityReport } from "@/lib/payroll/leave-reports";
 import { makePayRunPaydayFilingFile, updatePaydayFilingSettings } from "@/lib/payroll/payday-filing-service";
 import { payslipLayout } from "@/lib/payroll/payslip-layout";
@@ -627,15 +628,30 @@ describeWithDatabase("Holidays Act leave in pay runs (HL1-HL42)", () => {
       approved["C:2026-10-26"] = await approve(after.id);
     });
 
-    it("HL10: 3 weeks' unpaid leave moves Cara's anniversary by 21 days, unless a written agreement to count it is attached", async () => {
+    it("HL10, TXF10: 3 weeks' unpaid leave moves Cara's anniversary by the 14 days over a week, unless a written agreement to count it is attached", async () => {
       expect((await asJade((tx) => getLeaveSummary(tx, people.cara, "2026-12-31"))).annual).toMatchObject({ nextEntitled: "2027-05-04" });
       await expect(
         asJade((tx) => addUnpaidLeave(tx, { idempotencyKey: key("unpaid"), employeeId: people.cara, startDate: "2027-01-04", endDate: "2027-01-24", agreedToCount: true })),
       ).rejects.toThrow("Attach the written agreement");
       const { unpaidLeave } = await asJade((tx) => addUnpaidLeave(tx, { idempotencyKey: key("unpaid"), employeeId: people.cara, startDate: "2027-01-04", endDate: "2027-01-24" }));
-      expect(unpaidLeave.movesAnniversary).toBe(true);
-      expect((await asJade((tx) => getLeaveSummary(tx, people.cara, "2026-12-31"))).annual).toMatchObject({ nextEntitled: "2027-05-25" });
+      expect(unpaidLeave).toMatchObject({ movesAnniversary: true, movesAnniversaryBy: 14, anniversaryRule: "over_one_week", earlierRuleNote: null });
+      // Changed 26 Nov 2026 (TXF10, owner's decision): was 25 May (all 21 days).
+      expect((await asJade((tx) => getLeaveSummary(tx, people.cara, "2026-12-31"))).annual).toMatchObject({ nextEntitled: "2027-05-18" });
       await asJade((tx) => cancelUnpaidLeave(tx, unpaidLeave.id));
+      // TXF11: leave recorded before the change keeps the whole-period move, with a note, until a person switches it.
+      const earlier = await asJade((tx) => addUnpaidLeave(tx, { idempotencyKey: key("unpaid"), employeeId: people.cara, startDate: "2027-01-04", endDate: "2027-01-24" }));
+      await asJade((tx) => tx.query("update payroll_unpaid_leave set anniversary_rule = 'whole_period' where id = $1", [earlier.unpaidLeave.id]));
+      expect((await asJade((tx) => getLeaveSummary(tx, people.cara, "2026-12-31"))).annual).toMatchObject({ nextEntitled: "2027-05-25" });
+      const [listed] = (await asJade((tx) => listUnpaidLeave(tx, people.cara))).filter((record) => record.id === earlier.unpaidLeave.id);
+      expect(listed).toMatchObject({ movesAnniversaryBy: 21, anniversaryRule: "whole_period" });
+      expect(listed.earlierRuleNote).toContain("moves the anniversary by all 21 days. Employment NZ's guidance moves it only by the 14 days over one week");
+      const switched = await asJade((tx) => applyCurrentAnniversaryRule(tx, earlier.unpaidLeave.id));
+      expect(switched.unpaidLeave).toMatchObject({ movesAnniversaryBy: 14, anniversaryRule: "over_one_week", earlierRuleNote: null });
+      expect((await asJade((tx) => getLeaveSummary(tx, people.cara, "2026-12-31"))).annual).toMatchObject({ nextEntitled: "2027-05-18" });
+      await expect(asJade((tx) => applyCurrentAnniversaryRule(tx, earlier.unpaidLeave.id))).rejects.toThrow("already uses the current rule");
+      const audit = await asJade((tx) => tx.query("select count(*)::int as n from audit_events where event_type = 'payroll_unpaid_leave.anniversary_rule_changed'"));
+      expect(audit.rows[0].n).toBe(1);
+      await asJade((tx) => cancelUnpaidLeave(tx, earlier.unpaidLeave.id));
       const agreement = { fileName: "agreement.pdf", content: new TextEncoder().encode("%PDF-1.4\nagreed\n%%EOF") };
       const agreed = await asJade((tx) =>
         addUnpaidLeave(tx, { idempotencyKey: key("unpaid"), employeeId: people.cara, startDate: "2027-01-04", endDate: "2027-01-24", agreedToCount: true, agreement }),

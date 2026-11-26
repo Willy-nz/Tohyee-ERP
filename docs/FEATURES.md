@@ -3212,6 +3212,17 @@ that something happened.
   everything's paid on its due date, at IRD's dated rates, simple and daily,
   with the $60,000 rules for the standard option and nothing on $100 or
   less. Overpayment interest isn't worked out.
+- **Provisional tax options** (examples TXF14-TXF18, 26 Nov 2026, not yet reviewed): each income year can use the
+  standard option (the default), the estimation option (estimates with their dates; instalments under s RC 10), the
+  ratio option (IRD's ratio × GST Box 5 for each two months, six instalments, 31 March balance dates only, with the
+  eligibility checks Tohyee can make), or AIM through other software (no instalments or interest worked out). The
+  interest estimate and the AI's `get_income_tax_figures` follow the option. Not built: the ratio's asset-sale
+  election, stopping the ratio partway through a year, and next year's option on the IR4 and IR3.
+- **More trust kinds** (TXF12, TXF13): lines trusts (energy consumer trusts) at 33% and legacy superannuation funds at
+  28%.
+- **Unpaid leave and the anniversary** (TXF10, TXF11): leave of more than a week that doesn't count moves the
+  anniversary only by the days over one week. Leave recorded before 26 Nov 2026 keeps the whole-period move, with a
+  note on the employee, until a person chooses "Use the current rule".
 - **IR4 imputation return boxes** (ITX49): a company's imputation credit
   account fills boxes 41-45 of the IR4's annual imputation return.
 - **IR4 income and tax boxes** (ITX50-ITX53): once a

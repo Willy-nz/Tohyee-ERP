@@ -6,16 +6,23 @@ import styles from "@/components/tax-workspace.module.css";
 import { Money } from "@/components/books";
 import { Badge,Card,Notice,Stat,ui } from "@/components/ui";
 import { formatDate,formatMoney } from "@/lib/format";
+import { PROVISIONAL_OPTION_LABELS } from "@/lib/tax/income/provisional-options";
 import { dependsOnForecast,nextDue,taxTasks } from "@/lib/tax/income/workspace";
 import { Supported,TAX_VIEWS,viewHref } from "@/components/income-tax/shared";
 
 export function Provisional({ report }: { report: Supported }) {
   const schedule = report.provisional;
+  const option = report.provisionalOption.option;
+  const description =
+    option === "standard"
+      ? `Based on the ${report.lastYear.incomeYear} income year's RIT${report.lastYear.rit ? ` of ${formatMoney(report.lastYear.rit)}` : ""} (${report.lastYear.typed ? "typed from IRD" : "Tohyee estimate"}). Showing this isn't choosing an option with IRD.`
+      : option === "estimation"
+        ? "Based on the estimates you gave IRD for this year."
+        : option === "ratio"
+          ? `IRD's ratio of ${report.provisionalOption.ratioPercent ? Number(report.provisionalOption.ratioPercent) : ""}% × your GST sales (Box 5) for each two months.`
+          : "AIM, through other software.";
   return (
-    <Card
-      title="Provisional tax (standard option)"
-      description={`Based on the ${report.lastYear.incomeYear} income year's RIT${report.lastYear.rit ? ` of ${formatMoney(report.lastYear.rit)}` : ""} (${report.lastYear.typed ? "typed from IRD" : "Tohyee estimate"}). Showing this isn't choosing an option with IRD.`}
-    >
+    <Card title={`Provisional tax: ${PROVISIONAL_OPTION_LABELS[option]}`} description={description}>
       {schedule.kind === "schedule" ? (
         <div className={ui.tableWrap}>
           <table className={`${ui.table} ${ui.stackOnPhone}`}>
@@ -38,7 +45,7 @@ export function Provisional({ report }: { report: Supported }) {
                     {instalment.onTimeBy.date !== instalment.dueDate ? <span className={ui.muted}> (on time by {formatDate(instalment.onTimeBy.date)})</span> : null}
                   </td>
                   <td data-label="Amount" className={ui.num}>
-                    <Money value={instalment.amount} /> {instalment.estimate ? <Badge tone="amber">Estimate</Badge> : null}
+                    {instalment.notKnownYet ? <span className={ui.muted}>Not known yet</span> : <Money value={instalment.amount} />} {instalment.estimate ? <Badge tone="amber">Estimate</Badge> : null}
                     {instalment.catchUp !== "0.00" ? <div className={ui.muted}>Includes {formatMoney(instalment.catchUp)} not paid towards earlier instalments</div> : null}
                   </td>
                   <td data-label="Paid towards it" className={ui.num}>
@@ -62,7 +69,7 @@ export function Provisional({ report }: { report: Supported }) {
         </div>
       ) : null}
       {schedule.notes.map((text) => (
-        <Notice key={text} tone={schedule.kind === "unknown" ? "warning" : "info"}>
+        <Notice key={text} tone={schedule.kind === "unknown" || schedule.kind === "other_software" ? "warning" : "info"}>
           {text}
         </Notice>
       ))}
@@ -77,6 +84,7 @@ export function InterestCard({ report }: { report: Supported }) {
       title="Use-of-money interest (estimate)"
       description={`On ${interest.ritTyped ? "IRD's assessed" : "Tohyee's forecast"} RIT of ${formatMoney(interest.rit)}, at IRD's rates (latest from ${formatDate(interest.ratesKnownTo)}, used for future days too). IRD works out what it actually charges.`}
     >
+      {interest.notWorkedOut ? <Notice tone="warning">{interest.notWorkedOut}</Notice> : null}
       <div className={ui.statRow}>
         <Stat label={`So far, to ${formatDate(interest.soFar.asAt)}`} value={<Money value={interest.soFar.amount} />} />
         <Stat label="If everything's paid on its due date" value={interest.ifPaidOnTime === null ? <span className={ui.muted}>Not worked out</span> : <Money value={interest.ifPaidOnTime} />} />

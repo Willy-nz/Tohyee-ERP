@@ -16037,7 +16037,10 @@ amount paid.
     (3 weeks), that single period is longer than 1 week, so none of it
     counts: her anniversary moves by the whole 21 days, from Wed 1 Apr to
     **Wed 22 Apr 2026** (following the Act's wording). Her AWE
-    divisor stays 52.
+    divisor stays 52. (Superseded 26 Nov 2026 by TXF10: the anniversary
+    now moves only by the part over one week, to Wed 15 Apr 2026. Leave
+    recorded before then keeps the whole-period move until a person
+    reviews it, TXF11.)
   - If they agree, in writing, to count the whole 3 weeks, Tohyee records
     the agreement, the anniversary stays **Wed 1 Apr 2026** and her AWE
     divisor drops from 52 to **50** (the weeks over 1 week, s16(3)). Without
@@ -16696,7 +16699,7 @@ The owner asked Claude to research these questions and make the calls (1 Oct
   HL24).
 - **14** Unpaid leave of more than a week (a single period) moves the
   anniversary by its whole length unless a written agreement to count it
-  is recorded, which cuts the AWE divisor instead (HL10). (Corrected 2 Oct 2026 while building: this summary still had the earlier call, "only by the part beyond one week", which replaced on 1 Oct 2026.)
+  is recorded, which cuts the AWE divisor instead (HL10). (Corrected 2 Oct 2026 while building: this summary still had the earlier call, "only by the part beyond one week", which replaced on 1 Oct 2026.) (Superseded 26 Nov 2026: the owner chose Employment NZ's guidance, so the anniversary moves only by the part over one week; see TXF10 and TXF11.)
 - **15** No hard limit on holidays in advance; a warning above what's been
   earned, and a prompt for the written agreement (HL14).
 - **16** Advance leave worth more than the 8% is deducted only with written
@@ -24295,6 +24298,179 @@ backed up before Update now starts.
   Tohyee's data folder, which only Administrators can change) sees the
   unfinished update, puts v1.0.0 back and starts it, as in UPD11. From this
   version on; an update from 0.45.0 doesn't have it yet.
+
+## Tax and payroll decisions: unpaid leave, lines and legacy superannuation trusts, provisional tax options (TXF10-TXF18; 26 Nov 2026; owner's decisions, details following common practice, not yet reviewed)
+
+The owner decided the behaviour; the details follow the pages cited, read on
+26 Nov 2026 through a summarising fetch tool (so check the pages). Made-up
+figures and names.
+
+- **TXF10 Unpaid leave of more than a week moves the anniversary only by the
+  part over one week.** Employment NZ says the anniversary moves "by the
+  length of the (continuous) period of leave without pay in excess of one
+  week", and that each continuous period is looked at on its own: two
+  separate weeks don't move it
+  (https://www.employment.govt.nz/leave-and-holidays/leave-without-pay ;
+  https://employment.govt.nz/assets/uploads/documents/leave-and-holidays/holiday-act-guidance-tool-leave-without-pay.pdf ;
+  Holidays Act 2003 s 16: https://legislation.govt.nz/act/public/2003/129/en/latest/).
+  This replaces HL10's whole-period move.
+  - Aroha started Tue 1 Apr 2025 and takes unpaid leave Mon 2 to Sun 22 Feb
+    2026 (21 days). 7 days count; the other **14** move her anniversary
+    from Wed 1 Apr to **Wed 15 Apr 2026** (then 15 Apr each year).
+  - Rangi started Sat 1 Feb 2025 and takes unpaid leave Mon 3 to Tue 18 Nov
+    2025 (16 days). His anniversary moves by 9 days, to **Tue 10 Feb 2026**
+    (Employment NZ's own example moves an anniversary from 1 to 10 February
+    for the same length of leave).
+  - Two separate unpaid weeks (Mon 2 to Sun 8 Feb and Mon 2 to Sun 8 Mar
+    2026) each count in full: the anniversary stays 1 Apr.
+  - Unchanged: statutory unpaid leave always counts, and with a written
+    agreement to count the leave the anniversary stays and the AWE divisor
+    is cut by the weeks over one (HL10, s 16(3)).
+  Tested in `tests/unit/payroll-leave.test.ts` (HL10's test now expects 15
+  Apr 2026; HL43's opening-balance test now expects 18 Mar 2027 instead of
+  25 Mar 2027) and `tests/integration/payroll-leave.test.ts` (Cara's 21
+  days in January 2027 now move her anniversary from 4 May to **18 May
+  2027**, not 25 May).
+- **TXF11 Leave recorded under the earlier rule.** Tohyee works anniversaries
+  out from the unpaid leave records; it doesn't store the dates. Unpaid
+  leave recorded before this change keeps moving the anniversary by its
+  whole length, so nothing already worked out changes by itself. The
+  employee's leave page shows a plain note on each such record: "Recorded
+  under Tohyee's earlier rule, so it moves the anniversary by all 21 days.
+  Employment NZ's guidance moves it only by the 14 days over one week."
+  A person checks it (with the employee, and against any holiday pay
+  already worked out on the later date) and chooses **Use the current
+  rule**. That's recorded in the audit log with who did it; draft pay runs
+  from the leave's start are worked out again; approved pay runs aren't
+  changed. Cara's leave of 4 to 24 Jan 2027, recorded before the change,
+  gives an anniversary of 25 May 2027 with the note; after Use the current
+  rule, **18 May 2027**. New records always use the current rule. Tested in
+  `tests/integration/payroll-leave.test.ts`.
+- **TXF12 Lines trusts (energy consumer trusts) at 33%.** Income Tax Act 2007
+  schedule 1 part A clause 6B gives a basic rate of 0.33 to the trustee of
+  "a lines trust", from 1 April 2024 (the 2025 income year onwards)
+  (https://legislation.govt.nz/act/public/2007/97/en/latest/parts/DLM1523173/).
+  Section YA 1 defines a lines trust as one that was allocated or vested
+  shares in an energy company under the Energy Companies Act 1992 (or
+  under the Southland Electricity Act 1993 provisions) and still holds
+  them or still has the same class of beneficiaries
+  (https://www.legislation.govt.nz/act/public/2007/97/en/latest/parts/DLM1520573/).
+  IRD's trustee tax rates page and the IR6 guide (Q27B) call them energy
+  consumer trusts, at 33%
+  (https://www.ird.govt.nz/income-tax/income-tax-for-businesses-and-organisations/trusts-and-estates/income/trustee-tax-rates ;
+  https://www.ird.govt.nz/-/media/project/ir/home/documents/forms-and-guides/ir1---ir99/ir6g/ir6g-2026.pdf).
+  A new trust kind, "Lines trust (energy consumer trust)". Trustee income
+  of $50,000.00 in the 2027 income year: tax **$16,500.00** (not $19,500.00
+  at 39%). Excess imputation credits of $330.00 become a loss of
+  **$1,000.00** ($330 ÷ 0.33, IR6 guide Q27G). The IR6 has no box or tick
+  for the kind: the rate shows only in the tax worked out (as for an
+  estate). The minor beneficiary rule still applies, as for a family trust
+  (no exclusion for lines trusts was checked).
+- **TXF13 Legacy superannuation funds at 28%.** Schedule 1 part A clause 6(d)
+  gives 0.28 to the trustee of "a legacy superannuation fund", inserted
+  from 1 April 2024. Section YA 1: a scheme that used to be a widely-held
+  superannuation fund and is a restricted workplace savings scheme (or a
+  scheme treated as registered under the National Provident Fund
+  Restructuring Act 1990, s 59A(1)(b)). The IR6 guide (Q27B, Q27G) uses
+  28% for "a legacy superannuation fund trust". A new trust kind, "Legacy
+  superannuation fund". Trustee income $50,000.00: tax **$14,000.00**;
+  excess imputation credits of $280.00: loss **$1,000.00**. It's 28%
+  whatever the income: Tohyee doesn't apply the $10,000 test to it (whether
+  the 33% rule for a trust with $10,000 or less could apply instead wasn't
+  checked). The screen says IRD's registered superannuation funds page
+  says registered funds file an IR44, which Tohyee doesn't produce
+  (https://ird.govt.nz/income-tax/income-tax-for-businesses-and-organisations/income-tax-for-registered-superannuation-funds),
+  so this kind is for a fund that files an IR6. Tested (TXF12, TXF13) in
+  `tests/unit/trust-tax.test.ts` and `tests/integration/trust-tax.test.ts`.
+- **TXF14 A provisional tax option for each income year.** Standard until a
+  person chooses another: estimation, ratio, or AIM (through other
+  software). The choice is per income year: IRD moves AIM users back to
+  standard at the start of each year unless they choose AIM again
+  (https://www.ird.govt.nz/income-tax/provisional-tax/provisional-tax-options/accounting-income-method-aim).
+  Choosing here doesn't tell IRD; the screen says so. The instalments, due
+  dates, end-of-year tax, interest estimate and the AI's figures all follow
+  the option. Tested in `tests/integration/provisional-options.test.ts`.
+- **TXF15 Estimation option.** Anyone liable for provisional tax can estimate
+  their residual income tax (RIT), and estimate again, on or before an
+  instalment date, up to the last one (Income Tax Act 2007 s RC 7;
+  https://www.ird.govt.nz/income-tax/provisional-tax/provisional-tax-options/estimation-option).
+  The estimate must be fair and reasonable (s RC 7(4)); Tohyee says so but
+  can't judge it. Each instalment is (the estimate × the instalment's number
+  ÷ the number of instalments) less the provisional tax for the earlier
+  instalments (s RC 10, https://legislation.govt.nz/act/public/2007/97/en/latest/parts/DLM1519723/):
+  3 instalments, or 2 for a six-monthly GST filer, on the standard dates.
+  An instalment before the first estimate keeps its standard amount.
+  - Harakeke Ltd, 31 March balance date, 2027 income year. Estimate
+    $30,000.00 typed on 1 Aug 2026: instalment 1 (Fri 28 Aug 2026)
+    **$10,000.00**. Estimate again on 10 Jan 2027, $60,000.00: instalment 2
+    (Fri 15 Jan 2027) 60,000 × 2 ÷ 3 − 10,000 = **$30,000.00**; instalment 3
+    (Fri 7 May 2027) 60,000 − 40,000 = **$20,000.00**.
+  - An estimate after the last instalment date (7 May 2027) is refused.
+  - **Interest:** IRD charges interest on the difference between what was
+    paid and the year's actual RIT spread equally over the instalments, from
+    the day after each instalment date, even when the estimate was paid in
+    full and on time; there's no $60,000 rule
+    (https://www.ird.govt.nz/income-tax/provisional-tax/interest-on-provisional-tax,
+    its "Mary" example). Harakeke's RIT turns out $57,000.00, so $19,000.00
+    is required by each date. Paid $10,000 on 28 Aug, $30,000 on 15 Jan and
+    $20,000 on 7 May: $9,000.00 unpaid from 29 Aug 2026 to 15 Jan 2027 (140
+    days at 8.97%): **$309.65**. After that more than the share is paid, so
+    nothing more; interest IRD pays on the overpaid part isn't worked out
+    (as before).
+  Tested in `tests/unit/provisional-options.test.ts`.
+- **TXF16 Ratio option.** Who can use it (s RC 16, RC 17;
+  https://www.ird.govt.nz/income-tax/provisional-tax/provisional-tax-options/ratio-option):
+  last year's RIT more than $5,000 and no more than $150,000; registered
+  for GST for the whole of last year; filing GST monthly or two-monthly;
+  not a partnership; a ratio between 0% and 100%. It's chosen with IRD
+  before the income year starts (s RC 15), and IRD tells the taxpayer the
+  ratio: last year's RIT ÷ last year's total taxable supplies, GST
+  included (s RC 8(2), RC 8(8)). Tohyee takes the ratio IRD gave, typed.
+  - Each instalment is the ratio × total taxable supplies for the two
+    months before it (s RC 11): GST return Box 5 (sales including GST and
+    zero-rated sales), from the filed return, or worked out from the books
+    when it isn't filed yet. A monthly filer's two returns are added
+    together. Six instalments; for a 31 March balance date 28 Jun, 28 Aug,
+    28 Oct, 15 Jan, 28 Feb and 7 May
+    (https://www.ird.govt.nz/income-tax/provisional-tax/paying-your-provisional-tax/payment-dates-for-provisional-tax),
+    each for the two months ending the month before. Rounded to the cent.
+  - Kōura Ltd's ratio is 8%. Box 5 for April and May 2026 is $13,000.00, so
+    instalment 1 (Sun 28 Jun 2026, on time by Mon 29 Jun) is **$1,040.00**
+    (IRD's own example has the same figures). An instalment whose two months
+    haven't ended says "Not known yet".
+  - Refused: a six-monthly GST filer; last year's RIT (IRD's figure) of
+    $160,000.00 or $4,000.00; not registered for GST for all of last year; a
+    ratio of 0% or 100%; a balance date other than 31 March (the dates are
+    checked for 31 March only).
+  - **Interest:** used correctly and paid on time, IRD charges no interest on
+    the instalments; interest runs only on what's unpaid after the
+    end-of-year tax date, and IRD pays none on an overpayment (IRD,
+    "Interest on provisional tax"). Kōura's 2027 RIT of $30,000.00 with
+    $26,000.00 paid in instalments: interest on $4,000.00 from Tue 8 Feb
+    2028 (7 Feb 2028 is the end-of-year date) if it's still unpaid. The
+    screen says that late or short ratio instalments can still bring
+    penalties and interest, which Tohyee doesn't estimate.
+  Tested in `tests/unit/provisional-options.test.ts` and
+  `tests/integration/provisional-options.test.ts`.
+- **TXF17 AIM, through other software.** AIM is for individuals and
+  companies with turnover under $5 million, and needs AIM-capable
+  accounting software (IRD's AIM page). Tohyee isn't AIM software, so it
+  doesn't work out AIM instalments. Choosing "AIM, through other software"
+  takes the standard instalments and the interest estimate away (they'd be
+  wrong), and the screen says plainly: "Your AIM software works out these
+  instalments; Tohyee doesn't." End-of-year tax is the RIT less what's been
+  paid. For a trust the screen adds that IRD's AIM page describes AIM for
+  individuals and companies.
+- **TXF18 The AI's income tax figures.** `get_income_tax_figures` returns the
+  year's provisional tax option (and the ratio or estimates) with the
+  typed figures, so an AI doesn't assume the standard option. Tested in
+  `tests/integration/provisional-options.test.ts`.
+
+Not built (listed for the owner): the ratio option's election to leave out a
+large asset sale (s RC 19), what happens when a two-month Box 5 is negative
+(Tohyee shows nil with a note), stopping the ratio partway through the year
+(interest from the stop date), ratio dates for balance dates other than 31
+March, and next year's option on the IR4 (box 33A) and IR3.
 
 ## Shopify shipments cancelled after they were counted (SPF13-SPF20; 26 Nov 2026; following common practice, not yet reviewed)
 

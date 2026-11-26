@@ -186,7 +186,7 @@ function addMonthsTo(month: string, count: number): { year: number; month: numbe
  * 15 January and 28 April is 7 May (Income Tax Act 2007 schedule 3 part A,
  * ITX42).
  */
-function instalmentDate(previousBalanceDate: string, monthsAfter: number): string {
+export function instalmentDate(previousBalanceDate: string, monthsAfter: number): string {
   const { year, month } = addMonthsTo(previousBalanceDate.slice(0, 7), monthsAfter);
   if (month === 12) return `${year + 1}-01-15`;
   if (month === 4) return `${year}-05-07`;
@@ -304,6 +304,8 @@ export type Instalment = {
   basis: string;
   /** Uses Tohyee's estimate of last year's RIT rather than IRD's figure. */
   estimate: boolean;
+  /** The amount can't be worked out yet (a ratio instalment whose GST period hasn't ended; TXF16). */
+  notKnownYet?: boolean;
 };
 
 export type ScheduleAllocation = {
@@ -326,7 +328,9 @@ export type ScheduleAllocation = {
 export type ProvisionalSchedule =
   | { kind: "schedule"; instalments: Instalment[]; total: string; notes: string[]; allocation: ScheduleAllocation }
   | { kind: "not_provisional"; notes: string[] }
-  | { kind: "unknown"; notes: string[] };
+  | { kind: "unknown"; notes: string[] }
+  /** AIM through other software: Tohyee works nothing out (TXF17). */
+  | { kind: "other_software"; notes: string[] };
 
 /** A Decimal as a plain 2-place string ("18551.40"). */
 export function money(value: Decimal): string {
@@ -409,7 +413,7 @@ export function standardSchedule(input: {
   const allocated = (appliesTo: AppliesTo, statuses: readonly AllocationStatus[]) =>
     allocations.filter((entry) => entry.appliesTo === appliesTo && statuses.includes(entry.status)).reduce((sum, entry) => add(sum, entry.amount), ZERO_DECIMAL);
   const paidFor = (index: number) => allocated(index + 1, COUNTED);
-  const amounts: Array<{ target: Decimal; due: Decimal; basis: string; estimate: boolean; assumption: string | null }> = [];
+  const amounts: InstalmentWorking[] = [];
   // What's been paid for the earlier instalments, with no cap at their calculated amounts: an excess towards
   // instalment 1 reduces instalment 2 (IRD's "minus the amount paid for the first payment"; Codex, delegated by owner,
   // 20 Oct 2026). An earlier instalment that isn't due yet is assumed paid as worked out, and says so.
@@ -470,6 +474,22 @@ export function standardSchedule(input: {
     if (!lastYear.typed) notes.push(`The last instalment uses Tohyee's estimate of the RIT for ${label(1)}; it changes once IRD's figure is typed.`);
   }
 
+  return finishSchedule({ dates, amounts, payments: input.payments, notes });
+}
+
+/** One instalment's working before payments are matched to it: the cumulative target, what's due and why. */
+export type InstalmentWorking = { target: Decimal; due: Decimal; basis: string; estimate: boolean; assumption: string | null; notKnownYet?: boolean };
+
+/**
+ * The instalment table from each instalment's cumulative target and what's due (ITX6-ITX6H), for any option
+ * (TXF15, TXF16): what's paid towards each, what's still needed, credits and payments awaiting reconciliation.
+ */
+export function finishSchedule(input: { dates: string[]; amounts: InstalmentWorking[]; payments: Payment[]; notes: string[] }): ProvisionalSchedule {
+  const { dates, amounts, notes } = input;
+  const allocations = cappedAllocations(input.payments);
+  const allocated = (appliesTo: AppliesTo, statuses: readonly AllocationStatus[]) =>
+    allocations.filter((entry) => entry.appliesTo === appliesTo && statuses.includes(entry.status)).reduce((sum, entry) => add(sum, entry.amount), ZERO_DECIMAL);
+  const paidFor = (index: number) => allocated(index + 1, COUNTED);
   const floor = (value: Decimal) => (isNegative(value) ? ZERO_DECIMAL : value);
   let paidSoFar = ZERO_DECIMAL;
   let forecastSoFar = ZERO_DECIMAL;
@@ -504,6 +524,7 @@ export function standardSchedule(input: {
       basis: entry.basis,
       estimate: entry.estimate,
       assumption: entry.assumption,
+      ...(entry.notKnownYet ? { notKnownYet: true } : {}),
     };
   });
   // The year's provisional tax: the last cumulative target, not the sum of what's due (ITX6).
