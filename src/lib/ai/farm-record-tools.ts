@@ -523,10 +523,10 @@ export const FARM_RECORD_WRITE_TOOLS: AiTool[] = [
   {
     name: "add_farm_task",
     title: "Add a farm task",
-    description: "Adds a task to a farm's list with the day it's due, as Tasks › Add does. It can be for one person on the farm team (assignedToUserId, from list_staff or get_organisation's people) or left for anyone, repeat, and point to a paddock. Check list_farm_tasks first so the same task isn't added twice.",
+    description: "Adds a task to a farm's list with the day it's due, as Tasks › Add does. It can be for one person on the farm team (assignedToUserId, from list_staff or get_organisation's people) or left for anyone, repeat, point to a paddock, and have a category (the kind of job, in the farm's own words: use one already on the farm's tasks from list_farm_tasks where it fits). Check list_farm_tasks first so the same task isn't added twice.",
     level: "draft",
     inputSchema: schema(
-      { farmId: FARM_ID, title: { type: "string", maxLength: 200 }, dueOn: DATE, assignedToUserId: { type: "string" }, repeat: { type: "string", enum: [...REPEATS], description: "Left out for a one-off." }, paddockId: PADDOCK, note: { type: "string", maxLength: 2000 } },
+      { farmId: FARM_ID, title: { type: "string", maxLength: 200 }, dueOn: DATE, assignedToUserId: { type: "string" }, repeat: { type: "string", enum: [...REPEATS], description: "Left out for a one-off." }, paddockId: PADDOCK, category: { type: "string", maxLength: 40 }, note: { type: "string", maxLength: 2000 } },
       ["title", "dueOn"],
     ),
     run: async (tx, args) => ({
@@ -538,6 +538,7 @@ export const FARM_RECORD_WRITE_TOOLS: AiTool[] = [
         ...(args.repeat ? { repeat: args.repeat } : {}),
         ...(args.paddockId ? { paddockId: args.paddockId } : {}),
         ...(args.note ? { note: args.note } : {}),
+        ...(args.category ? { category: args.category } : {}),
       }),
     }),
   },

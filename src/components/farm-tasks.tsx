@@ -105,7 +105,7 @@ function TaskLine({ organisationId, farm, task, canRecord, onChanged, onOpen, op
             <strong>{task.title}</strong>
           )}
           <span className={ui.muted}>
-            {[dueText(task, today), task.repeat ? REPEAT_LABELS[task.repeat] : null, task.assignedToName ? `for ${task.assignedToName}` : "anyone", task.paddockName ? `paddock ${task.paddockName}` : null, task.point ? "on the map" : null].filter(Boolean).join(" · ")}
+            {[dueText(task, today), task.repeat ? REPEAT_LABELS[task.repeat] : null, task.assignedToName ? `for ${task.assignedToName}` : "anyone", task.category, task.paddockName ? `paddock ${task.paddockName}` : null, task.point ? "on the map" : null].filter(Boolean).join(" · ")}
           </span>
         </span>
         <span style={{ display: "flex", gap: 8, alignItems: "center" }}>
@@ -203,7 +203,12 @@ export function FarmTasks({ organisationId, farm, startNew = false }: FarmContex
   const [adding, setAdding] = useState(startNew && canRecord);
   const [open, setOpen] = useState<string | null>(null);
   const [message, setMessage] = useState<string | null>(null);
-  const shown = (tasks.data?.tasks ?? []).filter((task) => filter === "everyone" || task.assignedToUserId === user.id);
+  const [category, setCategory] = useState("");
+  const mine = (tasks.data?.tasks ?? []).filter((task) => filter === "everyone" || task.assignedToUserId === user.id);
+  const categories = categoriesOf(mine);
+  // A category nobody in this list has any more (another tab, or the last one was done) shows everything.
+  const picked = categories.includes(category) ? category : "";
+  const shown = mine.filter((task) => !picked || task.category === picked);
   const groups: Array<{ state: TaskState; tasks: FarmTask[] }> = (["overdue", "today", "soon", "later", "done"] as const).map((state) => ({ state, tasks: shown.filter((task) => task.state === state) })).filter((group) => group.tasks.length);
   const changed = (text?: string) => {
     setMessage(text ?? null);
@@ -248,6 +253,18 @@ export function FarmTasks({ organisationId, farm, startNew = false }: FarmContex
             ))}
           </div>
         </div>
+        {categories.length ? (
+          <Field label="Category">
+            <select value={picked} onChange={(event) => setCategory(event.target.value)}>
+              <option value="">All</option>
+              {categories.map((each) => (
+                <option key={each} value={each}>
+                  {each}
+                </option>
+              ))}
+            </select>
+          </Field>
+        ) : null}
         {tasks.error ? <Notice tone="error">{tasks.error}</Notice> : null}
         {!tasks.data && !tasks.error ? <p className={ui.muted}>Loading…</p> : null}
         {tasks.data && !shown.length ? <Empty picture="checklist">{view === "open" ? "Nothing to do." : view === "done" ? "No finished one-off tasks." : "No cancelled tasks."}</Empty> : null}
@@ -307,6 +324,12 @@ function TaskDetail({ organisationId, farm, task, canRecord, onChanged, onClose 
           {task.assignedToName ?? "Anyone on the farm team"}
           {task.needsReassigning ? <span className={ui.muted}> (can&apos;t sign in now: their access has ended or hasn&apos;t started. Change the task to give it to someone else.)</span> : null}
         </dd>
+        {task.category ? (
+          <>
+            <dt>Category</dt>
+            <dd>{task.category}</dd>
+          </>
+        ) : null}
         {task.paddockName ? (
           <>
             <dt>Paddock</dt>
@@ -363,12 +386,19 @@ function TaskDetail({ organisationId, farm, task, canRecord, onChanged, onClose 
   );
 }
 
+/** The categories in a list of tasks, A to Z, each once (FT9). */
+function categoriesOf(tasks: FarmTask[]): string[] {
+  return [...new Set(tasks.map((task) => task.category).filter((each): each is string => Boolean(each)))].sort((left, right) => left.localeCompare(right, "en-NZ", { sensitivity: "base" }));
+}
+
 function TaskForm({ organisationId, farm, task, onClose, onSaved }: { organisationId: string; farm: Farm; task: FarmTask | null; onClose: () => void; onSaved: () => void }) {
   const today = todayInBrowser();
+  // The farm's own categories, to pick from instead of typing one a second way.
+  const used = categoriesOf(useApiData<{ tasks: FarmTask[] }>(`/api/farming/farms/${farm.id}/tasks`, { organisationId }).data?.tasks ?? []);
   const team = useApiData<{ people: FarmTeamMember[] }>(`/api/farming/farms/${farm.id}/team`, { organisationId });
   const paddocks = useApiData<{ paddocks: Paddock[] }>(`/api/farming/farms/${farm.id}/paddocks`, { organisationId });
   const imageryKey = useApiData<{ settings: FarmingSettings }>("/api/farming/settings", { organisationId }).data?.settings.imageryKey ?? null;
-  const [form, setForm] = useState({ title: task?.title ?? "", assignedToUserId: task?.assignedToUserId ?? "", dueOn: task?.next ?? task?.dueOn ?? today, repeat: (task?.repeat ?? "") as Repeat | "", paddockId: task?.paddockId ?? "", note: task?.note ?? "" });
+  const [form, setForm] = useState({ title: task?.title ?? "", assignedToUserId: task?.assignedToUserId ?? "", dueOn: task?.next ?? task?.dueOn ?? today, repeat: (task?.repeat ?? "") as Repeat | "", paddockId: task?.paddockId ?? "", note: task?.note ?? "", category: task?.category ?? "" });
   const [point, setPoint] = useState<Position | null>(task?.point ?? null);
   const [placing, setPlacing] = useState(false);
   const [busy, setBusy] = useState(false);
@@ -378,7 +408,7 @@ function TaskForm({ organisationId, farm, task, onClose, onSaved }: { organisati
     setBusy(true);
     setError(null);
     try {
-      const body = { organisationId, title: form.title, assignedToUserId: form.assignedToUserId || null, dueOn: form.dueOn, repeat: form.repeat || null, paddockId: form.paddockId || null, note: form.note.trim() || null, point };
+      const body = { organisationId, title: form.title, assignedToUserId: form.assignedToUserId || null, dueOn: form.dueOn, repeat: form.repeat || null, paddockId: form.paddockId || null, note: form.note.trim() || null, category: form.category.trim() || null, point };
       if (task) await api(`/api/farming/tasks/${task.id}`, { method: "PATCH", body });
       else await api(`/api/farming/farms/${farm.id}/tasks`, { method: "POST", body });
       onSaved();
@@ -441,6 +471,14 @@ function TaskForm({ organisationId, farm, task, onClose, onSaved }: { organisati
             </select>
           </Field>
         </div>
+        <Field label="Category (optional)" hint="The kind of job, in your own words, like Fencing or Animal health. Tasks can be narrowed to one category.">
+          <input value={form.category} maxLength={40} list="farm-task-categories" onChange={(event) => setForm({ ...form, category: event.target.value })} />
+          <datalist id="farm-task-categories">
+            {used.map((each) => (
+              <option key={each} value={each} />
+            ))}
+          </datalist>
+        </Field>
         <Field label="Note (optional)">
           <textarea value={form.note} maxLength={1000} rows={2} onChange={(event) => setForm({ ...form, note: event.target.value })} />
         </Field>
