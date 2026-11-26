@@ -402,7 +402,10 @@ Server-wide:
   use from anywhere: it only backs up and leaves a version number for the
   Windows updater (a SYSTEM scheduled task, `installer/windows/tohyee-updater.ps1`),
   which installs nothing but GitHub's latest release, checked against its
-  SHA-256. On Windows the
+  SHA-256 and against the owner's signature (`TohyeeSetup-<version>.exe.sig`,
+  RSA-PSS, checked with the public keys in `scripts\release-keys.txt` that
+  the install shipped with; UPD14-UPD19, `installer/windows/release-signature.ps1`).
+  The server app's Install checks the same way. On Windows the
   server settings are a native app (`installer/windows/tray`, .NET Framework
   4.8, which Windows 10 and 11 include): a tray icon that shows whether the
   services are running and a window that signs in as a server admin (with

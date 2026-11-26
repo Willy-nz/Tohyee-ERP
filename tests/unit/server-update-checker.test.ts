@@ -4,6 +4,7 @@ import { summariseStartup } from "@/lib/updates/server-starts";
 import type { LatestReleaseCheck } from "@/lib/updates/server-updates";
 import {
   checkForUpdatesNow,
+  findSetupSignatureAsset,
   findWindowsSetupAsset,
   resetUpdateCheckState,
   sha256FromDigest,
@@ -111,6 +112,7 @@ describe("the Windows installer and its fingerprint", () => {
         size: 123,
         sha256: HASH,
         sha256From: "github-digest",
+        signatureUrl: null,
       },
     });
     expect(noFetch).not.toHaveBeenCalled();
@@ -132,6 +134,27 @@ describe("the Windows installer and its fingerprint", () => {
     expect(await windowsSetupFor(latest("1.2.0", [{ name: "tohyee-server-1.2.0.tar.gz" }]), noFetch)).toEqual({
       problem: "Release v1.2.0 has no TohyeeSetup-1.2.0.exe, so it can't be installed from here.",
     });
+  });
+
+  it("hands over the release's signature beside the installer (UPD14, UPD16)", async () => {
+    const noFetch = vi.fn<typeof fetch>();
+    const signed = await windowsSetupFor(
+      latest("1.2.0", [
+        { name: "TohyeeSetup-1.2.0.exe", digest: `sha256:${HASH}` },
+        { name: "TohyeeSetup-1.2.0.exe.sig" },
+        // Another version's signature isn't this one's.
+        { name: "TohyeeSetup-1.1.0.exe.sig" },
+      ]),
+      noFetch,
+    );
+    expect(signed).toMatchObject({
+      setup: { signatureUrl: "https://github.com/Willy-nz/Tohyee-ERP/releases/download/v1.2.0/TohyeeSetup-1.2.0.exe.sig" },
+    });
+    // Without one the server app decides: refused where it trusts a key, "not signed" where it trusts none.
+    const unsigned = await windowsSetupFor(latest("1.2.0", [{ name: "TohyeeSetup-1.2.0.exe", digest: `sha256:${HASH}` }, { name: "TohyeeSetup-1.1.0.exe.sig" }]), noFetch);
+    expect(unsigned).toMatchObject({ setup: { signatureUrl: null } });
+    expect(findSetupSignatureAsset(latest("1.2.0", [{ name: "tohyeesetup-1.2.0.exe.SIG" }]), "TohyeeSetup-1.2.0.exe")?.name).toBe("tohyeesetup-1.2.0.exe.SIG");
+    expect(noFetch).not.toHaveBeenCalled();
   });
 
   it("gives up on the .sha256 file after 15 seconds and says why", async () => {

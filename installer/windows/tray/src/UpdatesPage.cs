@@ -163,20 +163,23 @@ namespace Tohyee.Tray
                 if (!ok || prepared == null) return;
                 var setup = J.Obj(prepared, "setup");
                 var backups = J.List(prepared, "backups").Count;
-                string file = null;
+                UpdateInstaller.Downloaded downloaded = null;
                 Say("Backed up " + backups + (backups == 1 ? " database" : " databases") + ". Downloading " + J.Str(setup, "name") + "…");
                 ok = await Ui.Busy(this, _status, async () =>
                 {
-                    file = await UpdateInstaller.Download(
+                    downloaded = await UpdateInstaller.Download(
                         J.Str(setup, "downloadUrl"),
                         J.Str(setup, "name"),
                         J.Str(setup, "sha256"),
+                        string.IsNullOrEmpty(J.Str(setup, "signatureUrl")) ? null : J.Str(setup, "signatureUrl"),
                         (long)J.Num(setup, "size"),
                         percent => BeginInvoke((Action)(() => Say("Backed up " + backups + (backups == 1 ? " database" : " databases") + ". Downloading " + J.Str(setup, "name") + ": " + percent + "%"))));
                 });
-                if (!ok || file == null) return;
-                Say("Downloaded and checked. Starting the installer…");
-                if (!UpdateInstaller.Run(file, current, J.Str(prepared, "version"), _app.Settings.LogsDir))
+                if (!ok || downloaded == null) return;
+                Say(downloaded.Signature.Signed
+                    ? "Downloaded; its SHA-256 and signature are right. Starting the installer…"
+                    : "Downloaded; its SHA-256 is right. It wasn't checked for a signature: this Tohyee was installed before releases were signed. Starting the installer…");
+                if (!UpdateInstaller.Run(downloaded.File, current, J.Str(prepared, "version"), _app.Settings.LogsDir))
                 {
                     Ui.Show(_status, "Windows didn't get permission, so nothing was installed. Press Install to try again.", true);
                     return;

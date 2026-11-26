@@ -366,10 +366,17 @@ Get Tohyee on this device (in a browser on the phone) has the steps under
 6. You can turn **Allow from this source** off again afterwards (Settings ›
    Apps › Special app access › Install unknown apps).
 
-To update, install the newer APK over the old one; the address and what's
-saved stay. `Tohyee-<version>-test.apk` is a test build (no release key):
-it installs separately as "Tohyee (test)" and can't be updated to the real
-app.
+To update, install the newer `Tohyee-<version>.apk` over the old one; the
+address and what's saved stay. Every release's APK is signed with the same
+key, which is what lets Android accept it as an update (the release build
+checks the certificate matches the previous release's).
+
+`Tohyee-<version>-test.apk` is a test build, made when the release key
+isn't set up (the release notes say so). It installs separately as
+"Tohyee (test)" and can't be updated to the real app. Each test build is
+signed with a key made just for it, so a newer test build can't be
+installed over an older one either: uninstall the old one first, which
+loses what it saved on the phone (its address, and anything not yet sent).
 
 ### The address
 
@@ -391,9 +398,10 @@ again** and **Change Tohyee address**.
 
 ### Signing the Android app (for whoever publishes releases)
 
-Releases are signed with one key, kept in the repository's secrets. Make
-it once, on your own computer (Java's `keytool`, which comes with any JDK
-or Android Studio):
+Releases are signed with one key, kept in the repository's secrets.
+Step-by-step instructions for Windows are in `docs/OWNER-SETUP-SIGNING.md`.
+Make it once, on your own computer (Java's `keytool`, which comes with any
+JDK or Android Studio):
 
 ```sh
 keytool -genkeypair -v -keystore tohyee-release.keystore -storetype PKCS12 \
@@ -417,7 +425,9 @@ the repository: every later version must be signed with the same key, or
 phones won't install it as an update. Delete the `.b64` copy once it's in
 the secrets.
 
-Without the secrets, a release gets the test build instead. The build job
+Without the secrets, a release gets the test build instead, and a line in
+the release notes says so. With them, the sign job also compares the APK's
+certificate with the previous release's APK and stops if they differ. The build job
 never sees the secrets: it makes an unsigned APK, and a separate job that
 runs only `scripts/sign-android-apk.sh` (the Android SDK's `zipalign` and
 `apksigner`, no npm or Gradle) signs it. Pull requests and manual runs
