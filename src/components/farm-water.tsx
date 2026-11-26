@@ -19,6 +19,7 @@ import {
   sizeOptions,
   VELOCITY_GUIDE,
 } from "@/lib/farming/water-rules";
+import { PumpMatcher, StockWater } from "./farm-water-more";
 import styles from "./farm-water.module.css";
 
 const number = (text: string) =>
@@ -71,8 +72,9 @@ function Outcome({ result }: { result: PipeResult }) {
 }
 
 /**
- * Farm › Water (FW1-FW6): a pipe sizer, and the farm's mapped water pipes
- * with what each one does once it has a size and a flow.
+ * Farm › Water (FW1-FW10): what the stock drink, a pipe sizer, a pump
+ * matcher, and the farm's mapped water pipes with what each one does once
+ * it has a size and a flow.
  */
 export function FarmWater({
   organisationId,
@@ -87,17 +89,33 @@ export function FarmWater({
   );
   const canRecord = useCanRecordFarmWork();
   const [sized, setSized] = useState<WaterPipe | null>(null);
+  const [flow, setFlow] = useState("");
   const water = loaded.data?.water;
+  const toSizer = () =>
+    document
+      .getElementById("size-a-pipe")
+      ?.scrollIntoView({ behavior: "smooth", block: "start" });
   return (
     <div className={ui.stack}>
       <Notice tone="info">
         A guide for choosing pipe, not a design. It leaves out bends, valves and
-        fittings, and it doesn&apos;t know your pump. Check with your supplier
-        before you buy.
+        fittings. Check with your supplier before you buy.
       </Notice>
+      <StockWater
+        onUse={(litresAMinute) => {
+          setFlow(litresAMinute);
+          toSizer();
+        }}
+      />
       <div id="size-a-pipe">
-        <Sizer key={sized?.assetId ?? "free"} pipe={sized} />
+        <Sizer
+          key={sized?.assetId ?? "free"}
+          pipe={sized}
+          flow={flow}
+          setFlow={setFlow}
+        />
       </div>
+      <PumpMatcher pipes={water?.pipes ?? []} />
       {loaded.error ? <Notice tone="error">{loaded.error}</Notice> : null}
       {water ? (
         <Pipes
@@ -106,9 +124,8 @@ export function FarmWater({
           canRecord={canRecord}
           onSize={(pipe) => {
             setSized(pipe);
-            document
-              .getElementById("size-a-pipe")
-              ?.scrollIntoView({ behavior: "smooth", block: "start" });
+            if (pipe.flowLpm) setFlow(String(pipe.flowLpm));
+            toSizer();
           }}
           onSaved={loaded.reload}
         />
@@ -120,8 +137,15 @@ export function FarmWater({
 }
 
 /** Works a pipe out as you type. Opened from a mapped pipe, it starts with that pipe's length and figures. */
-function Sizer({ pipe }: { pipe: WaterPipe | null }) {
-  const [flow, setFlow] = useState(pipe?.flowLpm ? String(pipe.flowLpm) : "");
+function Sizer({
+  pipe,
+  flow,
+  setFlow,
+}: {
+  pipe: WaterPipe | null;
+  flow: string;
+  setFlow: (flow: string) => void;
+}) {
   const [length, setLength] = useState(pipe ? String(pipe.lengthM) : "");
   const [rise, setRise] = useState(pipe?.riseM ? String(pipe.riseM) : "0");
   const [sdr, setSdr] = useState<number>(PIPE_SDRS[0].sdr);
