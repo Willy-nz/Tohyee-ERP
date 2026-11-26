@@ -1,0 +1,66 @@
+.inputs {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 12px;
+  align-items: start;
+}
+
+.outcome {
+  display: grid;
+  grid-template-columns: repeat(auto-fit, minmax(11rem, 1fr));
+  gap: 8px 16px;
+  margin: 8px 0 0;
+}
+
+.outcome div {
+  display: grid;
+  gap: 2px;
+}
+
+.outcome dt {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.outcome dd {
+  margin: 0;
+  font-weight: 600;
+}
+
+.suggested td {
+  font-weight: 600;
+}
+
+.pipes {
+  list-style: none;
+  margin: 0;
+  padding: 0;
+  display: grid;
+  gap: 12px;
+}
+
+.pipes li {
+  display: grid;
+  gap: 6px;
+  padding-top: 12px;
+  border-top: 1px solid var(--border);
+}
+
+.pipeHead {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+  align-items: baseline;
+  justify-content: space-between;
+}
+
+.actions {
+  display: flex;
+  flex-wrap: wrap;
+  gap: 8px;
+}
+
+.form {
+  display: grid;
+  gap: 12px;
+}

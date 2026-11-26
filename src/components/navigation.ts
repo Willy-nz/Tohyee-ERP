@@ -618,13 +618,14 @@ export const FARM_MENUS: Menu[] = [
     module: "farming",
     // Its first link (Farms and paddocks) is drawn as a map; the menu is the whole farm.
     art: "farm",
-    area: ["/operations/farm/more", "/operations/farm/offline", "/operations/farm/security", "/operations/farm/mobs", "/operations/farm/medicines", "/operations/farm/animals", "/operations/farm/timeline", "/operations/farm/weather", "/operations/farming"],
+    area: ["/operations/farm/more", "/operations/farm/offline", "/operations/farm/security", "/operations/farm/mobs", "/operations/farm/medicines", "/operations/farm/animals", "/operations/farm/timeline", "/operations/farm/weather", "/operations/farm/water", "/operations/farming"],
     // The everyday pages first; year-end and money sit together near the end.
     groups: [
       {
         heading: "Paddocks and feed",
         links: [
           { href: "/operations/farming", label: "Farms and paddocks" },
+          { href: "/operations/farm/water", label: "Water pipes" },
           { href: "/operations/farming/pasture", label: "Pasture and feed" },
           { href: "/operations/farming/soil", label: "Soil tests" },
           { href: "/operations/farming/fertiliser", label: "Fertiliser plans" },

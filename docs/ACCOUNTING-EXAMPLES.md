@@ -22845,6 +22845,55 @@ and `tests/integration/map-assets.test.ts`.
 - **MA6 Layers.** Assets, rain gauges and tasks are told apart by their map
   ids, effluent by its blue, and everything else is a hazard.
 
+## Farming: water pipes (FW1-FW6; built by Claude 26 Nov 2026 when the owner asked for a pipe sizer in farming, following common engineering practice, not yet reviewed)
+
+No accounting: estimates only, nothing posted. Farm › Water sizes a pipe
+and shows what each mapped water pipe does. Friction is Darcy-Weisbach with
+the Colebrook-White friction factor (64/Re under Re 2,000), water at 15 °C,
+wall roughness 0.007 mm for polyethylene. Bends, valves and fittings aren't
+counted, and the screen says it's a guide, not a design. Tested in
+`tests/unit/farm-water.test.ts` and `tests/integration/farm-water.test.ts`.
+
+- **FW1 Speed and friction.** 110 L/min through 450 m of pipe with a
+  40.8 mm hole, on the flat: the water moves at **1.40 m/s** and loses
+  **5.28 m in each 100 m**, **23.7 m** over the length. That's the pressure
+  needed at the start: 23.7 m, **232 kPa** (1 m of water is 9.80665 kPa).
+- **FW2 Rise and fall.** The same pipe climbing 20 m needs 23.7 + 20 =
+  **43.7 m** (429 kPa). Falling 40 m it needs none: 23.7 − 40 = −16.3, shown
+  as **16.3 m to spare** at the far end. The friction is the same either
+  way.
+- **FW3 Bigger flow, smaller pipe.** Over 100 m, 110 L/min in the 40.8 mm
+  pipe loses 5.3 m. At 220 L/min it loses **18.5 m** (about three and a
+  half times) at 2.80 m/s, marked **Fast**. In a 26.2 mm hole, 110 L/min
+  loses **45.3 m** at 3.40 m/s. 1 L/min is laminar and loses nothing worth
+  showing. A missing figure, a hole under 5 mm or over 1,000 mm, or a rise
+  over 2,000 m gives no answer.
+- **FW4 The hole from the outside size.** Polyethylene pipe is sold by its
+  outside diameter and its wall (SDR, outside ÷ wall thickness), so the
+  hole is about outside − 2 × outside ÷ SDR: 50 mm SDR 11 is **40.9 mm**,
+  63 mm SDR 11 is 51.5 mm, 63 mm SDR 17 is 55.6 mm, 32 mm SDR 13.6 is
+  27.3 mm. A maker's table can differ a little, so a person can type their
+  pipe's own inside diameter instead.
+- **FW5 Every size, and a suggestion.** For 110 L/min over 450 m on the
+  flat in SDR 11: 40 mm runs at 2.18 m/s and loses 69.3 m; **50 mm** runs
+  at 1.40 m/s and loses 23.5 m; 63 mm runs at 0.88 m/s and loses 7.7 m. The
+  suggestion is the smallest size at or under **1.5 m/s**: 50 mm. 5,000
+  L/min has no suggestion in the list (up to 160 mm). Sizes over 6 m/s
+  aren't shown.
+- **FW6 The farm's own pipes.** Home farm's map has "Main to the back
+  paddocks" (about 531 m) and "Spur to 14", a trough and a tank. Water
+  lists the two pipes with their map lengths and the total, counts 1 trough
+  and 1 tank, and leaves the fence out. Tama (farm staff) gives the main a
+  40.8 mm hole, 110 L/min and a 12 m rise: 1.40 m/s, 5.28 m per 100 m over
+  the map's length, plus the 12 m. A size with no flow shows nothing worked
+  out; an empty box clears a figure. A trough can't have a size, "wide" and
+  2 mm are refused, Rangi (a viewer) can look but not change, and Tama
+  can't see or change Runoff's pipe.
+
+Left out for now, and said so: pump curves, ring mains and branches fed
+from two ends, losses in fittings, working the rise out from the land, how
+much stock drink, and a materials list.
+
 ## Farming: correcting a mob's head count change (MOB11-MOB14, built by Claude 5 Nov 2026, common NZ practice, not yet reviewed)
 
 Tested in `tests/integration/farm-mob-corrections.test.ts`.

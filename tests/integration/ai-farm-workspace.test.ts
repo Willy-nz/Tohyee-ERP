@@ -409,6 +409,10 @@ describeWithDatabase("the AI's farm workspace", () => {
     expect(await read("list_pasture_photo_estimates", { farmId: farm.id })).toMatchObject({ waiting: expect.any(Array), decided: expect.any(Array), more: false });
     expect(await read("pasture_photo_calibration", { farmId: farm.id })).toBeTruthy();
     expect(await read("list_farm_map_assets", { farmId: farm.id })).toMatchObject({ assets: expect.any(Array), more: false });
+    expect(await read("get_farm_water", { farmId: farm.id })).toMatchObject({ water: { pipes: expect.any(Array), counts: expect.any(Object) } });
+    // FW5: 110 L/min over 450 m on the flat suggests 50 mm; FW1 for a pipe of your own.
+    expect(await read("size_farm_pipe", { flowLpm: 110, lengthM: 450 })).toMatchObject({ suggestedOutsideMm: 50 });
+    expect(await read("size_farm_pipe", { flowLpm: 110, lengthM: 450, insideMm: 40.8 })).toMatchObject({ result: { velocity: 1.4, frictionM: 23.7, totalKpa: 232 } });
     expect(((await read("farm_team", { farmId: farm.id })).people as Json[]).map((person) => person.role)).toContain("owner");
     expect(await read("farm_terms")).toMatchObject({ terms: expect.any(Object) });
     const farming = await read("farming_settings");

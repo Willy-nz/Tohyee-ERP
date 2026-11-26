@@ -66,6 +66,7 @@ export const FARM_READ_COVERAGE: Record<string, ScreenCoverage> = {
   "GET /api/farming/farms/[farmId]/vegetation/cover": {"tool": "greenness_cover_check"},
   "GET /api/farming/farms/[farmId]/vegetation/export": {"person": "A file or picture a person downloads from the screen."},
   "GET /api/farming/farms/[farmId]/vegetation/preview": {"person": "It fetches from the imagery provider and spends the month's budget: for an admin in Tohyee."},
+  "GET /api/farming/farms/[farmId]/water": {"tool": "get_farm_water"},
   "GET /api/farming/farms/[farmId]/weather-days": {"tool": "farm_recent_weather"},
   "GET /api/farming/home": {"tool": "farm_home"},
   "GET /api/farming/last-farm": {"person": "Remembers which farm the screen last showed."},
