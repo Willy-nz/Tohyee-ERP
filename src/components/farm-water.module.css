@@ -64,3 +64,37 @@
   display: grid;
   gap: 12px;
 }
+
+.small {
+  width: 4.75rem;
+  max-width: 100%;
+  text-align: right;
+}
+
+.stock {
+  display: grid;
+  gap: 8px;
+}
+
+.stockHead,
+.stockRow {
+  display: grid;
+  grid-template-columns: minmax(0, 1fr) 5rem 5rem;
+  gap: 8px;
+  align-items: center;
+}
+
+.stockHead {
+  color: var(--text-muted);
+  font-size: 0.85rem;
+}
+
+.stockHead span:not(:first-child) {
+  text-align: right;
+}
+
+.stockRow input {
+  width: 100%;
+  min-width: 0;
+  text-align: right;
+}

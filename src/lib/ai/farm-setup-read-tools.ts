@@ -13,6 +13,7 @@ import { farmBenchmarksByFarm, getFarmReportingSetup } from "@/lib/farming/farm-
 import { readFarmLocations } from "@/lib/farming/locations";
 import { listMapAssets } from "@/lib/farming/map-assets";
 import { getFarmWater } from "@/lib/farming/water";
+import { matchPump, PEAK_HOURS, STOCK_WATER_CLASSES, stockDemand } from "@/lib/farming/water-demand-rules";
 import { PIPE_SDRS, pipeFlow, sizeOptions, VELOCITY_GUIDE } from "@/lib/farming/water-rules";
 import { linkableBillLines } from "@/lib/farming/fertiliser";
 import { linkableMovements, listMobs, listStockUnitFactors, untypedMobs } from "@/lib/farming/mobs";
@@ -200,6 +201,55 @@ export const FARM_SETUP_READ_TOOLS: AiTool[] = [
       const sized = sizeOptions(job, args.sdr === undefined || args.sdr === null ? PIPE_SDRS[0].sdr : Number(args.sdr));
       if (sized.options.length === 0) throw new ValidationError("Those figures are outside what this can work out.");
       return { sizes: sized.options, suggestedOutsideMm: sized.suggested, guideMs: VELOCITY_GUIDE };
+    },
+  },
+  {
+    name: "stock_water_demand",
+    title: "How much the stock drink",
+    description: `Works out what stock drink in a day and the flow needed to keep up, as Farm › Water does, saving nothing. Give the head of each class. Usual litres a head a day are used unless you give litresEach: ${STOCK_WATER_CLASSES.map((stock) => `${stock.key} ${stock.litres}`).join(", ")}. The peak flow delivers the day's water in peakHours (default ${PEAK_HOURS}, which is 14 litres a milking cow an hour). Allowances, not measurements: hot weather and dry feed need more.`,
+    level: "read",
+    inputSchema: schema(
+      {
+        stock: {
+          type: "array",
+          minItems: 1,
+          items: { type: "object", properties: { class: { type: "string", enum: STOCK_WATER_CLASSES.map((stock) => stock.key) }, head: { type: "number" }, litresEach: { type: "number", description: "Litres a head a day, to use instead of the usual figure." } }, required: ["class", "head"] },
+        },
+        peakHours: { type: "number", description: `Hours the stock drink a day's water in (default ${PEAK_HOURS}).` },
+      },
+      ["stock"],
+    ),
+    run: async (_tx, args) => {
+      const rows = (Array.isArray(args.stock) ? args.stock : []).map((row: { class?: unknown; head?: unknown; litresEach?: unknown }) => {
+        const known = STOCK_WATER_CLASSES.find((stock) => stock.key === row.class);
+        if (!known) throw new ValidationError(`Class must be one of: ${STOCK_WATER_CLASSES.map((stock) => stock.key).join(", ")}.`);
+        return { class: known.key, head: Number(row.head), litresEach: row.litresEach === undefined || row.litresEach === null ? known.litres : Number(row.litresEach) };
+      });
+      const demand = stockDemand(rows, args.peakHours === undefined || args.peakHours === null ? PEAK_HOURS : Number(args.peakHours));
+      if (!demand) throw new ValidationError("Give at least one class with a head count, and figures that are sensible numbers.");
+      return { stock: rows, ...demand };
+    },
+  },
+  {
+    name: "match_farm_pump",
+    title: "Match a pump to a pipe",
+    description: "Finds the flow a pump would push through a pipe, as Farm › Water does, saving nothing. Give two or more points from the pump's chart (at each flow in L/min, the head in metres it gives) and the pipe: inside diameter (mm), length (m), rise to the far end (m, minus for downhill) and the pressure wanted at the far end (m, default 0). The answer is where they meet, or that the pump can't make the head, or that the answer is past the last point given. The curve is straight lines between the points, and bends and fittings aren't counted: a guide, not a design.",
+    level: "read",
+    inputSchema: schema(
+      {
+        points: { type: "array", minItems: 2, items: { type: "object", properties: { flowLpm: { type: "number" }, headM: { type: "number" } }, required: ["flowLpm", "headM"] } },
+        insideMm: { type: "number" },
+        lengthM: { type: "number" },
+        riseM: { type: "number" },
+        endHeadM: { type: "number" },
+      },
+      ["points", "insideMm", "lengthM"],
+    ),
+    run: async (_tx, args) => {
+      const points = (Array.isArray(args.points) ? args.points : []).map((point: { flowLpm?: unknown; headM?: unknown }) => ({ flowLpm: Number(point.flowLpm), headM: Number(point.headM) }));
+      const match = matchPump(points, { insideMm: Number(args.insideMm), lengthM: Number(args.lengthM), riseM: Number(args.riseM ?? 0), endHeadM: Number(args.endHeadM ?? 0) });
+      if (!match) throw new ValidationError("That can't be worked out: a pump's head goes down as the flow goes up, each point needs its own flow, and the pipe's figures have to be in range.");
+      return { match };
     },
   },
   {

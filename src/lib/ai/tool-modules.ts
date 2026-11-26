@@ -150,6 +150,8 @@ export const FARMING_TOOLS: readonly string[] = [
   "list_farm_map_assets",
   "get_farm_water",
   "size_farm_pipe",
+  "stock_water_demand",
+  "match_farm_pump",
   "farm_team",
   "farm_people_locations",
   "effluent_setup",

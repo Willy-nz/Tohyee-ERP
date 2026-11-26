@@ -22890,9 +22890,45 @@ counted, and the screen says it's a guide, not a design. Tested in
   2 mm are refused, Rangi (a viewer) can look but not change, and Tama
   can't see or change Runoff's pipe.
 
-Left out for now, and said so: pump curves, ring mains and branches fed
-from two ends, losses in fittings, working the rise out from the land, how
-much stock drink, and a materials list.
+**Stock water and pumps (FW7-FW10; built by Claude 26 Nov 2026 when the
+owner asked for them, following common practice, not yet reviewed).** No
+accounting, and nothing saved. Tested in
+`tests/unit/farm-water-demand.test.ts`.
+
+- **FW7 What the stock drink.** Litres a head a day start from the
+  allowances regional plans use for stock water (the Canterbury figures):
+  milking cows 70, dry dairy cows 45, beef cattle 45, calves 25, ewes with
+  lambs 15, other sheep 6, lambs 2, horses 35. Each can be changed. 300
+  milking cows drink 300 × 70 = **21,000 L** a day. Stock drink most of it
+  in a few hours: over five hours that's 4,200 L an hour, **70 L/min**
+  (14 L a cow an hour, the dairy welfare code's recommended best practice
+  for peak supply). Spread over 24 hours, as a tank filling all day, it's
+  14.6 L/min. With 80 calves and 1,200 sheep as well: 21,000 + 2,000 +
+  7,200 = **30,200 L**, 100.7 L/min at the peak. Over four hours instead,
+  the cows alone need 87.5 L/min. No stock, a minus head count or hours
+  over 24 gives no answer.
+- **FW8 A pump and a pipe.** A pump's chart gives 62 m at 20 L/min, 55 m at
+  60, 42 m at 100 and 22 m at 140. The pipe is 450 m with a 40.8 mm hole,
+  climbing 12 m, with 10 m wanted at the far end. At 100 L/min the pipe
+  loses 20.0 m to friction, so it needs 20 + 12 + 10 = 42 m, which is what
+  the pump gives there: they meet at **100 L/min and 42 m**, 1.27 m/s. With
+  nothing wanted at the end they meet further along: more flow, less head.
+  Between typed points the pump's curve is a straight line.
+- **FW9 No meeting point.** Climbing 60 m, the pipe needs 71.2 m even at
+  20 L/min and the pump gives 62: **the pump can't do it**. Through 100 m
+  of 90 mm pipe on the flat, the pipe needs 0.2 m at 140 L/min and the pump
+  still gives 22: the answer is **past the last point**, so it says "more
+  than 140 L/min" and asks for points further along the chart. Nothing is
+  guessed beyond the first and last point.
+- **FW10 What it needs.** Two or more points (up to 12), each at its own
+  flow, with head that falls as flow rises. One point, a rising curve, a
+  zero flow or a pipe the sizer wouldn't accept gives no answer. The pump's
+  points are remembered on the device, not saved to the farm.
+
+Left out for now, and said so: ring mains and branches fed from two ends,
+losses in fittings, working the rise out from the land, pumps in series or
+parallel, suction lift, counting the head from the farm's mobs, and a
+materials list.
 
 ## Farming: correcting a mob's head count change (MOB11-MOB14, built by Claude 5 Nov 2026, common NZ practice, not yet reviewed)
 

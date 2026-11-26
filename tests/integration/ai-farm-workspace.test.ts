@@ -412,6 +412,9 @@ describeWithDatabase("the AI's farm workspace", () => {
     expect(await read("get_farm_water", { farmId: farm.id })).toMatchObject({ water: { pipes: expect.any(Array), counts: expect.any(Object) } });
     // FW5: 110 L/min over 450 m on the flat suggests 50 mm; FW1 for a pipe of your own.
     expect(await read("size_farm_pipe", { flowLpm: 110, lengthM: 450 })).toMatchObject({ suggestedOutsideMm: 50 });
+    // FW7 and FW8.
+    expect(await read("stock_water_demand", { stock: [{ class: "dairy_milking", head: 300 }] })).toMatchObject({ litresPerDay: 21000, peakLpm: 70 });
+    expect(await read("match_farm_pump", { points: [{ flowLpm: 20, headM: 62 }, { flowLpm: 60, headM: 55 }, { flowLpm: 100, headM: 42 }, { flowLpm: 140, headM: 22 }], insideMm: 40.8, lengthM: 450, riseM: 12, endHeadM: 10 })).toMatchObject({ match: { kind: "meets", flowLpm: 100, headM: 42 } });
     expect(await read("size_farm_pipe", { flowLpm: 110, lengthM: 450, insideMm: 40.8 })).toMatchObject({ result: { velocity: 1.4, frictionM: 23.7, totalKpa: 232 } });
     expect(((await read("farm_team", { farmId: farm.id })).people as Json[]).map((person) => person.role)).toContain("owner");
     expect(await read("farm_terms")).toMatchObject({ terms: expect.any(Object) });

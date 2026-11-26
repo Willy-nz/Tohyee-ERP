@@ -3343,9 +3343,12 @@ that something happened.
   diameter can be typed instead. Below, the farm's **mapped water pipes**
   are listed with their lengths from the map; farm staff give each a size,
   a flow and a rise, and it shows what that pipe does. A guide, not a
-  design: bends, fittings, pumps, ring mains and stock demand aren't
-  counted. AI tools: `get_farm_water` and `size_farm_pipe` (both look
-  only).
+  design: bends, fittings and ring mains aren't counted. **How much the
+  stock drink** (FW7) turns head counts into litres a day and the flow to
+  keep up at the peak, and hands it to the sizer. **Match a pump**
+  (FW8-FW10) takes points from a pump's chart and finds the flow it would
+  push through a pipe. AI tools: `get_farm_water`, `size_farm_pipe`,
+  `stock_water_demand` and `match_farm_pump` (all look only).
 - **Satellite vegetation: the pipeline** (tenant migration 0253; docs/SATELLITE-VEGETATION.md): optional, free Sentinel-2
   pictures of a farm's paddocks from the organisation's own Copernicus
   account, worked into greenness (NDVI) a paddock: mean and median, clear

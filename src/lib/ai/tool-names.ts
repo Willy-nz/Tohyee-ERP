@@ -122,6 +122,8 @@ export const AI_TOOL_PLAIN_WORDS: readonly { name: string; level: AiAccessLevel;
   { name: "list_farm_map_assets", level: "read", words: "Troughs, gates, fences and the like on a farm's map" },
   { name: "get_farm_water", level: "read", words: "A farm's water pipes and what each does" },
   { name: "size_farm_pipe", level: "read", words: "Size a water pipe for a flow, length and rise" },
+  { name: "stock_water_demand", level: "read", words: "How much water stock drink and the flow to keep up" },
+  { name: "match_farm_pump", level: "read", words: "The flow a pump would push through a pipe" },
   { name: "farm_team", level: "read", words: "Who can record farm work on a farm" },
   { name: "farm_people_locations", level: "read", words: "Who is sharing where they are with a farm right now" },
   { name: "effluent_setup", level: "read", words: "A farm's effluent systems, ponds, blocks, zones and consents" },
