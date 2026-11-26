@@ -36,6 +36,8 @@ export type FarmTask = {
   farmName: string;
   title: string;
   note: string | null;
+  /** The kind of job, in the farm's own words (FT9), or null. */
+  category: string | null;
   assignedToUserId: string | null;
   assignedToName: string | null;
   dueOn: string;
@@ -85,6 +87,7 @@ type TaskRow = {
   farm_name: string;
   title: string;
   note: string | null;
+  category: string | null;
   assigned_to_user_id: string | null;
   due_on: string;
   repeat: Repeat | null;
@@ -105,7 +108,7 @@ type TaskRow = {
 
 async function loadTasks(tx: OrgTx, where: string, params: unknown[], today: string): Promise<FarmTask[]> {
   const rows = await tx.query<TaskRow>(
-    `select t.id::text, t.farm_id::text, f.name as farm_name, t.title, t.note, t.assigned_to_user_id::text, t.due_on::text, t.repeat,
+    `select t.id::text, t.farm_id::text, f.name as farm_name, t.title, t.note, t.category, t.assigned_to_user_id::text, t.due_on::text, t.repeat,
             t.paddock_id::text, p.name as paddock_name, t.latitude::text, t.longitude::text, t.status,
             t.created_by_email, to_char(t.created_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as created_at, t.updated_by_email, to_char(t.updated_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as updated_at,
             d.id::text as done_id, d.done_for::text, d.done_by_email, to_char(d.done_at at time zone 'UTC', 'YYYY-MM-DD"T"HH24:MI:SS"Z"') as done_at
@@ -128,6 +131,7 @@ async function loadTasks(tx: OrgTx, where: string, params: unknown[], today: str
       farmName: row.farm_name,
       title: row.title,
       note: row.note,
+      category: row.category,
       assignedToUserId: row.assigned_to_user_id,
       assignedToName: row.assigned_to_user_id ? (team.get(row.assigned_to_user_id) ?? "A former member") : null,
       dueOn: row.due_on,
@@ -164,7 +168,7 @@ async function requireTask(tx: OrgTx, input: unknown, today: string): Promise<Fa
   return task;
 }
 
-type TaskFields = { title: string; note: string | null; assignedTo: string | null; dueOn: string; repeat: Repeat | null; paddockId: string | null; point: { latitude: string; longitude: string } | null };
+type TaskFields = { title: string; note: string | null; category: string | null; assignedTo: string | null; dueOn: string; repeat: Repeat | null; paddockId: string | null; point: { latitude: string; longitude: string } | null };
 
 function parsePoint(input: unknown): { latitude: string; longitude: string } | null {
   if (input === null || input === undefined || input === "") return null;
@@ -177,6 +181,8 @@ async function parseFields(tx: OrgTx, farmId: string, input: Record<string, unkn
   const has = (key: string) => input[key] !== undefined;
   const title = has("title") ? requireString(input.title, "What needs doing", { maxLength: 200 }).trim() : current!.title;
   const note = has("note") ? optionalString(input.note, "Note", { maxLength: 1000 }) : (current?.note ?? null);
+  // Spaces tidied, so "Fencing " and "Fencing" are one category. Empty clears it.
+  const category = has("category") ? (optionalString(typeof input.category === "string" ? input.category.replace(/\s+/g, " ").trim() : input.category, "Category", { maxLength: 40 }) || null) : (current?.category ?? null);
   const dueOn = has("dueOn") ? parseIsoDate(input.dueOn, "Due") : current?.dueOn;
   if (!dueOn) throw new ValidationError("Due is required (YYYY-MM-DD).");
   const repeat = has("repeat") ? (input.repeat === null || input.repeat === "" || input.repeat === "none" ? null : requireOneOf(input.repeat, "Repeat", REPEATS)) : (current?.repeat ?? null);
@@ -198,7 +204,7 @@ async function parseFields(tx: OrgTx, farmId: string, input: Record<string, unkn
     }
   }
   const point = has("point") ? parsePoint(input.point) : current?.point ? { longitude: current.point[0].toFixed(6), latitude: current.point[1].toFixed(6) } : null;
-  return { title, note, assignedTo, dueOn, repeat, paddockId, point };
+  return { title, note, category, assignedTo, dueOn, repeat, paddockId, point };
 }
 
 /** Why someone can't be given a task. */
@@ -215,16 +221,16 @@ async function notOnTeamMessage(tx: OrgTx, userId: string): Promise<string> {
 
 // Tasks (FT1-FT3) ---------------------------------------------------------------------------------------
 
-/** Adds a task (`title`, `dueOn`, and optionally `assignedToUserId`, `repeat`, `paddockId`, `point`, `note`). */
+/** Adds a task (`title`, `dueOn`, and optionally `assignedToUserId`, `repeat`, `paddockId`, `point`, `note`, `category`). */
 export async function addTask(tx: OrgTx, input: Record<string, unknown> & { farmId: unknown }, options: { today?: string } = {}): Promise<FarmTask> {
   const farmId = await requireFarm(tx, input.farmId);
   const fields = await parseFields(tx, farmId, input, null);
   const row = await tx.query<{ id: string }>(
-    `insert into farm_tasks (farm_id, title, note, assigned_to_user_id, due_on, repeat, paddock_id, latitude, longitude, created_by_email)
-     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10) returning id::text`,
-    [farmId, fields.title, fields.note, fields.assignedTo, fields.dueOn, fields.repeat, fields.paddockId, fields.point?.latitude ?? null, fields.point?.longitude ?? null, tx.actor.email],
+    `insert into farm_tasks (farm_id, title, note, assigned_to_user_id, due_on, repeat, paddock_id, latitude, longitude, created_by_email, category)
+     values ($1, $2, $3, $4, $5, $6, $7, $8, $9, $10, $11) returning id::text`,
+    [farmId, fields.title, fields.note, fields.assignedTo, fields.dueOn, fields.repeat, fields.paddockId, fields.point?.latitude ?? null, fields.point?.longitude ?? null, tx.actor.email, fields.category],
   );
-  await writeAuditEvent(tx, { eventType: "farming.task_added", entityType: "farm_task", entityId: row.rows[0].id, details: { farmId, title: fields.title, dueOn: fields.dueOn, repeat: fields.repeat, assignedTo: fields.assignedTo } });
+  await writeAuditEvent(tx, { eventType: "farming.task_added", entityType: "farm_task", entityId: row.rows[0].id, details: { farmId, title: fields.title, dueOn: fields.dueOn, repeat: fields.repeat, assignedTo: fields.assignedTo, category: fields.category } });
   return (await loadTasks(tx, "t.id = $1", [row.rows[0].id], options.today ?? todayIsoDate()))[0];
 }
 
@@ -239,14 +245,14 @@ export async function updateTask(tx: OrgTx, idInput: unknown, input: Record<stri
   }
   const fields = await parseFields(tx, task.farmId, input, task);
   await tx.query(
-    `update farm_tasks set title = $2, note = $3, assigned_to_user_id = $4, due_on = $5, repeat = $6, paddock_id = $7, latitude = $8, longitude = $9, status = $10, updated_by_email = $11, updated_at = now() where id = $1`,
-    [task.id, fields.title, fields.note, fields.assignedTo, fields.dueOn, fields.repeat, fields.paddockId, fields.point?.latitude ?? null, fields.point?.longitude ?? null, status, tx.actor.email],
+    `update farm_tasks set title = $2, note = $3, assigned_to_user_id = $4, due_on = $5, repeat = $6, paddock_id = $7, latitude = $8, longitude = $9, status = $10, updated_by_email = $11, updated_at = now(), category = $12 where id = $1`,
+    [task.id, fields.title, fields.note, fields.assignedTo, fields.dueOn, fields.repeat, fields.paddockId, fields.point?.latitude ?? null, fields.point?.longitude ?? null, status, tx.actor.email, fields.category],
   );
   await writeAuditEvent(tx, {
     eventType: status !== task.status ? (status === "cancelled" ? "farming.task_cancelled" : "farming.task_reopened") : "farming.task_changed",
     entityType: "farm_task",
     entityId: task.id,
-    details: { before: { title: task.title, dueOn: task.dueOn, repeat: task.repeat, assignedTo: task.assignedToUserId, status: task.status }, after: { title: fields.title, dueOn: fields.dueOn, repeat: fields.repeat, assignedTo: fields.assignedTo, status } },
+    details: { before: { title: task.title, dueOn: task.dueOn, repeat: task.repeat, assignedTo: task.assignedToUserId, status: task.status, category: task.category }, after: { title: fields.title, dueOn: fields.dueOn, repeat: fields.repeat, assignedTo: fields.assignedTo, status, category: fields.category } },
   });
   return (await loadTasks(tx, "t.id = $1", [task.id], today))[0];
 }

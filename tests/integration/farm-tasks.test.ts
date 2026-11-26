@@ -148,6 +148,29 @@ describeWithDatabase("farm team tasks", () => {
     const workers = await call(worker, remindersRoute.GET as Handler, "/api/app/reminders", {});
     expect((workers.body.reminders as Array<{ kind: string; title: string }>).filter((reminder) => reminder.kind === "task").map((reminder) => reminder.title)).toEqual(["Task: Check the trough"]);
   });
+  it("FT9 a task can have a category in the farm's own words; empty clears it and the rest is kept", async () => {
+    type Task = { id: string; category: string | null; title: string; note: string | null };
+    const added = await call(worker, tasksRoute.POST as Handler, `/api/farming/farms/${w.home}/tasks`, { farmId: w.home }, "POST", { title: "Strain the boundary fence", dueOn: "2030-07-01", category: "  Fencing   and gates " });
+    expect(added.status).toBe(201);
+    const task = added.body.task as Task;
+    // Spaces tidied, so it matches the same words typed another day.
+    expect(task.category).toBe("Fencing and gates");
+    const plain = (await call(worker, tasksRoute.POST as Handler, `/api/farming/farms/${w.home}/tasks`, { farmId: w.home }, "POST", { title: "Order drench", dueOn: "2030-07-01" })).body.task as Task;
+    expect(plain.category).toBeNull();
+    const listed = (await call(worker, tasksRoute.GET as Handler, `/api/farming/farms/${w.home}/tasks`, { farmId: w.home })).body.tasks as Task[];
+    expect(listed.find((each) => each.id === task.id)?.category).toBe("Fencing and gates");
+    // Changing something else keeps it; changing it keeps the rest; empty clears it.
+    const noted = (await call(worker, taskRoute.PATCH as Handler, `/api/farming/tasks/${task.id}`, { taskId: task.id }, "PATCH", { note: "Top wire" })).body.task as Task;
+    expect([noted.category, noted.note]).toEqual(["Fencing and gates", "Top wire"]);
+    const moved = (await call(worker, taskRoute.PATCH as Handler, `/api/farming/tasks/${task.id}`, { taskId: task.id }, "PATCH", { category: "Maintenance" })).body.task as Task;
+    expect([moved.category, moved.note, moved.title]).toEqual(["Maintenance", "Top wire", "Strain the boundary fence"]);
+    const cleared = (await call(worker, taskRoute.PATCH as Handler, `/api/farming/tasks/${task.id}`, { taskId: task.id }, "PATCH", { category: "  " })).body.task as Task;
+    expect(cleared.category).toBeNull();
+    // Over 40 letters is refused, and a viewer can't set one.
+    expect((await call(worker, taskRoute.PATCH as Handler, `/api/farming/tasks/${task.id}`, { taskId: task.id }, "PATCH", { category: "x".repeat(41) })).status).toBe(400);
+    expect((await call(viewer, taskRoute.PATCH as Handler, `/api/farming/tasks/${task.id}`, { taskId: task.id }, "PATCH", { category: "Fencing" })).status).toBe(403);
+  });
+
   it("#609 only people whose access is current can be given a task; open tasks for others are flagged, not changed", async () => {
     const run = as(owner);
     const temp = await createTestUser("tasks-temp@example.com", { displayName: "Hemi" });

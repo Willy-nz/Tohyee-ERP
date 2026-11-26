@@ -11,12 +11,12 @@ export const GET = route<Context>(async (request, context) => {
   return json({ tasks });
 });
 
-/** Adds a task (`title`, `dueOn`, and optionally `assignedToUserId`, `repeat`, `paddockId`, `point` [longitude, latitude], `note`). Farm staff and up (FT1). */
+/** Adds a task (`title`, `dueOn`, and optionally `assignedToUserId`, `repeat`, `paddockId`, `point` [longitude, latitude], `note`, `category`). Farm staff and up (FT1). */
 export const POST = route<Context>(async (request, context) => {
   const { farmId } = await context.params;
   const body = await readJson(request);
   const task = await withFarmWork(request, body.organisationId, "record", (tx) =>
-    addTask(tx, { farmId, title: body.title, dueOn: body.dueOn, assignedToUserId: body.assignedToUserId, repeat: body.repeat, paddockId: body.paddockId, point: body.point, note: body.note }),
+    addTask(tx, { farmId, title: body.title, dueOn: body.dueOn, assignedToUserId: body.assignedToUserId, repeat: body.repeat, paddockId: body.paddockId, point: body.point, note: body.note, category: body.category }),
   );
   return json({ task }, { status: 201 });
 });

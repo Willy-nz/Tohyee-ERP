@@ -22766,6 +22766,16 @@ Records only: nothing posts to the books.. Tested in
   bull" (told about today, as it's overdue), opening Tasks on Runoff;
   Tama's include "Task: Check the trough". Tasks for nobody in particular
   remind nobody.
+- **FT9 Categories (built by Claude 26 Nov 2026 when the owner asked for
+  them, not yet reviewed).** A task can have one category, the kind of job
+  in the farm's own words, up to 40 letters. Tama adds "Strain the boundary
+  fence" with "  Fencing   and gates ": it's kept as **Fencing and gates**
+  (spaces tidied, so the same words match another day). A task without one
+  has none. Adding a note keeps the category; changing it to "Maintenance"
+  keeps the note and the title; an empty category clears it. The form
+  offers the categories already on the farm's tasks, and the list can be
+  narrowed to one. 41 letters is refused, and Rangi (a viewer) can't set
+  one. Nothing is posted.
 
 ## Farming: mobs and the livestock head count (MOB1-MOB10; built by Claude 5 Nov 2026, common NZ practice, not yet reviewed)
 

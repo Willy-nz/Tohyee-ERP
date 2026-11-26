@@ -3306,7 +3306,7 @@ that something happened.
   A task can only be given to someone whose access is current; an open task for someone whose access has ended or not
   started shows **Needs reassigning** on Tasks, Today and the calendar,
   and stays theirs until someone changes it.
-
+ A task can also have a **category** in the farm's own words (FT9, tenant migration 0318), offered from the ones already in use, and the list can be narrowed to one.
 - **Mobs** (MOB1-MOB10, tenant migration 0233; common NZ practice, not yet reviewed): Farm › More › Mobs lists each mob (one
   IRD class, head, tag colour, paddock and last weight) with quick actions
   as one-question steps: move, record a weight, deaths, births, split,
