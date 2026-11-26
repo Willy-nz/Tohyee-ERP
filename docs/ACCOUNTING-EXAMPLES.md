@@ -22885,7 +22885,8 @@ counted, and the screen says it's a guide, not a design. Tested in
   lists the two pipes with their map lengths and the total, counts 1 trough
   and 1 tank, and leaves the fence out. Tama (farm staff) gives the main a
   40.8 mm hole, 110 L/min and a 12 m rise: 1.40 m/s, 5.28 m per 100 m over
-  the map's length, plus the 12 m. A size with no flow shows nothing worked
+  the map's length, plus the 12 m. (Since FW11 a tenth is added for
+  fittings: 5.80 m per 100 m.) A size with no flow shows nothing worked
   out; an empty box clears a figure. A trough can't have a size, "wide" and
   2 mm are refused, Rangi (a viewer) can look but not change, and Tama
   can't see or change Runoff's pipe.
@@ -22898,7 +22899,7 @@ accounting, and nothing saved. Tested in
 - **FW7 What the stock drink.** Litres a head a day start from the
   allowances regional plans use for stock water (the Canterbury figures):
   milking cows 70, dry dairy cows 45, beef cattle 45, calves 25, ewes with
-  lambs 15, other sheep 6, lambs 2, horses 35. Each can be changed. 300
+  lambs 15, other sheep 6, lambs 2, horses 35 (and deer 20, FW12). Each can be changed. 300
   milking cows drink 300 × 70 = **21,000 L** a day. Stock drink most of it
   in a few hours: over five hours that's 4,200 L an hour, **70 L/min**
   (14 L a cow an hour, the dairy welfare code's recommended best practice
@@ -22925,9 +22926,45 @@ accounting, and nothing saved. Tested in
   zero flow or a pipe the sizer wouldn't accept gives no answer. The pump's
   points are remembered on the device, not saved to the farm.
 
+**Fittings, mobs, deer and materials (FW11-FW13; built by Claude 26 Nov
+2026 when the owner asked for them, following common practice, not yet
+reviewed).** Tested in `tests/unit/farm-water-demand.test.ts` and
+`tests/integration/farm-water.test.ts`.
+
+- **FW11 Bends and fittings.** Bends, tees, valves and joiners lose
+  pressure too. Without a list of them, a usual estimate is to add a tenth
+  to the pipe's friction, so the page starts at **10%** (0% or 20% can be
+  chosen, and the choice is remembered on the device and used for the
+  sizer, the pump matcher and the mapped pipes). FW1's pipe loses 23.7 m on
+  its own and **26.1 m** with 10% (5.80 m per 100 m, 256 kPa); the speed
+  doesn't change. The allowance is on the friction only: at 20% with a
+  12 m rise it's 28.5 + 12 = 40.5 m. FW8's pump then meets the pipe a
+  little lower, at **97.2 L/min and 42.9 m**. A mapped pipe's saved figures
+  (FW6) are worked out with the 10%. FW1-FW10's figures above are the pipe
+  alone.
+- **FW12 Head from the farm's mobs.** "Fill in from this farm's mobs" puts
+  the farm's active mobs into the stock water classes as a best guess from
+  each mob's kind and class: dairy mixed-age cows and rising two-year
+  heifers as milking cows, other dairy cattle over a year as dry cows,
+  rising one-year cattle as calves, other beef cattle as beef, ewes as ewes
+  with lambs, other sheep as other sheep, all deer as deer. It can't know
+  whether cows are milking or ewes have lambs at foot, so they take the
+  bigger allowance. Goats and pigs have no allowance and are left out,
+  with their head said. 280 cows, 60 R2 heifers, 70 R1 heifers, 6 bulls,
+  400 ewes, 150 hoggets, 90 hinds, 40 R2 steers and 12 weaner pigs become
+  340 milking, 6 dry, 40 beef, 70 calves, 400 ewes with lambs, 150 other
+  sheep and 90 deer (12 left out): **36,320 L** a day. Deer are 20 L a
+  head, the deer industry's drought advice for an adult red stag. Every
+  head count can be changed, and only the chosen farm's mobs are counted.
+- **FW13 Pipe by size.** The mapped pipes' lengths added up by inside
+  diameter: 642 m and 120 m of 40.8 mm and 193 m of 26.2 mm, with 75 m not
+  yet sized, lists 26.2 mm: 193 m (1 pipe), 40.8 mm: **762 m** (2 pipes),
+  no size yet: 75 m (1 pipe). Map lengths, with nothing added for slope,
+  joins or offcuts, and the screen says so.
+
 Left out for now, and said so: ring mains and branches fed from two ends,
-losses in fittings, working the rise out from the land, pumps in series or
-parallel, suction lift, counting the head from the farm's mobs, and a
+fittings counted one by one, working the rise out from the land, pumps in
+series or parallel, suction lift, and troughs, valves and fittings in the
 materials list.
 
 ## Farming: correcting a mob's head count change (MOB11-MOB14, built by Claude 5 Nov 2026, common NZ practice, not yet reviewed)

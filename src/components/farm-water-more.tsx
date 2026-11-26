@@ -3,7 +3,7 @@
 import { useEffect, useState } from "react";
 import { Badge, Button, Card, Field, Notice, ui } from "@/components/ui";
 import type { WaterPipe } from "@/lib/farming/water";
-import { matchPump, MAX_PUMP_POINTS, PEAK_HOURS, STOCK_WATER_CLASSES, stockDemand } from "@/lib/farming/water-demand-rules";
+import { matchPump, MAX_PUMP_POINTS, type MobStock, PEAK_HOURS, STOCK_WATER_CLASSES, stockDemand } from "@/lib/farming/water-demand-rules";
 import { KPA_PER_METRE } from "@/lib/farming/water-rules";
 import styles from "./farm-water.module.css";
 
@@ -12,7 +12,8 @@ const whole = (value: number) => value.toLocaleString("en-NZ", { maximumFraction
 const fixed = (value: number, places: number) => value.toLocaleString("en-NZ", { minimumFractionDigits: places, maximumFractionDigits: places });
 
 /** What the stock drink in a day, and the flow that has to reach them (FW7). Nothing is saved. */
-export function StockWater({ onUse }: { onUse: (litresAMinute: string) => void }) {
+export function StockWater({ fromMobs, onUse }: { fromMobs: MobStock | null; onUse: (litresAMinute: string) => void }) {
+  const mobHead = fromMobs ? fromMobs.classes.reduce((total, each) => total + each.head, 0) : 0;
   const [head, setHead] = useState<Record<string, string>>({});
   const [each, setEach] = useState<Record<string, string>>({});
   const [hours, setHours] = useState(String(PEAK_HOURS));
@@ -20,6 +21,19 @@ export function StockWater({ onUse }: { onUse: (litresAMinute: string) => void }
   const demand = stockDemand(rows, number(hours));
   return (
     <Card title="How much the stock drink" description="Type the head that drink from this line. The litres each are usual allowances: put them up for hot weather or dry feed.">
+      {fromMobs && mobHead > 0 ? (
+        <>
+          <div className={styles.actions}>
+            <Button size="small" variant="secondary" onClick={() => setHead(Object.fromEntries(fromMobs.classes.map((each) => [each.key, String(each.head)])))}>
+              Fill in from this farm&apos;s mobs ({whole(mobHead)} head)
+            </Button>
+          </div>
+          <p className={ui.muted}>
+            A best guess from each mob&apos;s class: cows and ewes are counted as milking, since the line has to cope when they are. Check the head against the stock on this line.
+            {fromMobs.leftOutHead > 0 ? ` ${whole(fromMobs.leftOutHead)} head (goats and pigs) have no allowance here and are left out.` : ""}
+          </p>
+        </>
+      ) : null}
       <div className={styles.stock}>
         <div className={styles.stockHead}>
           <span>Stock</span>
@@ -77,7 +91,7 @@ const EMPTY: Point[] = [
 ];
 
 /** Where a pump and a pipe meet (FW8-FW10). The pump's points are remembered on this device only. */
-export function PumpMatcher({ pipes }: { pipes: WaterPipe[] }) {
+export function PumpMatcher({ pipes, fittings }: { pipes: WaterPipe[]; fittings: number }) {
   const [points, setPoints] = useState<Point[]>(EMPTY);
   const [inside, setInside] = useState("");
   const [length, setLength] = useState("");
@@ -103,7 +117,7 @@ export function PumpMatcher({ pipes }: { pipes: WaterPipe[] }) {
   const typed = points.filter((point) => point.flow.trim() !== "" || point.head.trim() !== "");
   const sizedPipes = pipes.filter((pipe) => pipe.insideMm !== null);
   const ready = typed.length >= 2 && inside.trim() !== "" && length.trim() !== "";
-  const match = ready ? matchPump(typed.map((point) => ({ flowLpm: number(point.flow), headM: number(point.head) })), { insideMm: number(inside), lengthM: number(length), riseM: number(rise.trim() === "" ? "0" : rise), endHeadM: number(end.trim() === "" ? "0" : end) }) : null;
+  const match = ready ? matchPump(typed.map((point) => ({ flowLpm: number(point.flow), headM: number(point.head) })), { insideMm: number(inside), lengthM: number(length), riseM: number(rise.trim() === "" ? "0" : rise), endHeadM: number(end.trim() === "" ? "0" : end), fittingsPct: fittings }) : null;
   return (
     <Card title="Match a pump" description="Type a few points from the pump's chart: at each flow, the head it gives. This finds the flow the pump would push through a pipe.">
       <div className={ui.tableWrap}>
@@ -176,6 +190,7 @@ export function PumpMatcher({ pipes }: { pipes: WaterPipe[] }) {
           <input inputMode="decimal" value={end} onChange={(event) => setEnd(event.target.value)} />
         </Field>
       </div>
+      {ready && fittings ? <p className={ui.muted}>Includes {fittings}% on the pipe&apos;s friction for bends and fittings.</p> : null}
       {!ready ? (
         <p className={ui.muted}>Type at least two pump points, and the pipe&apos;s inside diameter and length.</p>
       ) : !match ? (

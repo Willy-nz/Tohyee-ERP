@@ -6,6 +6,7 @@ import { coreQuery } from "@/lib/db/transactions";
 import type { OrgTx } from "@/lib/db/org-transaction";
 import { setMemberFarmAccess } from "@/lib/farming/access";
 import { addMapAsset } from "@/lib/farming/map-assets";
+import { createMob } from "@/lib/farming/mobs";
 import { saveFarm, setFarmingEnabled } from "@/lib/farming/paddocks";
 import { apiRequest, createTestOrganisation, createTestUser, describeWithDatabase, inOrganisation, params, sessionCookieFor, startTestServer, type TestServer } from "../helpers/test-server";
 
@@ -13,7 +14,7 @@ type Handler = (request: Request, context: never) => Promise<Response>;
 const ORG = "farm-water-co";
 type Result = { velocity: number; per100M: number; frictionM: number; totalM: number };
 type Pipe = { name: string; assetId: string; lengthM: number; insideMm: number | null; flowLpm: number | null; riseM: number | null; result: Result | null };
-type Body = { error?: string; pipe: Pipe & { result: Result }; water: { pipes: Pipe[]; totalLengthM: number; counts: Record<string, number> } };
+type Body = { error?: string; pipe: Pipe & { result: Result }; water: { pipes: Pipe[]; totalLengthM: number; counts: Record<string, number>; stock: unknown; materials: unknown } };
 
 /** Farm water (FW6, not yet reviewed). Made-up farms and people. */
 describeWithDatabase("farm water", () => {
@@ -42,6 +43,9 @@ describeWithDatabase("farm water", () => {
     w.trough = (await run((tx) => addMapAsset(tx, { farmId: w.home, kind: "trough", name: "Trough in 14", point: [169.806, -46.182] }))).id;
     await run((tx) => addMapAsset(tx, { farmId: w.home, kind: "tank", name: "Header tank", point: [169.8, -46.18] }));
     await run((tx) => addMapAsset(tx, { farmId: w.home, kind: "fence", name: "Boundary", line: [[169.8, -46.18], [169.81, -46.18]] }));
+    await run((tx) => createMob(tx, { farmId: w.home, name: "Milkers", kind: "dairy_cattle", classCode: "ma_cows", head: 280, onDate: "2026-09-01" }));
+    await run((tx) => createMob(tx, { farmId: w.home, name: "Ewes", kind: "sheep", classCode: "ma_ewes", head: 400, onDate: "2026-09-01" }));
+    await run((tx) => createMob(tx, { farmId: w.runoff, name: "Heifers", kind: "dairy_cattle", classCode: "r1_heifers", head: 70, onDate: "2026-09-01" }));
     w.far = (await run((tx) => addMapAsset(tx, { farmId: w.runoff, kind: "pipe", name: "Runoff line", line: [[170, -46], [170.001, -46]] }))).id;
   });
 
@@ -71,6 +75,9 @@ describeWithDatabase("farm water", () => {
     expect(main.lengthM).toBeLessThan(540);
     expect(seen.body.water.totalLengthM).toBe(main.lengthM + seen.body.water.pipes[1].lengthM);
     expect(seen.body.water.counts).toEqual({ troughs: 1, tanks: 1, bores: 0, waterPoints: 0 });
+    expect(seen.body.water.materials).toEqual({ sizes: [], unsized: { lengthM: seen.body.water.totalLengthM, pipes: 2 } });
+    // FW12: this farm's mobs, not the runoff's.
+    expect(seen.body.water.stock).toEqual({ classes: [{ key: "dairy_milking", head: 280 }, { key: "ewes_milk", head: 400 }], leftOutHead: 0 });
   });
 
   it("FW6 farm staff say what a pipe is, and it's worked out from the map's length", async () => {
@@ -79,14 +86,18 @@ describeWithDatabase("farm water", () => {
     const pipe = saved.body.pipe;
     expect(pipe).toMatchObject({ insideMm: 40.8, flowLpm: 110, riseM: 12 });
     expect(pipe.result.velocity).toBe(1.4);
-    expect(pipe.result.per100M).toBe(5.28);
-    // 5.28 m in each 100 m over the pipe's own length, then the 12 m climb.
-    expect(pipe.result.frictionM).toBeCloseTo((5.28 * pipe.lengthM) / 100, 0);
+    // 5.28 m in each 100 m for the pipe, and a tenth more for bends and fittings (FW11).
+    expect(pipe.result.per100M).toBe(5.8);
+    // Over the pipe's own length, then the 12 m climb.
+    expect(pipe.result.frictionM).toBeCloseTo((5.8 * pipe.lengthM) / 100, 0);
     expect(pipe.result.totalM).toBeCloseTo(pipe.result.frictionM + 12, 5);
     expect((await water(viewer)).body.water.pipes[0].result).toEqual(pipe.result);
     // Just a size: nothing to work out yet. Empty clears a figure.
     const sizeOnly = await set(worker, w.spur, { insideMm: 26.2, flowLpm: "", riseM: null });
     expect(sizeOnly.body.pipe).toMatchObject({ insideMm: 26.2, flowLpm: null, riseM: null, result: null });
+    // FW13: the metres of each size.
+    const after = (await water(viewer)).body.water;
+    expect(after.materials).toEqual({ sizes: [{ insideMm: 26.2, lengthM: after.pipes[1].lengthM, pipes: 1 }, { insideMm: 40.8, lengthM: after.pipes[0].lengthM, pipes: 1 }], unsized: { lengthM: 0, pipes: 0 } });
     expect((await set(worker, w.main, { insideMm: "40.8", flowLpm: "110", riseM: "" })).body.pipe.riseM).toBeNull();
   });
 

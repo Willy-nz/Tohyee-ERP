@@ -5,7 +5,8 @@ import { requireFarmAccess } from "@/lib/farming/access";
 import type { Position } from "@/lib/farming/geometry";
 import { lengthMetres } from "@/lib/farming/map-assets-rules";
 import { requireFarming } from "@/lib/farming/paddocks";
-import { MAX_FLOW_LPM, MAX_INSIDE_MM, MAX_RISE_M, MIN_INSIDE_MM, pipeFlow, type PipeResult } from "@/lib/farming/water-rules";
+import { type MobStock, stockFromMobs } from "@/lib/farming/water-demand-rules";
+import { FITTINGS_PCT, MAX_FLOW_LPM, MAX_INSIDE_MM, MAX_RISE_M, MIN_INSIDE_MM, pipeFlow, type PipeMaterials, pipeMaterials, type PipeResult } from "@/lib/farming/water-rules";
 import { requireId } from "@/lib/validation";
 
 /*
@@ -25,7 +26,7 @@ export type WaterPipe = {
   flowLpm: number | null;
   /** How far the far end is above the start, metres; nothing said counts as flat. */
   riseM: number | null;
-  /** Worked out when it has a size and a flow. */
+  /** Worked out when it has a size and a flow, with the usual tenth added for bends and fittings (FW11). */
   result: PipeResult | null;
 };
 
@@ -36,6 +37,10 @@ export type FarmWater = {
   totalLengthM: number;
   /** What else is on the map for water. */
   counts: { troughs: number; tanks: number; bores: number; waterPoints: number };
+  /** The farm's active mobs as head in each stock water class (FW12). */
+  stock: MobStock;
+  /** Metres of each size of pipe (FW13). */
+  materials: PipeMaterials;
 };
 
 type Row = { id: string; name: string; note: string | null; geometry: { coordinates: Position[] }; pipe_inside_mm: string | null; pipe_flow_lpm: string | null; pipe_rise_m: string | null };
@@ -53,7 +58,7 @@ function toPipe(row: Row): WaterPipe {
     insideMm,
     flowLpm,
     riseM,
-    result: insideMm !== null && flowLpm !== null ? pipeFlow({ insideMm, flowLpm, lengthM, riseM: riseM ?? 0 }) : null,
+    result: insideMm !== null && flowLpm !== null ? pipeFlow({ insideMm, flowLpm, lengthM, riseM: riseM ?? 0, fittingsPct: FITTINGS_PCT }) : null,
   };
 }
 
@@ -69,7 +74,10 @@ export async function getFarmWater(tx: OrgTx, farmIdInput: unknown): Promise<Far
   const counted = await tx.query<{ kind: string; count: string }>("select kind, count(*)::text as count from farm_map_assets where farm_id = $1 and status = 'active' and kind in ('trough', 'tank', 'bore', 'water_point') group by kind", [farmId]);
   const count = (kind: string) => Number(counted.rows.find((row) => row.kind === kind)?.count ?? 0);
   const pipes = rows.rows.map(toPipe);
+  const mobs = await tx.query<{ kind: string; class_code: string; head: string }>("select kind, class_code, sum(head)::text as head from mobs where farm_id = $1 and status = 'active' group by kind, class_code", [farmId]);
   return {
+    stock: stockFromMobs(mobs.rows.map((row) => ({ kind: row.kind, classCode: row.class_code, head: Number(row.head) }))),
+    materials: pipeMaterials(pipes),
     farmId,
     pipes,
     totalLengthM: pipes.reduce((total, pipe) => total + pipe.lengthM, 0),

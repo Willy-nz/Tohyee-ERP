@@ -3348,7 +3348,11 @@ that something happened.
   keep up at the peak, and hands it to the sizer. **Match a pump**
   (FW8-FW10) takes points from a pump's chart and finds the flow it would
   push through a pipe. AI tools: `get_farm_water`, `size_farm_pipe`,
-  `stock_water_demand` and `match_farm_pump` (all look only).
+  `stock_water_demand` and `match_farm_pump` (all look only). The page adds 10% to
+  the pipe's friction for **bends and fittings** unless changed (FW11),
+  fills the head counts in **from the farm's mobs** (FW12, a best guess
+  that can be changed), has a deer allowance, and lists the **metres of
+  each pipe size** on the map (FW13).
 - **Satellite vegetation: the pipeline** (tenant migration 0253; docs/SATELLITE-VEGETATION.md): optional, free Sentinel-2
   pictures of a farm's paddocks from the organisation's own Copernicus
   account, worked into greenness (NDVI) a paddock: mean and median, clear

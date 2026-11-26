@@ -30,6 +30,14 @@ export const MAX_INSIDE_MM = 1000;
 export const MAX_FLOW_LPM = 100000;
 export const MAX_LENGTH_M = 100000;
 export const MAX_RISE_M = 2000;
+/**
+ * Bends, tees, valves and joiners lose pressure too. Without a list of
+ * them, a usual estimate is to add a tenth to the pipe's friction (FW11).
+ * The screen and the AI tools start from this and let it be changed.
+ */
+export const FITTINGS_PCT = 10;
+export const FITTINGS_CHOICES = [0, 10, 20] as const;
+export const MAX_FITTINGS_PCT = 100;
 
 export type PipeInput = {
   /** The pipe's inside diameter, mm. */
@@ -40,6 +48,8 @@ export type PipeInput = {
   lengthM: number;
   /** How far the far end is above the start (negative when it's below), metres. */
   riseM: number;
+  /** Added to the pipe's friction for bends and fittings, percent. Nothing said is none. */
+  fittingsPct?: number;
 };
 
 export type PipeResult = {
@@ -80,13 +90,15 @@ function round(value: number, places: number): number {
 /** What a pipe does with a flow (FW1-FW3), or null when a figure is missing or out of range. */
 export function pipeFlow(input: PipeInput): PipeResult | null {
   const { insideMm, flowLpm, lengthM, riseM } = input;
-  if (![insideMm, flowLpm, lengthM, riseM].every(Number.isFinite)) return null;
+  const fittingsPct = input.fittingsPct ?? 0;
+  if (![insideMm, flowLpm, lengthM, riseM, fittingsPct].every(Number.isFinite)) return null;
+  if (fittingsPct < 0 || fittingsPct > MAX_FITTINGS_PCT) return null;
   if (insideMm < MIN_INSIDE_MM || insideMm > MAX_INSIDE_MM || flowLpm <= 0 || flowLpm > MAX_FLOW_LPM || lengthM <= 0 || lengthM > MAX_LENGTH_M || Math.abs(riseM) > MAX_RISE_M) return null;
   const insideM = insideMm / 1000;
   const flow = flowLpm / 60000;
   const velocity = flow / ((Math.PI * insideM * insideM) / 4);
   const reynolds = (velocity * insideM) / VISCOSITY;
-  const gradient = (frictionFactor(reynolds, insideM) / insideM) * ((velocity * velocity) / (2 * GRAVITY));
+  const gradient = (frictionFactor(reynolds, insideM) / insideM) * ((velocity * velocity) / (2 * GRAVITY)) * (1 + fittingsPct / 100);
   const frictionM = round(gradient * lengthM, 1);
   const totalM = round(frictionM + riseM, 1);
   return {
@@ -134,4 +146,24 @@ export function sizeOptions(input: Omit<PipeInput, "insideMm">, sdr: number): { 
     if (result) options.push({ outsideMm, insideMm, result });
   }
   return { options, suggested: options.find((option) => !option.result.fast)?.outsideMm ?? null };
+}
+
+export type PipeMaterials = {
+  /** Each inside diameter in use, smallest first, with the metres of it and how many pipes. */
+  sizes: { insideMm: number; lengthM: number; pipes: number }[];
+  /** Pipes with no size yet. */
+  unsized: { lengthM: number; pipes: number };
+};
+
+/** The metres of each size of pipe on the map (FW13): what a quote for the pipe would list. Map lengths, with nothing added for slope, joins or waste. */
+export function pipeMaterials(pipes: { lengthM: number; insideMm: number | null }[]): PipeMaterials {
+  const bySize = new Map<number, { lengthM: number; pipes: number }>();
+  const unsized = { lengthM: 0, pipes: 0 };
+  for (const pipe of pipes) {
+    const into = pipe.insideMm === null ? unsized : (bySize.get(pipe.insideMm) ?? { lengthM: 0, pipes: 0 });
+    into.lengthM += pipe.lengthM;
+    into.pipes += 1;
+    if (pipe.insideMm !== null) bySize.set(pipe.insideMm, into);
+  }
+  return { sizes: [...bySize.entries()].sort((left, right) => left[0] - right[0]).map(([insideMm, each]) => ({ insideMm, ...each })), unsized };
 }
