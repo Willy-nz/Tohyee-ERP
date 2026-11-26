@@ -408,6 +408,7 @@ describe("farm staff", () => {
     expect(menus.map((menu) => menu.label)).toEqual(["Today", "Map", "Log", "Chat", "Safety", "Effluent", "More"]);
     expect(menus.at(-1)!.groups.flatMap((group) => group.links.map((link) => link.href))).toEqual([
       "/operations/farming",
+      "/operations/farm/water",
       "/operations/farming/pasture",
       "/operations/farming/soil",
       "/operations/farm/mobs",

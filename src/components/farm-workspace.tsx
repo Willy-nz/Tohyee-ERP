@@ -617,6 +617,7 @@ const FARM_WORK: MoreLink[] = [
   { href: "/operations/farming/pasture", icon: "pasture", label: "Pasture and feed", note: "Readings, grazings and feed", staff: true },
   { href: "/operations/farming/rainfall", icon: "rainfall", label: "Rainfall", note: "Rain gauges, by month and season", staff: true },
   { href: "/operations/farm/weather", icon: "weather", label: "Weather", note: "MetService forecast for the next 7 days", staff: true },
+  { href: "/operations/farm/water", icon: "irrigation", label: "Water", note: "Size a pipe, and what each water line does", staff: true },
   { href: "/operations/farming/calendar", icon: "calendar", label: "Farm calendar", note: "Jobs, due dates and reminders", staff: true },
   { href: "/operations/farming/tasks", icon: "checklist", label: "Tasks", note: "Jobs for the farm team, with reminders", staff: true },
   { href: "/operations/farm/timeline", icon: "clock", label: "Farm timeline", note: "Moves, treatments, sales, weights and sprays", staff: true },

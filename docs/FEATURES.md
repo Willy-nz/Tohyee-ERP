@@ -3335,6 +3335,17 @@ that something happened.
   buttons turn hazards, effluent, assets, rain gauges, tasks and people on
   or off, remembered on the device.
 
+- **Farm water: pipe sizing** (FW1-FW6, tenant migration 0317): Farm ›
+  **Water** sizes a pipe as you type a flow (L/min), a length and a rise:
+  for each polyethylene size it shows the water's speed, the friction and
+  the pressure needed at the start (m and kPa), and suggests the smallest
+  size that keeps the water at or under 1.5 m/s. A pipe's own inside
+  diameter can be typed instead. Below, the farm's **mapped water pipes**
+  are listed with their lengths from the map; farm staff give each a size,
+  a flow and a rise, and it shows what that pipe does. A guide, not a
+  design: bends, fittings, pumps, ring mains and stock demand aren't
+  counted. AI tools: `get_farm_water` and `size_farm_pipe` (both look
+  only).
 - **Satellite vegetation: the pipeline** (tenant migration 0253; docs/SATELLITE-VEGETATION.md): optional, free Sentinel-2
   pictures of a farm's paddocks from the organisation's own Copernicus
   account, worked into greenness (NDVI) a paddock: mean and median, clear

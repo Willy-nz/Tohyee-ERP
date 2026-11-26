@@ -12,6 +12,8 @@ import { farmComparison } from "@/lib/farming/comparison";
 import { farmBenchmarksByFarm, getFarmReportingSetup } from "@/lib/farming/farm-reporting";
 import { readFarmLocations } from "@/lib/farming/locations";
 import { listMapAssets } from "@/lib/farming/map-assets";
+import { getFarmWater } from "@/lib/farming/water";
+import { PIPE_SDRS, pipeFlow, sizeOptions, VELOCITY_GUIDE } from "@/lib/farming/water-rules";
 import { linkableBillLines } from "@/lib/farming/fertiliser";
 import { linkableMovements, listMobs, listStockUnitFactors, untypedMobs } from "@/lib/farming/mobs";
 import { paddockStatuses } from "@/lib/farming/paddock-status";
@@ -164,6 +166,41 @@ export const FARM_SETUP_READ_TOOLS: AiTool[] = [
     level: "read",
     inputSchema: schema({ farmId: FARM_ID, ...PAGE }),
     run: async (tx, args) => paged("assets", await listMapAssets(tx, await farmFor(tx, args.farmId)), args),
+  },
+  {
+    name: "get_farm_water",
+    title: "A farm's water pipes",
+    description: "The water pipes drawn on a farm's map: each one's name, its length from the map (m) and, where someone has set them, its inside diameter (mm), the flow it's for (L/min) and its rise (m), with the water's speed, the friction and the pressure needed worked out. Also how many troughs, tanks, bores and water points are on the map. An estimate that leaves out bends and fittings.",
+    level: "read",
+    inputSchema: schema({ farmId: FARM_ID }),
+    run: async (tx, args) => ({ water: await getFarmWater(tx, requireId(await farmFor(tx, args.farmId), "farmId")) }),
+  },
+  {
+    name: "size_farm_pipe",
+    title: "Size a water pipe",
+    description: `Works out a water pipe as Farm › Water does, saving nothing: for a flow (L/min), a length (m) and a rise to the far end (m, minus for downhill), each polyethylene size's inside diameter, the water's speed (m/s), the friction (m) and the pressure needed at the start (m and kPa), and the smallest size that keeps the water at or under ${VELOCITY_GUIDE} m/s. Give insideMm to work out one pipe of your own instead. A guide, not a design: bends, valves, fittings and the pump aren't counted, so say that when you give the answer.`,
+    level: "read",
+    inputSchema: schema(
+      {
+        flowLpm: { type: "number", description: "Flow in litres a minute." },
+        lengthM: { type: "number", description: "Length in metres." },
+        riseM: { type: "number", description: "How far the far end is above the start, metres. Minus for downhill. Default 0." },
+        sdr: { type: "number", enum: PIPE_SDRS.map((each) => each.sdr), description: "The pipe's wall (SDR). Default the thickest listed." },
+        insideMm: { type: "number", description: "A pipe's own inside diameter in mm, to work out just that pipe." },
+      },
+      ["flowLpm", "lengthM"],
+    ),
+    run: async (_tx, args) => {
+      const job = { flowLpm: Number(args.flowLpm), lengthM: Number(args.lengthM), riseM: args.riseM === undefined || args.riseM === null ? 0 : Number(args.riseM) };
+      if (args.insideMm !== undefined && args.insideMm !== null) {
+        const result = pipeFlow({ ...job, insideMm: Number(args.insideMm) });
+        if (!result) throw new ValidationError("Those figures are outside what this can work out.");
+        return { insideMm: Number(args.insideMm), result, guideMs: VELOCITY_GUIDE };
+      }
+      const sized = sizeOptions(job, args.sdr === undefined || args.sdr === null ? PIPE_SDRS[0].sdr : Number(args.sdr));
+      if (sized.options.length === 0) throw new ValidationError("Those figures are outside what this can work out.");
+      return { sizes: sized.options, suggestedOutsideMm: sized.suggested, guideMs: VELOCITY_GUIDE };
+    },
   },
   {
     name: "farm_team",
