@@ -280,8 +280,8 @@ const GROUPS: readonly ToolGroup[] = [
   },
   {
     key: "chat",
-    label: "Chat (the team chat)",
-    tools: ["read_team_chat", "post_team_chat_message"],
+    label: "Chat (Everyone, spaces and direct messages)",
+    tools: ["read_team_chat", "post_team_chat_message", "list_chats", "read_chat", "post_chat_message"],
     hiddenBecause: (modules) => (modules.chat ? null : "Chat is turned off for this organisation (Settings › Modules)."),
   },
 ];

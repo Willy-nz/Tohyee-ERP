@@ -1,11 +1,11 @@
 import { json, route, searchParams, withTeamChat } from "@/lib/api/http";
-import { removeTeamMessage } from "@/lib/chat/team";
+import { removeRoomMessage } from "@/lib/chat/messages";
 
 type Context = { params: Promise<{ messageId: string }> };
 
-/** DELETE: takes a team chat message down: whoever posted it, or an owner or admin (TCH4). */
+/** DELETE: takes a message down in a chat you're in: whoever posted it, or an owner or admin (TCH4, TCH22). */
 export const DELETE = route<Context>(async (request, context) => {
   const { messageId } = await context.params;
-  const message = await withTeamChat(request, searchParams(request).get("organisationId"), "read", (tx) => removeTeamMessage(tx, messageId));
+  const message = await withTeamChat(request, searchParams(request).get("organisationId"), "read", (tx) => removeRoomMessage(tx, messageId));
   return json({ message });
 });
