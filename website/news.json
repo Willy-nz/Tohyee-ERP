@@ -2,6 +2,12 @@
   "about": "Announcements shown on the Home page of the Tohyee server app (Windows), next to the GitHub releases. Edit this file on main and GitHub Pages publishes it to https://willy-nz.github.io/Tohyee-ERP/news.json. Each item: date (YYYY-MM-DD), title, body, and optionally link (https) and kind (\"conference\" shows it in the conference card).",
   "items": [
     {
+      "date": "2026-11-27",
+      "title": "Tohyee 0.47.0: direct messages and spaces in Chat",
+      "body": "Chat now has direct messages, spaces anyone can make, and mentions, in one list with unread counts. Viewers can chat like everyone else. Owners and admins can review a chat if they need to: every chat says so, and each look is recorded.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.47.0"
+    },
+    {
       "date": "2026-11-26",
       "title": "Tohyee 0.46.0: Farm water and review fixes",
       "body": "Farm › Water sizes a pipe, works out what stock drink and matches a pump (a guide, not a design). Stock can move between farms, tasks can have a category, and provisional tax has its options. Many fixes from reviews of the books, tax, sales platforms, farm screens and security.",
