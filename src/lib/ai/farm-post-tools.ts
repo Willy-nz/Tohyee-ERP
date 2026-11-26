@@ -4,6 +4,7 @@ import { MOVEMENT } from "@/lib/ai/farm-tools";
 import { type AiTool, DATE, type JsonSchema, schema } from "@/lib/ai/tools";
 import { IDEMPOTENCY, idempotencyKey } from "@/lib/ai/write-tools";
 import { NotFoundError } from "@/lib/errors";
+import { moveMobToFarm } from "@/lib/farming/mob-farm-move";
 import { mobAction, mobRow } from "@/lib/farming/mobs";
 import { getMovement, recordMovement, voidMovement } from "@/lib/livestock/movements";
 
@@ -73,7 +74,7 @@ export const FARM_POST_TOOLS: AiTool[] = [
     name: "sell_from_mob",
     title: "Sell stock from a mob",
     description:
-      "Takes sold stock out of a mob, as Sell does on the mob. With Livestock on, the sale is recorded in the books' head count (or linked to a movement already there: movementId, from list_mob_linkable_movements). amount is the sale's value excluding GST, if known. This doesn't make an invoice or record the money: that's the sales tools. If the mob has tagged animals, say which were sold (animalIds). The answer warns if the mob is within a withholding period: pass that on.",
+      "Takes sold stock out of a mob, as Sell does on the mob. With Livestock on, the sale is recorded in the books' head count (or linked to a movement already there: movementId, from list_mob_linkable_movements). amount is the sale's value excluding GST, if known. This doesn't make an invoice or record the money: that's the sales tools. If the mob has tagged animals, say which were sold (animalIds). The answer warns if the mob is within a withholding period: pass that on. Stock going to another of this organisation's farms isn't sold: use move_mob_to_farm.",
     level: "post",
     inputSchema: schema(
       {
@@ -94,7 +95,7 @@ export const FARM_POST_TOOLS: AiTool[] = [
     name: "buy_into_mob",
     title: "Add bought stock to a mob",
     description:
-      "Adds bought stock to a mob, as Buy does on the mob. With Livestock on, the purchase is recorded in the books' head count (or linked to a movement already there: movementId, from list_mob_linkable_movements). amount is the cost excluding GST, if known. This doesn't make a bill or record the money: that's the purchases tools.",
+      "Adds bought stock to a mob, as Buy does on the mob. With Livestock on, the purchase is recorded in the books' head count (or linked to a movement already there: movementId, from list_mob_linkable_movements). amount is the cost excluding GST, if known. This doesn't make a bill or record the money: that's the purchases tools. Stock coming from another of this organisation's farms isn't bought: use move_mob_to_farm.",
     level: "post",
     inputSchema: schema(
       {
@@ -149,6 +150,33 @@ export const FARM_POST_TOOLS: AiTool[] = [
     level: "post",
     inputSchema: schema({ mobId: MOB, intoMobId: { type: "string", description: "The mob it joins, from list_mobs." }, onDate: ON_DATE, note: NOTE, idempotencyKey: IDEMPOTENCY }, ["mobId", "intoMobId"]),
     run: act("merge", (args) => ({ intoMobId: args.intoMobId })),
+  },
+  {
+    name: "move_mob_to_farm",
+    title: "Move stock to another farm",
+    description:
+      "Moves all of a mob, or some of it (head), to another farm in this organisation, as Move to another farm does on the mob. It's a move, not a sale: no livestock movement, no income and no purchase, and the kind and class don't change. Use it, never a sale and a purchase, for stock going between this organisation's own farms. They go into a new mob (name, toPaddockId on the other farm) or into a mob already there of the same class (intoMobId, from list_mobs for that farm). The withholding from their treatments goes with them. With part of a mob that has tagged animals, say which go (animalIds). The answer warns when they're within a withholding period, and for cattle and deer says Tohyee doesn't tell NAIT: pass both on.",
+    level: "post",
+    inputSchema: schema(
+      {
+        mobId: MOB,
+        toFarmId: { type: "string", description: "The farm they're going to, from list_farms_and_paddocks." },
+        head: { type: "integer", minimum: 1, description: "How many go. Leave out for the whole mob." },
+        intoMobId: { type: "string", description: "A mob already on the other farm, of the same class, for them to join." },
+        name: { type: "string", maxLength: 100, description: "The new mob's name, when they don't join a mob there. Default: the mob's name and the farm it came from." },
+        toPaddockId: { type: "string", description: "The paddock on the other farm for the new mob." },
+        animalIds: { type: "array", items: { type: "string" }, description: "The tagged animals that go, from list_animals." },
+        onDate: ON_DATE,
+        note: NOTE,
+        idempotencyKey: IDEMPOTENCY,
+      },
+      ["mobId", "toFarmId"],
+    ),
+    run: async (tx, args, context) => {
+      const { idempotencyKey: key, mobId, ...fields } = args;
+      const result = await moveMobToFarm(tx, mobId, { ...fields, operationId: operationId(context, key) });
+      return { from: result.from, to: result.to, livestock: result.livestock, message: result.message, warning: result.warning, nait: result.nait };
+    },
   },
   {
     name: "record_livestock_movement",

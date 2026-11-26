@@ -86,6 +86,8 @@ export type MobEvent = {
   toClassCode: string | null;
   otherMobId: string | null;
   otherMobName: string | null;
+  /** The other mob's farm (a move between farms names it). */
+  otherFarmName: string | null;
   fromPaddockName: string | null;
   toPaddockName: string | null;
   grazingId: string | null;
@@ -102,13 +104,13 @@ export type MobEvent = {
 
 export type ActionResult = { mob: Mob; events: MobEvent[]; livestock: "recorded" | "linked" | "reversed" | "off" | "none"; message: string };
 
-function optionalOperationId(input: unknown): string | null {
+export function optionalOperationId(input: unknown): string | null {
   if (input === undefined || input === null || input === "") return null;
   if (typeof input !== "string" || !UUID.test(input)) throw new ValidationError("operationId must be a UUID.");
   return input.toLowerCase();
 }
 
-function requireHead(input: unknown, label = "Head", min = 1): number {
+export function requireHead(input: unknown, label = "Head", min = 1): number {
   const value = typeof input === "number" ? input : Number(String(input ?? "").replace(/,/g, "").trim() || "NaN");
   if (!Number.isInteger(value) || value < min || value > MAX_HEAD) throw new ValidationError(`${label} must be a whole number from ${min} to ${MAX_HEAD.toLocaleString("en-NZ")}.`);
   return value;
@@ -128,9 +130,9 @@ async function requireFarmId(tx: OrgTx, input: unknown): Promise<string> {
   return farmId;
 }
 
-type PaddockRow = { id: string; farm_id: string; name: string; status: string; hectares: string | null };
+export type PaddockRow = { id: string; farm_id: string; name: string; status: string; hectares: string | null };
 
-async function requirePaddock(tx: OrgTx, input: unknown, farmId: string): Promise<PaddockRow> {
+export async function requirePaddock(tx: OrgTx, input: unknown, farmId: string): Promise<PaddockRow> {
   const id = requireId(input, "paddockId");
   const row = await tx.query<PaddockRow>(
     `select p.id::text, p.farm_id::text, p.name, p.status,
@@ -247,6 +249,7 @@ type EventRow = {
   other_name: string | null;
   other_kind: string | null;
   other_class: string | null;
+  other_farm: string | null;
   from_paddock: string | null;
   to_paddock: string | null;
   grazing_id: string | null;
@@ -263,11 +266,12 @@ type EventRow = {
 export async function loadEvents(tx: OrgTx, where: string, params: unknown[], limit = 500): Promise<MobEvent[]> {
   const rows = await tx.query<EventRow>(
     `select e.id::text, e.mob_id::text, m.name as mob_name, m.kind, m.class_code, e.event_type, e.event_date::text, e.head_change, e.head_after,
-            e.created_how, e.from_class_code, e.to_class_code, e.other_mob_id::text, o.name as other_name, o.kind as other_kind, o.class_code as other_class,
+            e.created_how, e.from_class_code, e.to_class_code, e.other_mob_id::text, o.name as other_name, o.kind as other_kind, o.class_code as other_class, ofarm.name as other_farm,
             fp.name as from_paddock, tp.name as to_paddock, e.grazing_id::text, e.livestock_movement_id::text, e.reverses_event_id::text, e.amount::text, e.average_kg::text,
             e.weighed_head, e.note, e.created_by_email, e.created_at::text
        from mob_events e join mobs m on m.id = e.mob_id
        left join mobs o on o.id = e.other_mob_id
+       left join farms ofarm on ofarm.id = o.farm_id
        left join paddocks fp on fp.id = e.from_paddock_id
        left join paddocks tp on tp.id = e.to_paddock_id
       where ${where}
@@ -288,6 +292,7 @@ export async function loadEvents(tx: OrgTx, where: string, params: unknown[], li
     toClassCode: row.to_class_code,
     otherMobId: row.other_mob_id,
     otherMobName: row.other_mob_id ? mobName({ name: row.other_name, kind: row.other_kind ?? "", classCode: row.other_class ?? "" }) : null,
+    otherFarmName: row.other_farm,
     fromPaddockName: row.from_paddock,
     toPaddockName: row.to_paddock,
     grazingId: row.grazing_id,
@@ -401,7 +406,7 @@ export async function addEvent(tx: OrgTx, input: EventInput): Promise<string> {
 }
 
 /** The event an operation id already made (a sync sent again): the same details are done; different ones are refused. */
-async function replayedEvent(tx: OrgTx, operationId: string | null, hash: string): Promise<string | null> {
+export async function replayedEvent(tx: OrgTx, operationId: string | null, hash: string): Promise<string | null> {
   if (!operationId) return null;
   const row = await tx.query<{ mob_id: string; request_hash: string | null; created_by_email: string }>("select mob_id::text, request_hash, created_by_email from mob_events where operation_id = $1", [operationId]);
   const found = row.rows[0];
@@ -415,7 +420,7 @@ async function replayedEvent(tx: OrgTx, operationId: string | null, hash: string
   return found.mob_id;
 }
 
-async function openGrazing(tx: OrgTx, mob: Mob, paddock: PaddockRow, onDate: string, head: number): Promise<string> {
+export async function openGrazing(tx: OrgTx, mob: Mob, paddock: PaddockRow, onDate: string, head: number): Promise<string> {
   const freeText = await tx.query<{ mob: string }>("select mob from grazings where paddock_id = $1 and status = 'active' and out_on is null and mob_id is null", [paddock.id]);
   if (freeText.rows[0]) {
     throw new ConflictError(`${paddock.name} has "${freeText.rows[0].mob}" in it, recorded without a mob record. Record its day out, or make it a mob record first.`);
@@ -501,7 +506,7 @@ function optionalAmount(input: unknown): string | null {
   return input === undefined || input === null || input === "" ? null : parseDecimalInput(input, "Amount", { maxScale: 2, allowZero: true });
 }
 
-function eventDate(input: unknown): string {
+export function eventDate(input: unknown): string {
   return input === undefined || input === null || input === "" ? todayIsoDate() : parseIsoDate(input, "The date");
 }
 
@@ -1045,7 +1050,7 @@ export async function linkableMovements(tx: OrgTx, mobIdInput: unknown, input: {
 const REVERSIBLE = ["sold", "died", "born", "bought", "reclass", "created"] as const;
 const REVERSE_WORDS: Record<string, string> = { sold: "sale", died: "death", born: "birth", bought: "purchase", reclass: "class change", created: "addition" };
 /** Later events after which the animals can't simply be put back into the same mob. */
-const RESHAPING: Record<string, string> = { moved: "moved", split_out: "split", split_in: "split", merged_in: "merged", merged_out: "merged", reclass: "had its class changed", closed: "closed" };
+const RESHAPING: Record<string, string> = { moved: "moved", farm_out: "moved to another farm", farm_in: "joined by stock from another farm", split_out: "split", split_in: "split", merged_in: "merged", merged_out: "merged", reclass: "had its class changed", closed: "closed" };
 
 /**
  * Reverses a mob's sale, death, birth, purchase or class change (MOB11-

@@ -408,7 +408,8 @@ export async function moveAnimals(tx: OrgTx, input: { animalIds?: unknown; toMob
   let toHead = to.head;
   for (const [fromId, group] of groups) {
     const from = await mobRow(tx, fromId, true);
-    if (from.farmId !== to.farmId) throw new ValidationError("Mobs on different farms: move the mob, or sell and buy.");
+    // Between your own farms it's a move, never a sale and a purchase (OPF13).
+    if (from.farmId !== to.farmId) throw new ValidationError(`${from.name} is on another farm. Use "Move to another farm" on ${from.name}, and choose these tags there.`);
     if (from.kind !== to.kind || from.classCode !== to.classCode) throw new ValidationError(`${from.name} is ${from.className.toLowerCase()} and ${to.name} is ${to.className.toLowerCase()}. A mob is one class: change the class first.`);
     if (from.createdOn && onDate < from.createdOn) throw new ValidationError(`${from.name} was added on ${from.createdOn}. The date can't be before that.`);
     const n = group.length;

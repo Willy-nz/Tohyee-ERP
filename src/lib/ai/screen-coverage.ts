@@ -476,6 +476,7 @@ export const SCREEN_COVERAGE: Record<string, ScreenCoverage> = {
   "DELETE /api/farming/map-assets/[assetId]": {"next": "farm"},
   "PUT /api/farming/member-farms": {"next": "farm"},
   "POST /api/farming/mobs/[mobId]/actions": {"tool": "move_mob"},
+  "POST /api/farming/mobs/[mobId]/farm-move": {"tool": "move_mob_to_farm"},
   "POST /api/farming/mobs/[mobId]/breeding": {"tool": "record_breeding"},
   "PATCH /api/farming/mobs/[mobId]": {"next": "farm"},
   "POST /api/farming/paddocks/[paddockId]/boundary": {"next": "farm"},

@@ -9,6 +9,7 @@ import { BreedingFlow, breedingTypesFor, MobBreeding, PlanRoundFlow, RotationCar
 import { FarmTermsCard, useFarmTerms } from "@/components/farm-timeline";
 import { ProductStockCard, TreatFlow, TreatmentsCard } from "@/components/farm-treatments";
 import { MobBcsPanel } from "@/components/farm-bcs";
+import { FarmMoveFlow, otherFarms } from "@/components/farm-mob-farm-move";
 import { taggedText } from "@/lib/farming/animal-rules";
 import type { Animal } from "@/lib/farming/animals";
 import { classTerm, type FarmTerms, term } from "@/lib/farming/farm-terms";
@@ -44,7 +45,7 @@ import styles from "./farm-workspace.module.css";
 
 const NATURAL = new Intl.Collator("en-NZ", { numeric: true, sensitivity: "base" });
 
-type Flow = { kind: "add" } | { kind: "action"; action: MobAction; mob: Mob } | { kind: "treat"; mob: Mob } | { kind: "breeding"; mob: Mob; recordType: BreedingType } | { kind: "plan" };
+type Flow = { kind: "add" } | { kind: "action"; action: MobAction; mob: Mob } | { kind: "treat"; mob: Mob } | { kind: "breeding"; mob: Mob; recordType: BreedingType } | { kind: "plan" } | { kind: "farm_move"; mob: Mob };
 type MobFlowKind = Extract<Flow, { kind: "add" } | { kind: "action" }>;
 
 function useMobs(organisationId: string, farmId: string) {
@@ -69,7 +70,7 @@ function TagSwatch({ colour }: { colour: string | null }) {
   return <span aria-label={`${colour} tag`} title={`${colour} tag`} style={{ display: "inline-block", width: 12, height: 12, borderRadius: 3, border: "1px solid var(--border)", background: /^[a-z]+$/i.test(colour) ? colour.toLowerCase() : "var(--surface-sunken)" }} />;
 }
 
-export function FarmMobs({ organisationId, farm }: FarmContext) {
+export function FarmMobs({ organisationId, farm, farms }: FarmContext) {
   const today = todayInBrowser();
   const { can } = useWorkspace();
   const canRecord = useCanRecordFarmWork();
@@ -93,6 +94,7 @@ export function FarmMobs({ organisationId, farm }: FarmContext) {
   };
 
   if (flow?.kind === "breeding") return <BreedingFlow organisationId={organisationId} farm={farm} mob={flow.mob} mobs={list} recordType={flow.recordType} onClose={closeFlow} />;
+  if (flow?.kind === "farm_move") return <FarmMoveFlow organisationId={organisationId} farm={farm} farms={farms} mob={flow.mob} onClose={closeFlow} />;
   if (flow?.kind === "plan") return <PlanRoundFlow organisationId={organisationId} farm={farm} mobs={list} roundDays={rotation.data?.plan.roundDays ?? null} onClose={closeFlow} />;
 
   if (flow?.kind === "treat") {
@@ -177,6 +179,7 @@ export function FarmMobs({ organisationId, farm }: FarmContext) {
               mob={mob}
               canRecord={canRecord}
               canBooks={can("bookkeeper")}
+              canMoveFarm={otherFarms(farms, farm.id).length > 0}
               terms={terms}
               mobs={list}
               onChanged={(message) => {
@@ -186,6 +189,7 @@ export function FarmMobs({ organisationId, farm }: FarmContext) {
               onAction={(action) => {
                 setDone(null);
                 if (action === "treat") setFlow({ kind: "treat", mob });
+                else if (action === "farm_move") setFlow({ kind: "farm_move", mob });
                 else if (action.startsWith("breeding:")) setFlow({ kind: "breeding", mob, recordType: action.slice(9) as BreedingType });
                 else setFlow({ kind: "action", action: action as MobAction, mob });
               }}
@@ -207,7 +211,7 @@ export function FarmMobs({ organisationId, farm }: FarmContext) {
   );
 }
 
-function MobCard({ organisationId, farmName, mob, mobs, canRecord, canBooks, terms, onAction, onChanged, onClose }: { organisationId: string; farmName: string; mob: Mob; mobs: Mob[]; canRecord: boolean; canBooks: boolean; terms: FarmTerms; onAction: (action: MobAction | "treat" | `breeding:${BreedingType}`) => void; onChanged: (message: string) => void; onClose: () => void }) {
+function MobCard({ organisationId, farmName, mob, mobs, canRecord, canBooks, canMoveFarm, terms, onAction, onChanged, onClose }: { organisationId: string; farmName: string; mob: Mob; mobs: Mob[]; canRecord: boolean; canBooks: boolean; canMoveFarm: boolean; terms: FarmTerms; onAction: (action: MobAction | "treat" | "farm_move" | `breeding:${BreedingType}`) => void; onChanged: (message: string) => void; onClose: () => void }) {
   const today = todayInBrowser();
   const router = useRouter();
   const detail = useApiData<{ mob: Mob; events: MobEvent[]; weights: MobWeight[] }>(`/api/farming/mobs/${mob.id}`, { organisationId });
@@ -262,6 +266,7 @@ function MobCard({ organisationId, farmName, mob, mobs, canRecord, canBooks, ter
             text="More actions"
             items={[
               ...others.map((action) => ({ label: term(terms, `action:${action}`, MOB_ACTION_LABELS[action]), onSelect: () => onAction(action) })),
+              ...(canRecord && canMoveFarm ? [{ label: "Move to another farm", onSelect: () => onAction("farm_move") }] : []),
               ...(canRecord ? [{ label: "Weigh or score each tag", onSelect: () => router.push(`/operations/farm/animals/quick?farm=${mob.farmId}&mob=${mob.id}`) }] : []),
               ...(canRecord ? breedingTypesFor(mob).map((type) => ({ label: `Record ${BREEDING_LABELS[type].toLowerCase()}`, onSelect: () => onAction(`breeding:${type}`) })) : []),
             ]}
@@ -368,6 +373,10 @@ export function eventText(event: MobEvent): string {
     case "merged_out":
     case "merged_in":
       return `${label} ${event.otherMobName ?? ""}: ${Math.abs(event.headChange)} head`;
+    case "farm_out":
+      return `Moved to ${event.otherFarmName ?? "another farm"}: ${event.otherMobName ?? ""}, ${Math.abs(event.headChange)} head`;
+    case "farm_in":
+      return `Came from ${event.otherMobName ?? ""} on ${event.otherFarmName ?? "another farm"}: ${event.headChange} head`;
     case "animals_out":
     case "animals_in":
       return `${label} ${event.otherMobName ?? ""}: ${Math.abs(event.headChange)} head${event.note ? ` (${event.note})` : ""}`;

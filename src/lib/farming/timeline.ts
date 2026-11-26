@@ -90,15 +90,16 @@ export async function farmTimeline(tx: OrgTx, input: { farmId: unknown; mobId?: 
       other_name: string | null;
       other_kind: string | null;
       other_class: string | null;
+      other_farm: string | null;
       average_kg: string | null;
       amount: string | null;
       movement: boolean;
       note: string | null;
     }>(
       `select e.id::text, e.mob_id::text, m.name, m.kind, m.class_code, e.event_type, e.event_date::text, e.head_change, e.head_after,
-              e.from_paddock_id::text, e.to_paddock_id::text, e.to_class_code, e.from_class_code, o.name as other_name, o.kind as other_kind, o.class_code as other_class,
+              e.from_paddock_id::text, e.to_paddock_id::text, e.to_class_code, e.from_class_code, o.name as other_name, o.kind as other_kind, o.class_code as other_class, ofarm.name as other_farm,
               e.average_kg::text, e.amount::text, e.livestock_movement_id is not null as movement, e.note
-         from mob_events e join mobs m on m.id = e.mob_id left join mobs o on o.id = e.other_mob_id
+         from mob_events e join mobs m on m.id = e.mob_id left join mobs o on o.id = e.other_mob_id left join farms ofarm on ofarm.id = o.farm_id
         where e.farm_id = $1 and e.event_date between $2 and $3
           and ($5::bigint is null or e.mob_id = $5)
           and ($6::bigint is null or e.from_paddock_id = $6 or e.to_paddock_id = $6)
@@ -116,6 +117,8 @@ export async function farmTimeline(tx: OrgTx, input: { farmId: unknown; mobId?: 
       else if (row.event_type === "reclass") title = `${name}: ${className(row.kind, row.from_class_code ?? "")} to ${className(row.kind, row.to_class_code ?? "")}`;
       else if (row.event_type === "created") title = `${name} added: ${row.head_after} head${row.to_paddock_id ? ` in ${paddockLabel(names.get(row.to_paddock_id) ?? "")}` : ""}`;
       else if (["sold", "died", "born", "bought"].includes(row.event_type)) title = `${name}: ${Math.abs(row.head_change)} ${label.toLowerCase()}`;
+      else if (row.event_type === "farm_out") title = `${name}: ${Math.abs(row.head_change)} moved to ${other} on ${row.other_farm}`;
+      else if (row.event_type === "farm_in") title = `${name}: ${row.head_change} came from ${other} on ${row.other_farm}`;
       else if (other) title = `${name}: ${label.toLowerCase()} ${other} (${Math.abs(row.head_change)} head)`;
       items.push({
         key: `e${row.id}`,

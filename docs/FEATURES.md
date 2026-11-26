@@ -3318,6 +3318,14 @@ that something happened.
   Mob names typed on grazings can be made mob records, and mobs can be
   imported from CSV or Excel. Moves, weights, deaths, births and counts
   work offline through the device's queue.
+  **Move to another farm** (OPF7-OPF13, tenant migration 0316; following
+  common practice, not yet reviewed), in the mob's "More actions": all or
+  some of a mob goes to another farm in the organisation, into a new mob or
+  one of the same class there, in three steps that work offline. It's a
+  move, not a sale: no livestock movement. Treatments' withholding and the
+  history go with the animals, and tagged animals move onto the other
+  farm's register. Cattle and deer get a reminder that Tohyee doesn't tell
+  NAIT. The AI's tool is move_mob_to_farm.
 
 - **Farm map assets and measuring** (MA1-MA6, tenant migration 0248): on Farm › Map, **Farm assets** puts troughs, gates,
   water points, sheds, bores, tanks, yards and culverts on the map as
