@@ -1,4 +1,5 @@
 import { describe, expect, it } from "vitest";
+import { ROLES, teamChatAllows } from "@/lib/auth/roles";
 import {
   CHAT_PRIVACY_LINE,
   canManageSpace,
@@ -82,5 +83,20 @@ describe("chat ids (TCH17, TCH22)", () => {
 describe("who can read it (TCH19)", () => {
   it("is said plainly", () => {
     expect(CHAT_PRIVACY_LINE).toBe("Owners and admins of this organisation can read this chat if they need to.");
+  });
+});
+
+describe("who's in Chat, by role (TCH6, TCH27)", () => {
+  it("is everyone but farm staff and report viewers, and everyone in it posts, viewers too", () => {
+    const allowed = ROLES.filter((role) => teamChatAllows(role, "read"));
+    expect(allowed).toEqual(["sales_rep", "sales_manager", "viewer", "bookkeeper", "admin", "owner"]);
+    expect(ROLES.filter((role) => teamChatAllows(role, "post"))).toEqual(allowed);
+    expect(teamChatAllows("farm_worker", "read")).toBe(false);
+    expect(teamChatAllows("report_viewer", "read")).toBe(false);
+  });
+
+  it("leaves a space's managing to its maker, owners and admins, viewers or not", () => {
+    expect(canManageSpace("viewer", true)).toBe(true);
+    expect(canManageSpace("viewer", false)).toBe(false);
   });
 });

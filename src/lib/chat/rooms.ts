@@ -117,9 +117,9 @@ export async function describeRoom(tx: OrgTx, room: RoomRow, member: boolean): P
   const members = await roomMembers(tx, room);
   const viewer = tx.actor.userId?.toLowerCase() ?? null;
   const role = tx.actor.role;
+  // Everyone in Chat posts, viewers too (TCH27).
   const mayPost = !role || teamChatAllows(role, "post");
-  const stuck = roomReadOnlyBecause(room, members, viewer);
-  const readOnlyBecause = stuck ?? (mayPost ? null : "You can read this chat. Posting needs the bookkeeper role or higher, or a sales role.");
+  const readOnlyBecause = roomReadOnlyBecause(room, members, viewer) ?? (mayPost ? null : "Chat isn't open to this role.");
   const open = room.kind === "space" && !room.closed_at;
   return {
     id: room.id,
@@ -174,7 +174,7 @@ async function requireOpenName(tx: OrgTx, name: string, exceptRoomId: string | n
   if (taken.rows.length) throw new ValidationError(`There's already an open space called ${name}.`);
 }
 
-/** Makes a space (TCH14): anyone in Chat who can post, with the people they pick. */
+/** Makes a space (TCH14, TCH27): anyone in Chat, with the people they pick. */
 export async function createSpace(tx: OrgTx, input: { name: unknown; userIds?: unknown; idempotencyKey: unknown }): Promise<ChatRoomDetail> {
   await requireTeamChat(tx);
   requireChatRole(tx, "post");

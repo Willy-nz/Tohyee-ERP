@@ -7,7 +7,7 @@ import { useModules } from "@/components/modules";
 import { Notice, Page, PageHeader } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
 
-/** Chat (TCH1-TCH26): the list of chats and the open one. */
+/** Chat (TCH1-TCH27): the list of chats and the open one. */
 export default function ChatPage() {
   return (
     <Page>

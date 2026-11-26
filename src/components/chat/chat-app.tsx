@@ -37,7 +37,8 @@ export function ChatApp({ organisationId }: { organisationId: string }) {
     return () => window.clearInterval(timer);
   }, [reload]);
 
-  const canStart = role !== "viewer";
+  // Everyone in Chat starts chats, viewers too (TCH27).
+  const canStart = true;
   const canRemoveAny = role === "owner" || role === "admin";
   const go = (value: string | null) => router.push(chatHref(value));
   const ref = parseChatRef(open);
@@ -54,7 +55,7 @@ export function ChatApp({ organisationId }: { organisationId: string }) {
     pane = farm ? (
       <div className={styles.main}>
         <h2>{farm.name}</h2>
-        <FarmChat key={farm.ref} organisationId={organisationId} farm={{ id: ref.farmId, name: farm.name }} canRemoveAny={canRemoveAny} canPost={role !== "viewer"} inChatApp />
+        <FarmChat key={farm.ref} organisationId={organisationId} farm={{ id: ref.farmId, name: farm.name }} canRemoveAny={canRemoveAny} canPost={role !== "viewer"} inChatApp /* a farm's chat keeps FCH7: viewers read */ />
       </div>
     ) : list.data ? (
       <Notice tone="info">Chat not found.</Notice>

@@ -2,7 +2,7 @@ import type { Role } from "@/lib/auth/roles";
 import { ValidationError } from "@/lib/errors";
 
 /*
- * Chat's plain rules (TCH10-TCH26, asked for by the owner; details following
+ * Chat's plain rules (TCH10-TCH27, asked for by the owner; details following
  * common practice, not yet reviewed). Browser-safe: the screens use them too.
  */
 

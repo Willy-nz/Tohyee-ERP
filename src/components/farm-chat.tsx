@@ -394,7 +394,7 @@ function ChatRoom({ organisationId, room, canRemoveAny, canPost, inChatApp }: { 
           </div>
         </form>
       ) : (
-        <p className={styles.empty}>{room.kind === "room" && room.readOnlyBecause ? room.readOnlyBecause : "You can read this chat. Posting needs the bookkeeper role or higher, or a sales role."}</p>
+        <p className={styles.empty}>{room.kind === "room" && room.readOnlyBecause ? room.readOnlyBecause : "You can read this farm's chat. Posting in it needs farm staff or the bookkeeper role or higher."}</p>
       )}
       <div ref={endRef} className={styles.end} />
     </div>

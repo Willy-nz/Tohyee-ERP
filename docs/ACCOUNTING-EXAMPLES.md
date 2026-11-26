@@ -19858,6 +19858,8 @@ bookkeeper, a viewer, a sales rep, a farm worker and a report viewer.
 - **TCH6 Who's in it.** Everyone in the organisation but farm staff (they have
   their farm's chat) and report viewers. Sales reps and managers read and
   post, as bookkeepers and up do; viewers read only.
+  *Superseded 27 Nov 2026 by TCH27: viewers post too. Who's in Chat is
+  unchanged.*
 - **TCH7 The AI.** A person's own AI can read the team chat (read_team_chat)
   and post words in it when they ask (post_team_chat_message), marked "via
   their AI". The tools are offered only while Chat is on.
@@ -24836,14 +24838,15 @@ v1.2.0 is out. Nothing here changes the books.
   installed over an earlier version: uninstall that first, which loses
   what it saved on the phone.
 
-## Chat: direct messages, spaces, mentions and review (TCH10-TCH26; 27 Nov 2026; asked for by the owner; details following common practice, not yet reviewed)
+## Chat: direct messages, spaces, mentions and review (TCH10-TCH27; 27 Nov 2026; asked for by the owner; details following common practice, not yet reviewed)
 
 Tested in `tests/unit/chat-rules.test.ts`, `tests/integration/chat-rooms.test.ts`,
 `tests/integration/chat-review.test.ts`, `tests/integration/chat-migration.test.ts`,
 `tests/integration/team-chat.test.ts`, `tests/unit/navigation.test.ts` and
 `tests/unit/ai-screen-coverage.test.ts`. A made-up shop has an owner (Olive),
 an admin (Ari), two bookkeepers (Bea and Ben), a sales rep (Sam), a viewer
-(Vic), a farm worker and a report viewer. Who's in Chat at all is still TCH6.
+(Vic), a farm worker and a report viewer. Who's in Chat at all is still TCH6;
+what viewers can do there is TCH27.
 
 - **TCH10 The list of chats.** Chat has a list down the side: Home, Mentions,
   then Direct messages, then Spaces. On a phone the list is the first screen;
@@ -24866,9 +24869,8 @@ an admin (Ari), two bookkeepers (Bea and Ben), a sales rep (Sam), a viewer
   12 people. Make a space for a bigger group."). Who's in a direct message
   is fixed: to change it, start another. Nobody can delete, close or leave
   one; its messages stay.
-- **TCH14 A space.** Anyone in Chat who can post (bookkeepers and up, sales
-  roles; viewers read only, as TCH6) can make a space, name it (up to 80
-  characters) and add people. The maker is in it. "Stocktake" can't be used
+- **TCH14 A space.** Anyone in Chat (viewers too, TCH27) can make a space,
+  name it (up to 80 characters) and add people. The maker is in it. "Stocktake" can't be used
   twice for open spaces, and no space can be called Everyone.
 - **TCH15 Joining and leaving a space.** Anyone in a space can add others in
   Chat. Anyone can leave, and then can't read it any more unless someone
@@ -24927,3 +24929,13 @@ an admin (Ari), two bookkeepers (Bea and Ben), a sales rep (Sam), a viewer
   direct messages, Review chats, the AI tools) and keeps every message for
   when it's back on. Starred messages, threads, calls, reactions, editing
   messages and showing who's typing aren't built.
+- **TCH27 Viewers chat like everyone else.** The viewer role is read-only on
+  the books, not in Chat (the owner's decision, 27 Nov 2026). Vic posts
+  words, photos and voice notes, starts direct messages, makes spaces, adds
+  people, mentions people and is mentioned, the same as Bea. Like everyone
+  but owners and admins, Vic takes down only Vic's own messages and can't
+  open Review chats. Vic's own AI connection still only looks, because AI
+  access levels already cap a viewer at looking: it reads Vic's chats but
+  isn't offered post_chat_message. A farm's chat keeps its own rule (FCH7):
+  Vic reads it. Unchanged: farm staff use only their farm's chat in the farm
+  app, and report viewers (the report-only role) aren't in Chat.

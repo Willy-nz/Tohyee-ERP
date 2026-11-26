@@ -7,12 +7,14 @@ import * as roomReadRoute from "@/app/api/chat/rooms/[roomId]/read/route";
 import * as roomRoute from "@/app/api/chat/rooms/[roomId]/route";
 import * as roomsRoute from "@/app/api/chat/rooms/route";
 import * as unreadRoute from "@/app/api/chat/unread/route";
+import { effectiveAccessLevel, levelAllows } from "@/lib/ai/access-levels";
 import { findAiTool } from "@/lib/ai/catalogue";
 import { loadToolModules, moduleHidesTool } from "@/lib/ai/tool-modules";
 import type { SessionUser } from "@/lib/auth/sessions";
 import { listRoomMessages, markRoomRead, postRoomMessage, removeRoomMessage } from "@/lib/chat/messages";
 import { chatHome, chatList, chatMentions, chatUnreadTotal } from "@/lib/chat/overview";
 import { chatPeople } from "@/lib/chat/people";
+import { reviewList } from "@/lib/chat/review";
 import { addToSpace, closeSpace, createSpace, everyoneRoomId, getRoom, leaveSpace, renameSpace, startDirect } from "@/lib/chat/rooms";
 import { postTeamMessage, setTeamChatEnabled } from "@/lib/chat/team";
 import type { OrgTx } from "@/lib/db/org-transaction";
@@ -87,7 +89,7 @@ describeWithDatabase("chat rooms", () => {
   });
 
   let space = "";
-  it("TCH14: anyone who can post makes a space and names it; viewers can't; names are unique and never Everyone", async () => {
+  it("TCH14: anyone in Chat makes a space and names it; names are unique and never Everyone", async () => {
     const key1 = key("space");
     const made = await as("bea")((tx) => createSpace(tx, { name: " Stocktake ", userIds: [people.ben.id], idempotencyKey: key1 }));
     space = made.id;
@@ -96,8 +98,6 @@ describeWithDatabase("chat rooms", () => {
     expect((await as("bea")((tx) => createSpace(tx, { name: "Stocktake", userIds: [people.ben.id], idempotencyKey: key1 }))).id).toBe(space);
     await expect(as("ben")((tx) => createSpace(tx, { name: "stocktake", userIds: [], idempotencyKey: key("space") }))).rejects.toThrow("There's already an open space called stocktake.");
     await expect(as("ben")((tx) => createSpace(tx, { name: "Everyone", userIds: [], idempotencyKey: key("space") }))).rejects.toThrow("Everyone is the chat for the whole team.");
-    const viewer = await call(roomsRoute, "POST", "vic", "/api/chat/rooms", { organisationId: ORG, kind: "space", name: "Mine", userIds: [], idempotencyKey: key("space") });
-    expect(viewer.status).toBe(403);
     // A sales rep can.
     const rep = await call(roomsRoute, "POST", "sam", "/api/chat/rooms", { organisationId: ORG, kind: "space", name: "Orders", userIds: [people.vic.id], idempotencyKey: key("space") });
     expect(rep.status).toBe(201);
@@ -120,7 +120,7 @@ describeWithDatabase("chat rooms", () => {
     expect((await as("ben")((tx) => listRoomMessages(tx, { roomId: everyone }))).messages.map((message) => message.id)).toContain(old.id);
     await expect(as("olive")((tx) => renameSpace(tx, everyone, "All of us"))).rejects.toThrow("Everyone can't be renamed or closed.");
     await expect(as("olive")((tx) => closeSpace(tx, everyone))).rejects.toThrow("Everyone can't be renamed or closed.");
-    expect((await as("vic")((tx) => getRoom(tx, everyone)))).toMatchObject({ kind: "everyone", name: "Everyone", privacyLine: false, canPost: false });
+    expect((await as("vic")((tx) => getRoom(tx, everyone)))).toMatchObject({ kind: "everyone", name: "Everyone", privacyLine: false, canPost: true });
     // Everyone is everyone in Chat (TCH6): not farm staff or report viewers.
     const members = (await as("bea")((tx) => getRoom(tx, everyone))).members.map((member) => member.name);
     expect(members).toEqual(expect.arrayContaining(["Olive Owner", "Ari Admin", "Sam Rep", "Vic Viewer"]));
@@ -140,6 +140,40 @@ describeWithDatabase("chat rooms", () => {
     await expect(as("bea")((tx) => renameSpace(tx, space, "Again"))).rejects.toThrow("This space is closed.");
     expect((await as("ben")((tx) => listRoomMessages(tx, { roomId: space }))).messages.map((message) => message.body)).toEqual(["Aisle 3 done"]);
     expect(await as("ben")((tx) => getRoom(tx, space))).toMatchObject({ closed: true, canPost: false, canAddPeople: false });
+  });
+
+  it("TCH27: a viewer chats like everyone else, but takes down only their own messages and can't review", async () => {
+    // Posts words, a photo and a voice note in Everyone.
+    const everyoneId = await as("vic")((tx) => everyoneRoomId(tx));
+    const MP4 = Buffer.concat([Buffer.from([0, 0, 0, 0x18]), Buffer.from("ftypM4A "), Buffer.alloc(60, 2)]).toString("base64");
+    const said = await as("vic")((tx) =>
+      postRoomMessage(tx, { roomId: everyoneId, body: "Fridge is fixed", photos: [{ fileName: "f.png", contentBase64: PNG }], voice: { seconds: 4, contentBase64: MP4 }, idempotencyKey: key("m") }),
+    );
+    expect(said.attachments.map((file) => file.kind)).toEqual(["photo", "voice"]);
+    // Starts a direct message, over the screen's own address.
+    const started = await call(roomsRoute, "POST", "vic", "/api/chat/rooms", { organisationId: ORG, kind: "direct", userIds: [people.ben.id], idempotencyKey: key("dm") });
+    expect(started.status).toBe(201);
+    const dm = (await started.json()).room;
+    expect(dm).toMatchObject({ kind: "direct", canPost: true, readOnlyBecause: null });
+    // Makes a space and adds people.
+    const made = await call(roomsRoute, "POST", "vic", "/api/chat/rooms", { organisationId: ORG, kind: "space", name: "Front desk", userIds: [people.bea.id], idempotencyKey: key("space") });
+    expect(made.status).toBe(201);
+    const desk = (await made.json()).room.id;
+    const added = await call(roomMembersRoute, "POST", "vic", `/api/chat/rooms/${desk}/members`, { organisationId: ORG, userIds: [people.sam.id] }, params({ roomId: desk }));
+    expect(added.status).toBe(200);
+    // Is mentioned, and mentions others.
+    await as("bea")((tx) => postRoomMessage(tx, { roomId: desk, body: "@Vic Viewer thanks", mentions: [people.vic.id], idempotencyKey: key("m") }));
+    expect((await as("vic")((tx) => chatMentions(tx))).messages.map((message) => message.body)).toContain("@Vic Viewer thanks");
+    await as("vic")((tx) => postRoomMessage(tx, { roomId: desk, body: "@Sam Rep the courier came", mentions: [people.sam.id], idempotencyKey: key("m") }));
+    // Takes down their own message, not other people's.
+    const bea = (await as("vic")((tx) => listRoomMessages(tx, { roomId: desk }))).messages.find((message) => message.body === "@Vic Viewer thanks")!;
+    await expect(as("vic")((tx) => removeRoomMessage(tx, bea.id))).rejects.toThrow("Only whoever posted a message, or an owner or admin, can take it down.");
+    expect(await as("vic")((tx) => removeRoomMessage(tx, said.id))).toMatchObject({ removed: true });
+    // Review chats stays for owners and admins.
+    await expect(as("vic")((tx) => reviewList(tx))).rejects.toThrow("Review chats is for owners and admins.");
+    // A viewer's own AI looks only, as AI access levels already say: it's never offered post_chat_message.
+    expect(levelAllows(effectiveAccessLevel("full", "viewer"), findAiTool("post_chat_message")!.level)).toBe(false);
+    expect(levelAllows(effectiveAccessLevel("full", "viewer"), findAiTool("read_chat")!.level)).toBe(true);
   });
 
   let farmId = "";

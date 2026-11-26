@@ -56,7 +56,7 @@ export async function requireChatPeople(tx: OrgTx, userIds: readonly string[]): 
 export function requireChatRole(tx: OrgTx, need: "read" | "post"): void {
   const role = tx.actor.role;
   if (role && !teamChatAllows(role, need)) {
-    throw new ForbiddenError(need === "post" ? "Posting in Chat needs the bookkeeper role or higher, or a sales role." : "Chat isn't open to this role.");
+    throw new ForbiddenError("Chat isn't open to this role.");
   }
 }
 
