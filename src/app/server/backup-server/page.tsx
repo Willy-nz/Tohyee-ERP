@@ -42,7 +42,10 @@ export default function BackupServerPage() {
           {loaded.data?.copies ? <Copies copies={loaded.data.copies} keepRemovedDays={loaded.data.keepRemovedDays} onChanged={loaded.reload} /> : null}
         </>
       ) : (
-        <Pair settings={settings} onChanged={loaded.reload} />
+        <>
+          {settings.role === "fenced" ? <Fenced onChanged={loaded.reload} /> : null}
+          <Pair settings={settings} onChanged={loaded.reload} />
+        </>
       )}
     </Page>
   );
@@ -74,7 +77,10 @@ function Paired({ settings, onChanged }: { settings: BackupServerSettings; onCha
         <ul>
           <li>Nothing can be changed here, and only server admins can look.</li>
           <li>No emails, feeds, imports or other automatic jobs run here. The main server runs them.</li>
-          <li>It looks for new backups from the main server every 5 minutes and takes them. Switching over comes in the next stage of this feature.</li>
+          <li>It looks for new backups from the main server every 5 minutes and takes them.</li>
+          <li>
+            If the main server is lost, a server admin or an organisation&apos;s Owner can <a href="/switch-over">switch over</a> and make this the main server.
+          </li>
         </ul>
         <div>
           <Button variant="secondary" disabled={busy} onClick={() => void unpair()}>
@@ -108,7 +114,10 @@ function Pair({ settings, onChanged }: { settings: BackupServerSettings; onChang
     }
   }
   return (
-    <Card title="Make this a backup server" description="For a fresh install of Tohyee with no organisations. The main server keeps running as it is.">
+    <Card
+      title="Make this a backup server"
+      description={settings.role === "fenced" ? "The organisations here are replaced by copies from the new main server's backups." : "For a fresh install of Tohyee with no organisations. The main server keeps running as it is."}
+    >
       <form onSubmit={(event) => void pair(event)} className={ui.stack}>
         {settings.restartNeeded ? <Notice tone="warning">Restart Tohyee on this computer to finish going back to a main server.</Notice> : null}
         {error ? <Notice tone="error">{error}</Notice> : null}
@@ -222,6 +231,39 @@ function Copies({ copies, keepRemovedDays, onChanged }: { copies: CopiesState; k
             Take new copies now
           </Button>
         </div>
+      </div>
+    </Card>
+  );
+}
+
+/** An old main that found the backup server was made the main while it was away (BKS17-BKS18). */
+function Fenced({ onChanged }: { onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function mainAfterAll() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/api/admin/backup-server/main-after-all", { method: "POST" });
+      onChanged();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card title="This server is no longer the main one">
+      <div className={ui.stack}>
+        {error ? <Notice tone="error">{error}</Notice> : null}
+        <Notice tone="warning">The backup server was made the main server while this one was away. This server takes no changes and runs no automatic jobs. People can still read what&apos;s here.</Notice>
+        <p>Usually: pair this server as the backup server below, pointing at the folder the new main backs up into. Anything entered here after the new main&apos;s copy was made isn&apos;t on the new main: note it down first, as pairing replaces the books here.</p>
+        <div>
+          <Button variant="secondary" disabled={busy} onClick={() => void mainAfterAll()}>
+            This is the main server after all
+          </Button>
+        </div>
+        <p className={ui.muted}>Only if the switch-over was a mistake and the other server is being stopped. Two main servers would drift apart.</p>
       </div>
     </Card>
   );

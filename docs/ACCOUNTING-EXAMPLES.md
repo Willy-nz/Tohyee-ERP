@@ -25069,3 +25069,49 @@ and `tests/integration/backup-server-refresh.test.ts`.
   backups, 30 with nightly, emails the main's server admins once and shows
   on its Backups page. A main with no backup server (no status file) says
   nothing.
+
+**Stage 2: switching over.** The owner's choices (27 Nov 2026): an Owner
+who isn't a server admin gets the one switch-over screen on the backup
+server; every organisation's jobs come on at once; and people can still
+read their books on an old main that has stopped. Tested in
+`tests/integration/backup-server-switch.test.ts`.
+
+- **BKS15 Who can switch over.** A server admin, or an Owner of any
+  organisation on the backup server. Aroha owns Harbour Club and isn't a
+  server admin: on the backup server she reaches the Switch over screen
+  (the banner links to it) and nothing else; any other page still says
+  only server admins can look. The screen lists every organisation that
+  would move, with what time each copy is as at, and how the server is
+  reached from outside (its outside address, and whether it answered).
+  Kim, a bookkeeper, is told only that she can't switch over.
+- **BKS16 Switching over.** Tohyee never does it by itself. The person
+  types their password again, ticks "The old main server is off, or can't
+  be reached", and says why. A wrong password, no tick or no reason is
+  refused and nothing changes (five wrong passwords in 15 minutes blocks
+  it). Then: a note saying the main has moved is left in the backups
+  folder; this server becomes the main; changes are taken; and every
+  organisation's automatic jobs come on (archived copies stay off). Who,
+  when, why and each copy's time are kept in the record. Anything entered
+  on the old main after a copy's time isn't here. Afterwards a server
+  admin restarts Tohyee, sets where it backs up, saves its recovery kit,
+  and reconnects AI and app connections (they aren't copied).
+- **BKS17 The old main comes back.** At start, and every few minutes, a
+  main looks in its own backups folder for that note. If another server
+  was made the main after this one last was, it **stops**: every change is
+  refused with "This server is no longer the main one", no jobs run, and a
+  banner says so. People can still read their books there. The new main
+  isn't stopped by its own note. If the note couldn't be written (the
+  folder was unreachable), the switch-over screen says to keep the old
+  main off.
+- **BKS18 A mistake.** On a stopped old main, a server admin on the server
+  computer can say "This is the main server after all". It takes changes
+  again, and the same note doesn't stop it a second time.
+- **BKS19 Switching back.** The returned old main is paired as the backup
+  server (the one case where a server with organisations can be): its
+  books become copies, with jobs off, replaced from the new main's backups
+  at the next look. To go back to the original computer, switch over
+  again from there.
+
+Not in this stage: the offer to switch when the main can't be reached,
+practice switch-overs, moving the outside address by itself, and a page in
+the Windows server app.

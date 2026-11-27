@@ -896,7 +896,7 @@ export async function pausedOrganisations(): Promise<{ id: string; displayName: 
  */
 export async function resumeOrganisationJobs(auth: ServerAdminAuth, organisationIdInput: unknown): Promise<void> {
   if (!auth.user.isServerAdmin) throw new ForbiddenError("Only a server admin can turn on a restored copy's automatic jobs.");
-  if ((await serverRole()) === "backup") throw new ForbiddenError("This is a backup server: its copies' automatic jobs stay off. They come on when it's made the main server.");
+  if ((await serverRole()) !== "main") throw new ForbiddenError("This is a backup server: its copies' automatic jobs stay off. They come on when it's made the main server.");
   const organisationId = parseOrganisationId(organisationIdInput);
   await withCoreTransaction(async (client) => {
     // The demo farm's jobs stay off: it's made up, so it never sends or imports anything.

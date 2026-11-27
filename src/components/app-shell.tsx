@@ -933,11 +933,18 @@ export function AppShell({
 
 /** On a backup server (BKS5), every page says so: nothing can be changed there. A main server shows nothing. */
 function BackupCopyBanner() {
-  const role = useApiData<{ role: "main" | "backup" }>("/api/server-role");
-  if (role.data?.role !== "backup") return null;
+  const role = useApiData<{ role: "main" | "backup" | "fenced"; maySwitchOver: boolean }>("/api/server-role");
+  if (!role.data || role.data.role === "main") return null;
   return (
     <div className={styles.backupCopy} role="status" data-print="hide">
-      Backup copy of another Tohyee server. Nothing can be changed here.
+      {role.data.role === "fenced" ? (
+        "This server is no longer the main one. Nothing can be changed here: use the other server."
+      ) : (
+        <>
+          Backup copy of another Tohyee server. Nothing can be changed here.{" "}
+          {role.data.maySwitchOver ? <a href="/switch-over">Main server lost? Switch over</a> : null}
+        </>
+      )}
     </div>
   );
 }

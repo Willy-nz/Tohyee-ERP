@@ -1,3 +1,4 @@
+import { randomUUID } from "node:crypto";
 import { promises as fs } from "node:fs";
 import path from "node:path";
 import { type ServerAdminAuth, writeAdminAuditEvent } from "@/lib/audit";
@@ -7,7 +8,7 @@ import type { ServerRole } from "@/lib/backup-server/rules";
 import { coreQuery, withCoreTransaction } from "@/lib/db/transactions";
 import { ForbiddenError, ValidationError } from "@/lib/errors";
 import { secretsAvailable } from "@/lib/secrets";
-import { deleteServerSetting, readServerSetting, writeServerSetting } from "@/lib/server-settings";
+import { deleteServerSetting, readServerSetting, writeServerSetting, writeServerValue } from "@/lib/server-settings";
 
 /*
  * Backup server mode (BKS4-BKS7, issue #11). A server paired as a backup
@@ -27,6 +28,17 @@ type Stored = {
 type StoredSecrets = { recoveryKey?: { version: number; key: string } };
 
 const SETTING = "backup_server";
+export const FENCED_SETTING = "server_fenced";
+const IDENTITY_SETTING = "server_identity";
+
+/** This server's own ID: made once, never shown to people. It's how the "the main has moved" note says which server is the main (BKS16). */
+export async function serverIdentity(): Promise<string> {
+  const stored = await readServerSetting<{ id?: string }, Record<string, never>>(IDENTITY_SETTING);
+  if (stored.value.id) return stored.value.id;
+  const id = randomUUID();
+  await withCoreTransaction((client) => writeServerValue(client, IDENTITY_SETTING, { id }, "tohyee"));
+  return id;
+}
 
 export type BackupServerSettings = {
   role: ServerRole;
@@ -49,7 +61,7 @@ export async function serverRole(): Promise<ServerRole> {
   let role: ServerRole = "main";
   try {
     const stored = await readServerSetting<Stored, StoredSecrets>(SETTING);
-    role = stored.value.mode === "backup" ? "backup" : "main";
+    role = stored.value.mode === "backup" ? "backup" : (await readServerSetting<{ at?: string }, Record<string, never>>(FENCED_SETTING)).value.at ? "fenced" : "main";
   } catch {
     // No core database yet (first start): a main server.
     role = "main";
@@ -71,7 +83,8 @@ export async function noteStartedRole(): Promise<ServerRole> {
 
 export async function getBackupServerSettings(): Promise<BackupServerSettings> {
   const stored = await readServerSetting<Stored, StoredSecrets>(SETTING);
-  const role: ServerRole = stored.value.mode === "backup" ? "backup" : "main";
+  forgetServerRole();
+  const role = await serverRole();
   const began = startedAs ?? role;
   return {
     role,
@@ -107,7 +120,9 @@ export async function pairAsBackupServer(
   if ((await serverRole()) === "backup") throw new ValidationError("This is already a backup server.");
   const own = await coreQuery<{ count: string }>("select count(*)::text as count from organisations where demo_for_user_id is null");
   const count = Number(own.rows[0].count);
-  if (count > 0) {
+  // A returned old main (BKS19) is the exception: its organisations are replaced by copies from the new main.
+  const fenced = (await serverRole()) === "fenced";
+  if (count > 0 && !fenced) {
     throw new ValidationError(
       `A backup server starts empty, and this server has ${count === 1 ? "an organisation" : `${count} organisations`}. Its copies replace what's here, so set it up on a fresh install of Tohyee.`,
     );
@@ -136,6 +151,9 @@ export async function pairAsBackupServer(
       { recoveryKey: { version: key.version, key: key.key.toString("base64") } },
       auth.user.email,
     );
+    await deleteServerSetting(client, FENCED_SETTING);
+    // Its books are now copies, replaced from the main's backups: their jobs stay off.
+    await client.query("update organisations set jobs_paused_at = coalesce(jobs_paused_at, now()), jobs_paused_reason = coalesce(jobs_paused_reason, 'A backup server''s copy. The main server runs the automatic jobs.') where demo_for_user_id is null");
     await writeAdminAuditEvent(client, { userId: auth.user.id, email: auth.user.email }, {
       eventType: "server.backup_server_paired",
       entityType: "server_setting",

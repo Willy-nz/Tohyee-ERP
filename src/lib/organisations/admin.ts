@@ -42,7 +42,7 @@ export async function listAllOrganisations(): Promise<OrganisationAdminView[]> {
  */
 export async function listOrganisationsForJobs(): Promise<OrganisationAdminView[]> {
   // A backup server runs no jobs for anyone (BKS6): the main does, and nothing may be sent or imported twice.
-  if ((await serverRole()) === "backup") return [];
+  if ((await serverRole()) !== "main") return [];
   const paused = new Set((await coreQuery<{ id: string }>("select id from organisations where jobs_paused_at is not null")).rows.map((row) => row.id));
   return (await listAllOrganisations()).filter((organisation) => !paused.has(organisation.id));
 }
