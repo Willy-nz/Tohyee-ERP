@@ -66,6 +66,7 @@ that something happened.
   swapped in; people and memberships follow the main; it holds the main's
   organisations and no others (one the main removes is archived for 30
   days, then deleted); and the main's Backups page shows what it has taken.
+  Each server emails its admins when the other goes quiet (BKS13-BKS14).
   Switching over is still to come.
   **Restoring** makes a copy of the organisation, so
   nothing is overwritten, and works on a new server given the old server's

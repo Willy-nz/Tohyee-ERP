@@ -46,6 +46,8 @@ export type CopiesState = {
   people: CopyState | null;
   /** The organisations the main has, from its newest server backup read so far. Null until one has been read. */
   mainOrganisations: string[] | null;
+  /** The times of the newest few backups taken (newest first): how often the main's backups come (BKS13). */
+  recentMadeAts?: string[];
   /** Organisations the main no longer has: archived here, deleted after KEEP_REMOVED_DAYS. */
   removed: Record<string, { displayName: string; archivedAt: string }>;
   lastRunAt: string | null;
@@ -187,6 +189,7 @@ export async function refreshCopies(now = new Date()): Promise<RefreshResult> {
           await swapIn(organisationId, incoming, displayName);
         }
         state.organisations[organisationId] = { displayName, backupName: backup.name, madeAt: header.createdAt, refreshedAt: now.toISOString(), error: null, errorAt: null };
+        state.recentMadeAts = [...new Set([header.createdAt, ...(state.recentMadeAts ?? [])])].sort().reverse().slice(0, 6);
         result.refreshed.push(organisationId);
       } catch (error) {
         // The copy from before is untouched and stays in use.
@@ -311,6 +314,12 @@ export function startCopyRefresher(): void {
       .then((result) => {
         for (const failure of result.failed) console.warn(`[tohyee] Backup server: couldn't take the copy of ${failure.organisationId ?? "the main server's people"}: ${failure.error}`);
         if (result.refreshed.length > 0) console.log(`[tohyee] Backup server: took new copies of ${result.refreshed.join(", ")}.`);
+      })
+      // Then: has the main gone quiet (BKS13)? Imported here, as alerts reads this file's state.
+      .then(() => import("@/lib/backup-server/alerts"))
+      .then(({ watchForMainGoneQuiet }) => watchForMainGoneQuiet())
+      .then((quiet) => {
+        if (quiet.quiet) console.warn(`[tohyee] Backup server: no new backup from the main server for more than ${quiet.hours} hours.`);
       })
       .catch((error) => console.warn("[tohyee] Backup server refresh:", error instanceof Error ? error.message : error));
   };

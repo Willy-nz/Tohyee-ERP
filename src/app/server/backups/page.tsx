@@ -10,6 +10,7 @@ import type { BackupOverview, TargetSummary } from "@/lib/backups/overview";
 import type { RecoveryKitStatus } from "@/lib/backups/recovery-kit";
 import type { BackupSettings } from "@/lib/backups/service";
 import { api, errorMessage } from "@/lib/client/api";
+import type { QuietState } from "@/lib/backup-server/alerts";
 import type { BackupServerReport } from "@/lib/backup-server/refresh";
 import { formatDateTime } from "@/lib/format";
 
@@ -18,6 +19,7 @@ type FileRow = { name: string; sizeBytes: number; problem: string | null; header
 type Details = {
   settings: BackupSettings;
   backupServer: BackupServerReport | null;
+  backupServerQuiet: QuietState | null;
   overview: BackupOverview;
   recoveryKit: RecoveryKitStatus;
   files: FileRow[];
@@ -182,7 +184,7 @@ export default function ServerBackupsPage() {
         </Card>
       ) : null}
       {details ? <Destination details={details} onSaved={load} /> : null}
-      {details?.backupServer ? <BackupServerCard report={details.backupServer} /> : null}
+      {details?.backupServer ? <BackupServerCard report={details.backupServer} quiet={details.backupServerQuiet} /> : null}
       {details ? <Databases overview={details.overview} /> : null}
       {details ? <Files files={details.files} /> : null}
       {details ? <RecoveryKit details={details} onChanged={load} /> : null}
@@ -284,10 +286,11 @@ function Status({ details }: { details: Details }) {
 }
 
 /** On the main: what its backup server at a second place last said it has taken (BKS12), read from the backups folder. */
-function BackupServerCard({ report }: { report: BackupServerReport }) {
+function BackupServerCard({ report, quiet }: { report: BackupServerReport; quiet: QuietState | null }) {
   const failing = report.organisations.filter((each) => each.error);
   return (
     <Card title="Backup server" description={`A backup server at a second place last took copies from this folder ${formatDateTime(report.at)}.`}>
+      {quiet?.quiet ? <Notice tone="error">It hasn&apos;t taken a copy for more than {quiet.hours} hours. Check that computer is on, Tohyee is running there, and this folder is still syncing to it.</Notice> : null}
       {failing.length || report.people?.error ? (
         <Notice tone="warning">
           It couldn&apos;t take the newest backup of {[...failing.map((each) => each.id), ...(report.people?.error ? ["people and memberships"] : [])].join(", ")}. It still has the copy from before. Look at Backup server on that computer.

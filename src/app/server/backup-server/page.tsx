@@ -5,6 +5,7 @@ import { useApiData } from "@/components/hooks";
 import { Badge, Button, Card, Field, Notice, Page, PageHeader, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
 import type { BackupServerSettings } from "@/lib/backup-server/mode";
+import type { QuietState } from "@/lib/backup-server/alerts";
 import type { CopiesState } from "@/lib/backup-server/refresh";
 import { api, errorMessage } from "@/lib/client/api";
 import { formatDateTime } from "@/lib/format";
@@ -12,7 +13,7 @@ import { formatDateTime } from "@/lib/format";
 /** Server › Backup server (BKS4-BKS7): make this Tohyee keep a copy of another one. */
 export default function BackupServerPage() {
   const { user } = useWorkspace();
-  const loaded = useApiData<{ backupServer: BackupServerSettings; copies: CopiesState | null; keepRemovedDays: number }>(user.isServerAdmin ? "/api/admin/backup-server" : null);
+  const loaded = useApiData<{ backupServer: BackupServerSettings; copies: CopiesState | null; quiet: QuietState | null; keepRemovedDays: number }>(user.isServerAdmin ? "/api/admin/backup-server" : null);
   if (!user.isServerAdmin) {
     return (
       <Page>
@@ -32,6 +33,11 @@ export default function BackupServerPage() {
         )
       ) : settings.role === "backup" ? (
         <>
+          {loaded.data?.quiet?.quiet ? (
+            <Notice tone="error">
+              No new backup has come from the main server for more than {loaded.data.quiet.hours} hours{loaded.data.quiet.newest ? ` (the newest copy is as at ${formatDateTime(loaded.data.quiet.newest)})` : ""}. Check the main server is running and its backups folder is still syncing here.
+            </Notice>
+          ) : null}
           <Paired settings={settings} onChanged={loaded.reload} />
           {loaded.data?.copies ? <Copies copies={loaded.data.copies} keepRemovedDays={loaded.data.keepRemovedDays} onChanged={loaded.reload} /> : null}
         </>

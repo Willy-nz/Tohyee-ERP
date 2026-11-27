@@ -127,6 +127,10 @@ export function startBackupScheduler(): void {
     runDueBackups()
       .catch((error) => console.warn("[tohyee] Backup scheduler:", error instanceof Error ? error.message : error))
       // Once a week the newest backups are read back and checked again.
+      // Has a backup server at a second place stopped taking copies (BKS14)?
+      .then(() => import("@/lib/backup-server/alerts"))
+      .then(({ watchForBackupServerGoneQuiet }) => watchForBackupServerGoneQuiet())
+      .catch((error) => console.warn("[tohyee] Backup server watch:", error instanceof Error ? error.message : error))
       .then(() => runDueIntegrityChecks())
       .then(async (checks) => {
         const failed = checks.filter((check) => check.status === "failed");

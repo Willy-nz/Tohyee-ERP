@@ -25050,3 +25050,22 @@ date and switching over come in later stages.
 Not copied by this stage, and to be dealt with at switching over: AI and
 app connections, sessions, and what the server's own database holds about
 groups of organisations (consolidation groups and chart mapping).
+
+**Stage 1d: alerts.** Tested in `tests/unit/backup-server-alerts.test.ts`
+and `tests/integration/backup-server-refresh.test.ts`.
+
+- **BKS13 The main has gone quiet.** The backup server emails its server
+  admins, and its page says so, when no new backup has come for too long:
+  **3 hours** when backups have been arriving an hour or two apart,
+  **30 hours** otherwise (it isn't told the main's setting, so it goes by
+  the times of the backups it has seen). Copies as at 11:00 with nothing
+  newer: fine at 13:00, quiet at 15:00. One email for the quiet spell, not
+  one every five minutes; when backups come again it clears, and the next
+  quiet spell is emailed again. The email needs email set up on the backup
+  server itself (server settings aren't copied); the page says it either
+  way.
+- **BKS14 The backup server has gone quiet.** The main does the same from
+  the status file (BKS12): no report for more than 3 hours with hourly
+  backups, 30 with nightly, emails the main's server admins once and shows
+  on its Backups page. A main with no backup server (no status file) says
+  nothing.

@@ -3,6 +3,7 @@ import os from "node:os";
 import path from "node:path";
 import { afterAll, beforeAll, expect, it } from "vitest";
 import type { SessionUser } from "@/lib/auth/sessions";
+import { watchForBackupServerGoneQuiet, watchForMainGoneQuiet } from "@/lib/backup-server/alerts";
 import { forgetServerRole, pairAsBackupServer } from "@/lib/backup-server/mode";
 import { copiesState, KEEP_REMOVED_DAYS, readBackupServerReport, refreshCopies } from "@/lib/backup-server/refresh";
 import { exportRecoveryKit } from "@/lib/backups/recovery-kit";
@@ -210,5 +211,31 @@ describeWithDatabase("backup server: keeping the copy up to date", () => {
     const text = await fs.readFile(path.join(folder, "_backup-server", "status.json"), "utf8");
     expect(text).not.toContain("@");
     expect(await readBackupServerReport(held)).toBeNull();
+  });
+
+  it("BKS13 the backup server says when the main has gone quiet, once, until backups come again", async () => {
+    const newest = (await copiesState()).organisations[HARBOUR].madeAt;
+    const after = (hours: number) => new Date(new Date(newest).getTime() + hours * 60 * 60 * 1000);
+    // The rounds here were seconds apart, so it reads them as hourly: 3 hours.
+    expect(await watchForMainGoneQuiet(after(2))).toMatchObject({ quiet: false, hours: 3, alertedAt: null });
+    const quiet = await watchForMainGoneQuiet(after(4));
+    expect(quiet).toMatchObject({ quiet: true, hours: 3, newest });
+    expect(quiet.alertedAt).toBe(after(4).toISOString());
+    // Still quiet an hour later: the same alert, not another.
+    expect((await watchForMainGoneQuiet(after(5))).alertedAt).toBe(after(4).toISOString());
+    expect(await watchForMainGoneQuiet(after(1))).toMatchObject({ quiet: false, alertedAt: null });
+  });
+
+  it("BKS14 the main says when its backup server has stopped taking copies; with no backup server it says nothing", async () => {
+    // Read as the main would: its backups folder holds the backup server's status file.
+    const report = await readBackupServerReport(folder);
+    const at = new Date(report!.at);
+    const after = (hours: number) => new Date(at.getTime() + hours * 60 * 60 * 1000);
+    // Nightly backups on this server: 30 hours.
+    expect(await watchForBackupServerGoneQuiet(after(29))).toMatchObject({ quiet: false, hours: 30 });
+    expect(await watchForBackupServerGoneQuiet(after(31))).toMatchObject({ quiet: true, hours: 30, alertedAt: after(31).toISOString() });
+    expect(await watchForBackupServerGoneQuiet(after(1))).toMatchObject({ quiet: false, alertedAt: null });
+    await fs.rm(path.join(folder, "_backup-server"), { recursive: true, force: true });
+    expect(await watchForBackupServerGoneQuiet(after(99))).toBeNull();
   });
 });

@@ -1,6 +1,7 @@
 import { json, readJson, requireAuth, route } from "@/lib/api/http";
 import { requireServerAdmin } from "@/lib/auth/guard";
 import { recentChecks } from "@/lib/backups/checks";
+import { watchForBackupServerGoneQuiet } from "@/lib/backup-server/alerts";
 import { readBackupServerReport } from "@/lib/backup-server/refresh";
 import { backupOverview } from "@/lib/backups/overview";
 import { recoveryKitStatus } from "@/lib/backups/recovery-kit";
@@ -20,6 +21,7 @@ export const GET = route(async (request) => {
     settings,
     // What a backup server at a second place last said it has taken (BKS12), or null when there isn't one.
     backupServer: await readBackupServerReport(settings.folder),
+    backupServerQuiet: await watchForBackupServerGoneQuiet().catch(() => null),
     overview,
     recoveryKit: await recoveryKitStatus(),
     status: await backupStatus(),
