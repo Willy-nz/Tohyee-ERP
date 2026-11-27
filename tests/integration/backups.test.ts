@@ -240,6 +240,13 @@ describeWithDatabase("backups and restores", () => {
     await expect(updateBackupSettings({ user: owner }, { folder: blocked })).rejects.toThrow(/can't write to/);
     await expect(updateBackupSettings({ user: owner }, { folder: "relative/path" })).rejects.toThrow(/must be a full path/);
     await expect(updateBackupSettings({ user: owner }, { time: "2am" })).rejects.toThrow(/24-hour HH:MM/);
+    // BKS1: how often. Nightly unless set; other settings are kept when only this changes.
+    expect((await updateBackupSettings({ user: owner }, {})).frequency).toBe("nightly");
+    const hourly = await updateBackupSettings({ user: owner }, { frequency: "hourly" });
+    expect(hourly).toMatchObject({ frequency: "hourly", enabled: true, time: "02:00" });
+    expect((await updateBackupSettings({ user: owner }, { time: "03:00" })).frequency).toBe("hourly");
+    await expect(updateBackupSettings({ user: owner }, { frequency: "weekly" })).rejects.toThrow(/nightly or hourly/);
+    await updateBackupSettings({ user: owner }, { frequency: "nightly", time: "02:00" });
   });
 
   it("a wrong password for the recovery kit: 5 in 15 minutes blocks it, even with the right one", async () => {

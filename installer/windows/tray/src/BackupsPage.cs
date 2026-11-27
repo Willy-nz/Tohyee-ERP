@@ -20,7 +20,8 @@ namespace Tohyee.Tray
         private readonly Label _summary = new Label { AutoSize = true, ForeColor = Theme.Text, Tag = "wrap", MaximumSize = new Size(Theme.S(640), 0), Margin = new Padding(0, 0, 0, 8) };
         private readonly Label _attention = new Label { AutoSize = true, ForeColor = Ui.Danger, Tag = "wrap", MaximumSize = new Size(Theme.S(640), 0), Margin = new Padding(0, 0, 0, 8) };
         private readonly Label _state = Ui.State();
-        private readonly CheckBox _enabled = new DarkCheckBox { Text = "Back up every night", AutoSize = true };
+        private readonly CheckBox _enabled = new DarkCheckBox { Text = "Back up automatically", AutoSize = true };
+        private readonly CheckBox _hourly = new DarkCheckBox { Text = "Every hour (for a server with a backup server at a second place)", AutoSize = true };
         private readonly TextBox _time = new TextBox { Width = Theme.S(80) };
         private readonly TextBox _folder = new TextBox { Width = Theme.S(330) };
         private readonly Label _folderNote = new Label { AutoSize = true, ForeColor = Ui.Muted, MaximumSize = new Size(Theme.S(600), 0), Margin = new Padding(0, 2, 0, 6) };
@@ -47,11 +48,12 @@ namespace Tohyee.Tray
             statusButtons.Controls.Add(Ui.Btn("Open in the browser", (s, e) => TrayApp.Open(_api.BaseUrl + "/server/backups")));
             status.Body.Controls.Add(statusButtons);
 
-            var nightly = Ui.Card(page, "Nightly backups", null);
+            var nightly = Ui.Card(page, "Automatic backups", null);
             nightly.Body.Controls.Add(_state);
             var form = Ui.Form();
-            Ui.Field(form, "Nightly", _enabled);
-            Ui.Field(form, "At (24-hour)", _time);
+            Ui.Field(form, "On", _enabled);
+            Ui.Field(form, "How often", _hourly);
+            Ui.Field(form, "Nightly at (24-hour)", _time);
             _time.Dock = DockStyle.None;
             // Wraps the buttons under the folder in a narrow window rather than running off the card.
             var folderRow = new FlowLayoutPanel { AutoSize = true, WrapContents = true, Margin = new Padding(0), BackColor = Theme.Card, Tag = "wrap" };
@@ -108,6 +110,7 @@ namespace Tohyee.Tray
             _defaultFolder = J.Str(settings, "defaultFolder");
             _enabled.Checked = J.Bool(settings, "enabled");
             _time.Text = J.Str(settings, "time") ?? "02:00";
+            _hourly.Checked = J.Str(settings, "frequency") == "hourly";
             _folder.Text = J.Str(settings, "folder") ?? "";
             _folderNote.Text = "Tohyee's service writes here, so it must be a folder on this computer. Blank means the default: " + _defaultFolder;
 
@@ -182,7 +185,7 @@ namespace Tohyee.Tray
             }
             else if (!J.Bool(settings, "enabled"))
             {
-                _state.Text = "Nightly backups are off.";
+                _state.Text = "Automatic backups are off.";
                 _state.ForeColor = Ui.Danger;
             }
             else if (anyFailed)
@@ -192,7 +195,7 @@ namespace Tohyee.Tray
             }
             else
             {
-                _state.Text = "On: every night at " + _time.Text + (anyNever ? ". Not everything has been backed up yet; use Back up now to start." : ".");
+                _state.Text = (J.Str(settings, "frequency") == "hourly" ? "On: every hour" : "On: every night at " + _time.Text) + (anyNever ? ". Not everything has been backed up yet; use Back up now to start." : ".");
                 _state.ForeColor = anyNever ? Theme.Text : Ui.Success;
             }
         }
@@ -318,6 +321,7 @@ namespace Tohyee.Tray
             {
                 { "enabled", _enabled.Checked },
                 { "time", _time.Text.Trim() },
+                { "frequency", _hourly.Checked ? "hourly" : "nightly" },
                 { "folder", _folder.Text.Trim() == _defaultFolder ? "" : _folder.Text.Trim() },
             };
             //: the service runs as its own account, so it's given the chosen folder first.

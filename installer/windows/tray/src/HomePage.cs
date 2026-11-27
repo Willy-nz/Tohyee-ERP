@@ -190,8 +190,8 @@ namespace Tohyee.Tray
                 }
                 var keySet = J.Bool(settings, "keySet");
                 var schedule = !keySet ? "No TOHYEE_SECRET_KEY on this server"
-                    : J.Bool(settings, "enabled") ? "Every night at " + (J.Str(settings, "time") ?? "02:00")
-                    : "Nightly backups are off";
+                    : J.Bool(settings, "enabled") ? (J.Str(settings, "frequency") == "hourly" ? "Every hour" : "Every night at " + (J.Str(settings, "time") ?? "02:00"))
+                    : "Automatic backups are off";
                 if (failed) _backup.Show("Failed", schedule, Theme.Danger);
                 else if (!last.HasValue) _backup.Show("Never", schedule, Theme.Warning);
                 else _backup.Show(Ago(last.Value), schedule + (never ? " · some not yet" : ""), J.Bool(settings, "enabled") ? Theme.Success : Theme.Warning);
@@ -205,7 +205,7 @@ namespace Tohyee.Tray
                     problems.Add(new Attention("Save the recovery kit.", "Without it, the backups can't be opened on another computer.", "Open Backups", "backups", Theme.Warning));
                 }
                 if (failed) problems.Add(new Attention("The last backup failed.", "The Backups page says why.", "Open Backups", "backups", Theme.Danger));
-                else if (keySet && !J.Bool(settings, "enabled")) problems.Add(new Attention("Nightly backups are off.", "Nothing is backed up until they're on again or you back up by hand.", "Open Backups", "backups", Theme.Warning));
+                else if (keySet && !J.Bool(settings, "enabled")) problems.Add(new Attention("Automatic backups are off.", "Nothing is backed up until they're on again or you back up by hand.", "Open Backups", "backups", Theme.Warning));
             }
             catch (ApiException)
             {

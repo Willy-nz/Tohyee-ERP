@@ -64,7 +64,7 @@ export type BackupOverview = {
 
 export type OverviewInput = {
   now: Date;
-  settings: Pick<BackupSettings, "enabled" | "keySet" | "folder" | "time">;
+  settings: Pick<BackupSettings, "enabled" | "keySet" | "folder" | "time"> & { frequency?: BackupSettings["frequency"] };
   folderExists: boolean;
   space: DiskSpace | null;
   files: Pick<BackupFile, "name" | "sizeBytes" | "problem" | "header">[];
@@ -84,6 +84,8 @@ function aYearAfter(iso: string): string {
 
 /** A good backup older than this (when nightly backups are on) needs looking at. */
 const STALE_HOURS = 36;
+/** With hourly backups: three missed hours (BKS3). */
+const STALE_HOURS_HOURLY = 3;
 /** And so does a check older than this. */
 const CHECK_STALE_DAYS = 8;
 
@@ -105,7 +107,7 @@ export function summariseBackups(input: OverviewInput): BackupOverview {
     if (entry.latest?.status === "running") state = "running";
     else if (entry.latest?.status === "failed") state = "failed";
     else if (!entry.lastGood) state = "never";
-    else if (settings.enabled && now.getTime() - new Date(entry.lastGood.finishedAt ?? entry.lastGood.startedAt).getTime() > STALE_HOURS * HOUR) state = "old";
+    else if (settings.enabled && now.getTime() - new Date(entry.lastGood.finishedAt ?? entry.lastGood.startedAt).getTime() > (settings.frequency === "hourly" ? STALE_HOURS_HOURLY : STALE_HOURS) * HOUR) state = "old";
     return {
       organisationId: entry.organisationId,
       displayName: entry.displayName,
@@ -121,7 +123,7 @@ export function summariseBackups(input: OverviewInput): BackupOverview {
     attention.push({ level: "error", text: "This server has no TOHYEE_SECRET_KEY, so it can't make backups (they're encrypted with it)." });
   }
   if (!settings.enabled) {
-    attention.push({ level: "warning", text: "Nightly backups are off. Nothing is backed up unless someone presses Back up now." });
+    attention.push({ level: "warning", text: "Automatic backups are off. Nothing is backed up unless someone presses Back up now." });
   }
   if (!input.folderExists) {
     attention.push({ level: "error", text: `The backup folder ${settings.folder} isn't there. Plug in its drive, sign in to its sync app, or choose the folder again.` });

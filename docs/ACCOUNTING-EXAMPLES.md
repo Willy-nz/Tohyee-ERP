@@ -24939,3 +24939,35 @@ what viewers can do there is TCH27.
   isn't offered post_chat_message. A farm's chat keeps its own rule (FCH7):
   Vic reads it. Unchanged: farm staff use only their farm's chat in the farm
   app, and report viewers (the report-only role) aren't in Chat.
+
+## Backup server at a second place (BKS; built by Claude from 27 Nov 2026 to the owner's plan in issue #11, following common practice, not yet reviewed)
+
+No accounting: nothing here posts. The plan is two Tohyee servers, a main
+one everyone uses and a backup one at a second place that keeps a copy
+from the main's backups and can be switched to by a person. Up to an hour
+of work may be lost (the owner's choice). It's built in stages; these
+examples are added as each stage is.
+
+**Stage 1a: hourly backups on the main.** Tested in
+`tests/unit/backup-schedule.test.ts`.
+
+- **BKS1 What's kept.** Automatic backups are every night (as before) or
+  every hour. With hourly, the keep rules are the same 14 days and 12
+  months, **plus the newest 24 backups**, so a mistake found in the
+  afternoon can be put back from that morning and a backup server always
+  finds the last hour's copy. Harbour Club is backed up at ten past every
+  hour on 5, 6 and 7 October. After the 23:10 backup on the 7th its folder
+  holds 27 files: all 24 of the 7th, the last of the 5th and of the 6th
+  (23:10 each), and the month's first (5 October 00:10). At 10:10 on the
+  7th the 24 reach back to 11:10 on the 6th; 10:10 on the 6th has gone.
+  Nightly keeps what it always did. The 24 is Claude's figure, not the
+  owner's: more is safer and takes more room in the folder.
+- **BKS2 When one is due.** With hourly, each database is backed up once in
+  each clock hour, at any time of day: at 10:05 with none yet, both the
+  server's own database and Harbour Club are due; after good backups at
+  10:06 and 10:20 (one made by hand counts) nothing is due until 11:00. A
+  try that failed at 10:06 waits for 11:00, not five minutes, and a backup
+  still running isn't started twice. The first failure of a day is emailed
+  to server admins, as before.
+- **BKS3 Worth a look.** With hourly backups, a database whose last good
+  backup is more than 3 hours old shows as old (36 hours with nightly).
