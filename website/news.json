@@ -3,6 +3,12 @@
   "items": [
     {
       "date": "2026-11-27",
+      "title": "Tohyee 0.48.0: a backup server at a second place",
+      "body": "A second Tohyee at another address can keep a copy of your books from hourly backups. If the main server is lost, a person switches over to it; Tohyee never switches by itself. It hasn't been tried on two real computers yet, so practise a switch-over before relying on it.",
+      "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.48.0"
+    },
+    {
+      "date": "2026-11-27",
       "title": "Tohyee 0.47.0: direct messages and spaces in Chat",
       "body": "Chat now has direct messages, spaces anyone can make, and mentions, in one list with unread counts. Viewers can chat like everyone else. Owners and admins can review a chat if they need to: every chat says so, and each look is recorded.",
       "link": "https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.47.0"
