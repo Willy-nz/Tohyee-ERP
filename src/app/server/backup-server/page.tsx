@@ -5,13 +5,15 @@ import { useApiData } from "@/components/hooks";
 import { Badge, Button, Card, Field, Notice, Page, PageHeader, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
 import type { BackupServerSettings } from "@/lib/backup-server/mode";
+import type { QuietState } from "@/lib/backup-server/alerts";
+import type { CopiesState } from "@/lib/backup-server/refresh";
 import { api, errorMessage } from "@/lib/client/api";
 import { formatDateTime } from "@/lib/format";
 
 /** Server › Backup server (BKS4-BKS7): make this Tohyee keep a copy of another one. */
 export default function BackupServerPage() {
   const { user } = useWorkspace();
-  const loaded = useApiData<{ backupServer: BackupServerSettings }>(user.isServerAdmin ? "/api/admin/backup-server" : null);
+  const loaded = useApiData<{ backupServer: BackupServerSettings; copies: CopiesState | null; quiet: QuietState | null; keepRemovedDays: number }>(user.isServerAdmin ? "/api/admin/backup-server" : null);
   if (!user.isServerAdmin) {
     return (
       <Page>
@@ -30,7 +32,15 @@ export default function BackupServerPage() {
           <p className={ui.muted}>Loading…</p>
         )
       ) : settings.role === "backup" ? (
-        <Paired settings={settings} onChanged={loaded.reload} />
+        <>
+          {loaded.data?.quiet?.quiet ? (
+            <Notice tone="error">
+              No new backup has come from the main server for more than {loaded.data.quiet.hours} hours{loaded.data.quiet.newest ? ` (the newest copy is as at ${formatDateTime(loaded.data.quiet.newest)})` : ""}. Check the main server is running and its backups folder is still syncing here.
+            </Notice>
+          ) : null}
+          <Paired settings={settings} onChanged={loaded.reload} />
+          {loaded.data?.copies ? <Copies copies={loaded.data.copies} keepRemovedDays={loaded.data.keepRemovedDays} onChanged={loaded.reload} /> : null}
+        </>
       ) : (
         <Pair settings={settings} onChanged={loaded.reload} />
       )}
@@ -64,7 +74,7 @@ function Paired({ settings, onChanged }: { settings: BackupServerSettings; onCha
         <ul>
           <li>Nothing can be changed here, and only server admins can look.</li>
           <li>No emails, feeds, imports or other automatic jobs run here. The main server runs them.</li>
-          <li>Keeping the copy up to date, and switching over, come in the next stages of this feature.</li>
+          <li>It looks for new backups from the main server every 5 minutes and takes them. Switching over comes in the next stage of this feature.</li>
         </ul>
         <div>
           <Button variant="secondary" disabled={busy} onClick={() => void unpair()}>
@@ -135,6 +145,84 @@ function Pair({ settings, onChanged }: { settings: BackupServerSettings; onChang
           </Button>
         </div>
       </form>
+    </Card>
+  );
+}
+
+/** The copies this backup server holds (BKS8-BKS11): each organisation as at the main's backup it was made from. */
+function Copies({ copies, keepRemovedDays, onChanged }: { copies: CopiesState; keepRemovedDays: number; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [message, setMessage] = useState<{ tone: "success" | "error"; text: string } | null>(null);
+  async function refresh() {
+    setBusy(true);
+    setMessage(null);
+    try {
+      const done = await api<{ result: { refreshed: string[]; failed: { organisationId: string | null; error: string }[] } }>("/api/admin/backup-server/refresh", { method: "POST" });
+      setMessage(
+        done.result.failed.length
+          ? { tone: "error", text: done.result.failed.map((failure) => `${failure.organisationId ?? "People"}: ${failure.error}`).join(" ") }
+          : { tone: "success", text: done.result.refreshed.length ? `New copies taken: ${done.result.refreshed.join(", ")}.` : "Nothing new to take." },
+      );
+      onChanged();
+    } catch (caught) {
+      setMessage({ tone: "error", text: errorMessage(caught) });
+    } finally {
+      setBusy(false);
+    }
+  }
+  const rows = Object.entries(copies.organisations).sort((left, right) => left[1].displayName.localeCompare(right[1].displayName));
+  const removed = Object.entries(copies.removed);
+  return (
+    <Card title="The copies here" description={copies.lastRunAt ? `Last looked for new backups ${formatDateTime(copies.lastRunAt)}.` : "It hasn't looked for backups yet."}>
+      <div className={ui.stack}>
+        {copies.lastError ? <Notice tone="error">{copies.lastError}</Notice> : null}
+        {message ? <Notice tone={message.tone}>{message.text}</Notice> : null}
+        {rows.length === 0 ? (
+          <p className={ui.muted}>No copies yet. They arrive once the main server&apos;s backups are in the folder.</p>
+        ) : (
+          <div className={ui.tableWrap}>
+            <table className={`${ui.table} ${ui.stackOnPhone}`}>
+              <thead>
+                <tr>
+                  <th>Organisation</th>
+                  <th>The books as at</th>
+                  <th>Taken</th>
+                  <th>State</th>
+                </tr>
+              </thead>
+              <tbody>
+                {rows.map(([id, copy]) => (
+                  <tr key={id}>
+                    <td data-label="Organisation">
+                      {copy.displayName} <span className={ui.muted}>({id})</span>
+                    </td>
+                    <td data-label="The books as at">{copy.madeAt ? formatDateTime(copy.madeAt) : "No copy yet"}</td>
+                    <td data-label="Taken">{copy.refreshedAt ? formatDateTime(copy.refreshedAt) : ""}</td>
+                    <td data-label="State">
+                      {copies.removed[id] ? <Badge tone="amber">Archived</Badge> : copy.error ? <Badge tone="red">Newest backup not taken</Badge> : <Badge tone="green">Up to date</Badge>}
+                      {copy.error ? <div className={ui.muted}>{copy.error}</div> : null}
+                    </td>
+                  </tr>
+                ))}
+              </tbody>
+            </table>
+          </div>
+        )}
+        <p className={ui.muted}>
+          {copies.people?.madeAt ? `People and who's in what: as at ${formatDateTime(copies.people.madeAt)}.` : "People and memberships haven't been taken yet."}
+          {copies.people?.error ? ` The newest couldn't be taken: ${copies.people.error}` : ""}
+        </p>
+        {removed.length ? (
+          <Notice tone="warning">
+            The main server no longer has {removed.map(([id, gone]) => `${gone.displayName} (${id}, archived ${formatDateTime(gone.archivedAt)})`).join(", ")}. Each copy is kept here for {keepRemovedDays} days, then deleted.
+          </Notice>
+        ) : null}
+        <div>
+          <Button variant="secondary" disabled={busy} onClick={() => void refresh()}>
+            Take new copies now
+          </Button>
+        </div>
+      </div>
     </Card>
   );
 }

@@ -17,7 +17,7 @@ export const BACKUP_SERVER_ADMINS_ONLY = "This is the backup copy of another Toh
  */
 const ALLOWED: RegExp[] = [
   /^\/api\/auth\//,
-  /^\/api\/admin\/backup-server(\/|$)/,
+  /^\/api\/admin\/backup-server(\/|$)/, // its pairing, and "take new copies now"
   /^\/api\/admin\/server-update(\/|$)/,
   /^\/api\/admin\/updates(\/|$)/,
   /^\/api\/admin\/backups\/(check|restore\/find)(\/|$)/,

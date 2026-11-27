@@ -61,7 +61,13 @@ that something happened.
   kept as well. A fresh Tohyee can be made a **backup server** for another
   one (BKS4-BKS7, Server › Backup server or `backup-server pair`): it takes
   no changes, only server admins can look, and it runs no automatic jobs.
-  Keeping its copy up to date and switching over are still to come.
+  It **keeps its copy up to date** from the main's backups folder (BKS8-BKS12):
+  each newer backup is restored beside the copy in use, checked, then
+  swapped in; people and memberships follow the main; it holds the main's
+  organisations and no others (one the main removes is archived for 30
+  days, then deleted); and the main's Backups page shows what it has taken.
+  Each server emails its admins when the other goes quiet (BKS13-BKS14).
+  Switching over is still to come.
   **Restoring** makes a copy of the organisation, so
   nothing is overwritten, and works on a new server given the old server's
   recovery kit (below).

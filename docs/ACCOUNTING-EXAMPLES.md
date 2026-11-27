@@ -25007,3 +25007,65 @@ date and switching over come in later stages.
 - **BKS7 Undoing a pairing.** A backup server that holds no organisations
   yet can stop being one. Once it has copies it can't be unpaired: it
   becomes the main server by switching over (a later stage).
+
+**Stage 1c: keeping the copy up to date.** Tested in
+`tests/integration/backup-server-refresh.test.ts`.
+
+- **BKS8 The first look.** Every 5 minutes (or "Take new copies now") the
+  backup server reads the main's backups folder. For each organisation the
+  main has, it restores the newest backup under the organisation's own ID
+  and name. Harbour Club, backed up at 10:00 with one journal, is on the
+  backup server after its 10:05 look: one journal, members Moana (Owner)
+  and Kim (bookkeeper), as on the main. Nobody is added: the backup server
+  itself isn't made an Owner of anyone's books. The copy's jobs are off.
+  A look that finds nothing new does nothing.
+- **BKS9 A newer backup.** The 11:00 backup (a second journal) is restored
+  into a new database **beside** the copy in use and checked there; only
+  then is it swapped in, and only after that is the old database dropped.
+  Harbour Club keeps its ID and now has two journals. People and who's in
+  what come from the main's server backup each time: Kim is now a viewer,
+  as on the main; Tama, new on the main, is here; Second Co, new on the
+  main, arrives with its members. People already here are brought up to
+  the main's password, two-step sign-in, name and active or not. Sessions
+  aren't copied: people sign in again.
+- **BKS10 A backup that can't be restored.** A damaged newer backup of
+  Harbour Club fails its check. The copy from 11:00 stays in use, untouched,
+  the page says the newest backup wasn't taken and why, nothing half-made
+  is left beside it, and it's tried again at the next look. Other
+  organisations carry on.
+- **BKS11 The same organisations, always.** The backup server holds the
+  organisations in the main's newest server backup and no others. Nobody
+  can make one on it. When the main removes Second Co, the 12:05 look
+  **archives** the copy here (switched off, still on disk) rather than
+  deleting it, so a removal by mistake can be rescued; its old backups in
+  the folder aren't taken again. 29 days later it's still there; at **30
+  days** it's deleted, database and all (the owner's choice, 27 Nov 2026).
+- **BKS12 The main knows.** After each look the backup server writes a
+  small file in the main's folder (`_backup-server/status.json`): each
+  organisation's ID, what time its copy is as at, and any failure. It names
+  no people. The main's Backups page reads it: "A backup server at a second
+  place last took copies from this folder at ...". There's no link between
+  the two servers: only the folder.
+
+Not copied by this stage, and to be dealt with at switching over: AI and
+app connections, sessions, and what the server's own database holds about
+groups of organisations (consolidation groups and chart mapping).
+
+**Stage 1d: alerts.** Tested in `tests/unit/backup-server-alerts.test.ts`
+and `tests/integration/backup-server-refresh.test.ts`.
+
+- **BKS13 The main has gone quiet.** The backup server emails its server
+  admins, and its page says so, when no new backup has come for too long:
+  **3 hours** when backups have been arriving an hour or two apart,
+  **30 hours** otherwise (it isn't told the main's setting, so it goes by
+  the times of the backups it has seen). Copies as at 11:00 with nothing
+  newer: fine at 13:00, quiet at 15:00. One email for the quiet spell, not
+  one every five minutes; when backups come again it clears, and the next
+  quiet spell is emailed again. The email needs email set up on the backup
+  server itself (server settings aren't copied); the page says it either
+  way.
+- **BKS14 The backup server has gone quiet.** The main does the same from
+  the status file (BKS12): no report for more than 3 hours with hourly
+  backups, 30 with nightly, emails the main's server admins once and shows
+  on its Backups page. A main with no backup server (no status file) says
+  nothing.

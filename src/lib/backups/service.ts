@@ -654,6 +654,12 @@ export type RestoreInput = {
   key?: unknown;
   /** Or the recovery kit already opened (a recovery file and its passphrase). */
   material?: RecoveryMaterial;
+  /**
+   * A backup server's copy (BKS8): the organisation's own name, and nobody
+   * added as its Owner. Its members come from the main's server backup, so
+   * a server admin isn't made an Owner of books they don't belong to.
+   */
+  mirror?: boolean;
 };
 
 /** The ID a restore suggests: the original's when it isn't on this server (a replacement computer), otherwise `<id>-<YYYYMMDD>`. */
@@ -705,7 +711,9 @@ async function restoreFromCopy(actor: AdminActor, input: RestoreInput, file: str
   const displayName =
     typeof input.displayName === "string" && input.displayName.trim()
       ? input.displayName.trim().slice(0, 150)
-      : `${header.displayName ?? header.organisationId} (restored from ${made.date})`.slice(0, 150);
+      : input.mirror
+        ? (header.displayName ?? header.organisationId).slice(0, 150)
+        : `${header.displayName ?? header.organisationId} (restored from ${made.date})`.slice(0, 150);
   const databaseName = databaseNameFor(id);
 
   const source = await getOrganisation(header.organisationId);
@@ -731,17 +739,17 @@ async function restoreFromCopy(actor: AdminActor, input: RestoreInput, file: str
       const owner = await client.query<{ id: string }>("select id from users where email = $1 and is_active", [normaliseEmail(input.ownerEmail)]);
       if (!owner.rows[0]) throw new ValidationError(`There's no active user with the email ${normaliseEmail(input.ownerEmail)}.`);
       if (!members.some((m) => m.user_id === owner.rows[0].id)) members.push({ user_id: owner.rows[0].id, role: "owner" });
-    } else if (actor.id && !members.some((m) => m.user_id === actor.id)) {
+    } else if (!input.mirror && actor.id && !members.some((m) => m.user_id === actor.id)) {
       members.push({ user_id: actor.id, role: "owner" });
     }
-    if (!members.some((m) => m.role === "owner")) {
+    if (!input.mirror && !members.some((m) => m.role === "owner")) {
       throw new ValidationError("The original organisation is gone, so say who owns the copy (ownerEmail).");
     }
     // Paused from the start: nothing is sent or imported until a server admin turns its jobs on.
     await client.query(
       `insert into organisations (id, display_name, database_name, base_currency, created_by, jobs_paused_at, jobs_paused_reason)
        values ($1, $2, $3, coalesce($4, 'NZD'), $5, now(), $6)`,
-      [id, displayName, databaseName, source?.baseCurrency ?? null, actor.id, `Restored from a backup made ${made.date}.`],
+      [id, displayName, databaseName, source?.baseCurrency ?? null, actor.id, input.mirror ? "A backup server's copy. The main server runs the automatic jobs." : `Restored from a backup made ${made.date}.`],
     );
     for (const member of members) {
       await client.query(
