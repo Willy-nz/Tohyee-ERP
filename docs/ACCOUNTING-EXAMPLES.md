@@ -25112,6 +25112,31 @@ read their books on an old main that has stopped. Tested in
   at the next look. To go back to the original computer, switch over
   again from there.
 
-Not in this stage: the offer to switch when the main can't be reached,
-practice switch-overs, moving the outside address by itself, and a page in
-the Windows server app.
+**Stages 3 and 4: the offer to switch, and practising.** Tested in
+`tests/integration/backup-server-switch.test.ts`.
+
+- **BKS20 Can the main be reached?** A server admin gives the backup
+  server the main's outside address (https only). Every 5 minutes it asks
+  that address whether it's up. No answer from 12:05: at 12:15 nothing yet;
+  at 12:20, **15 minutes** on, it emails the backup server's admins once
+  ("the main server can't be reached: switch over?", with what time the
+  newest copy is as at) and its page says so, with a link to Switch over.
+  It asks once for the spell, not every 5 minutes, and **never switches by
+  itself**. When the main answers again the spell is over. With no address
+  given, nothing is checked. Losing the link between the two places looks
+  the same as losing the main, which is why a person decides.
+- **BKS21 Practise a switch-over.** A server admin on the backup server
+  checks everything a switch-over needs, without switching: each copy is
+  opened and is the organisation it says; how many minutes of work would
+  be lost today (now less the copy's time); that the note which stops the
+  old main can be written in the backups folder (a test file, removed
+  again); and that this server's outside address answers. It says "Ready",
+  or lists what isn't: a server with remote access off is told that after a
+  switch only its own network could reach it. Nothing is switched and no
+  note is left.
+- **BKS22 Every 6 months.** The last practice is kept (when, who, ready or
+  not). The page says when none has been done, and again when the last is
+  more than 6 months old.
+
+Not built: moving the outside address by itself at a switch-over, and a
+page in the Windows server app.

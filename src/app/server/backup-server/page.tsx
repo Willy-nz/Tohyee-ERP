@@ -6,6 +6,7 @@ import { Badge, Button, Card, Field, Notice, Page, PageHeader, ui } from "@/comp
 import { useWorkspace } from "@/components/workspace";
 import type { BackupServerSettings } from "@/lib/backup-server/mode";
 import type { QuietState } from "@/lib/backup-server/alerts";
+import type { MainReach, PracticeResult } from "@/lib/backup-server/practice";
 import type { CopiesState } from "@/lib/backup-server/refresh";
 import { api, errorMessage } from "@/lib/client/api";
 import { formatDateTime } from "@/lib/format";
@@ -13,7 +14,7 @@ import { formatDateTime } from "@/lib/format";
 /** Server › Backup server (BKS4-BKS7): make this Tohyee keep a copy of another one. */
 export default function BackupServerPage() {
   const { user } = useWorkspace();
-  const loaded = useApiData<{ backupServer: BackupServerSettings; copies: CopiesState | null; quiet: QuietState | null; keepRemovedDays: number }>(user.isServerAdmin ? "/api/admin/backup-server" : null);
+  const loaded = useApiData<{ backupServer: BackupServerSettings; copies: CopiesState | null; quiet: QuietState | null; main: MainReach | null; practice: { last: PracticeResult | null; due: boolean } | null; keepRemovedDays: number }>(user.isServerAdmin ? "/api/admin/backup-server" : null);
   if (!user.isServerAdmin) {
     return (
       <Page>
@@ -40,6 +41,8 @@ export default function BackupServerPage() {
           ) : null}
           <Paired settings={settings} onChanged={loaded.reload} />
           {loaded.data?.copies ? <Copies copies={loaded.data.copies} keepRemovedDays={loaded.data.keepRemovedDays} onChanged={loaded.reload} /> : null}
+          {loaded.data?.main ? <MainAddress main={loaded.data.main} onChanged={loaded.reload} /> : null}
+          {loaded.data?.practice ? <Practice practice={loaded.data.practice} onChanged={loaded.reload} /> : null}
         </>
       ) : (
         <>
@@ -264,6 +267,108 @@ function Fenced({ onChanged }: { onChanged: () => void }) {
           </Button>
         </div>
         <p className={ui.muted}>Only if the switch-over was a mistake and the other server is being stopped. Two main servers would drift apart.</p>
+      </div>
+    </Card>
+  );
+}
+
+/** Whether the main can be reached (BKS20): the backup server asks its address every 5 minutes. */
+function MainAddress({ main, onChanged }: { main: MainReach; onChanged: () => void }) {
+  const [url, setUrl] = useState(main.url ?? "");
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function save(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/api/admin/backup-server/main-address", { method: "PUT", body: { url } });
+      onChanged();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+  return (
+    <Card title="Can the main server be reached?" description="Give the main server's outside address and this server asks it every 5 minutes. After 15 minutes with no answer it emails the server admins, asking whether to switch over. It never switches by itself.">
+      <form onSubmit={(event) => void save(event)} className={ui.stack}>
+        {error ? <Notice tone="error">{error}</Notice> : null}
+        {main.offer ? (
+          <Notice tone="error">
+            The main server hasn&apos;t answered since {main.unreachableSince ? formatDateTime(main.unreachableSince) : "a while ago"}. If it&apos;s lost or won&apos;t be back soon, <a href="/switch-over">switch over</a>.
+          </Notice>
+        ) : main.url && main.reachable === true ? (
+          <p>
+            <Badge tone="green">Answering</Badge> Last asked {main.checkedAt ? formatDateTime(main.checkedAt) : ""}.
+          </p>
+        ) : main.url && main.reachable === false ? (
+          <p>
+            <Badge tone="amber">No answer</Badge> Since {main.unreachableSince ? formatDateTime(main.unreachableSince) : ""}.
+          </p>
+        ) : null}
+        <Field label="The main server's address" hint="Like https://books.example.nz. Leave empty to turn this off.">
+          <input value={url} onChange={(event) => setUrl(event.target.value)} inputMode="url" />
+        </Field>
+        <div>
+          <Button type="submit" variant="secondary" disabled={busy}>
+            Save
+          </Button>
+        </div>
+      </form>
+    </Card>
+  );
+}
+
+/** Practise a switch-over (BKS21-BKS22): everything one needs, checked without switching. */
+function Practice({ practice, onChanged }: { practice: { last: PracticeResult | null; due: boolean }; onChanged: () => void }) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState<string | null>(null);
+  async function run() {
+    setBusy(true);
+    setError(null);
+    try {
+      await api("/api/admin/backup-server/practice", { method: "POST" });
+      onChanged();
+    } catch (caught) {
+      setError(errorMessage(caught));
+    } finally {
+      setBusy(false);
+    }
+  }
+  const last = practice.last;
+  return (
+    <Card title="Practise a switch-over" description="Opens every copy, checks the note for the old main can be written, and tries this server's outside address. Nothing is switched.">
+      <div className={ui.stack}>
+        {error ? <Notice tone="error">{error}</Notice> : null}
+        {practice.due ? <Notice tone="warning">{last ? "The last practice was more than 6 months ago. Worth doing again." : "A switch-over hasn't been practised yet. Until it has, nobody knows it works."}</Notice> : null}
+        {last ? (
+          <>
+            <p>
+              {last.ready ? <Badge tone="green">Ready</Badge> : <Badge tone="red">Not ready</Badge>} Practised {formatDateTime(last.at)} by {last.byEmail}.
+            </p>
+            {last.problems.length ? (
+              <ul>
+                {last.problems.map((problem) => (
+                  <li key={problem}>{problem}</li>
+                ))}
+              </ul>
+            ) : null}
+            <ul>
+              {last.organisations.map((each) => (
+                <li key={each.id}>
+                  {each.displayName}: {each.opens ? "opens" : "doesn't open"}
+                  {each.behindMinutes === null ? "" : `; ${each.behindMinutes} minutes of work would have been lost`}
+                </li>
+              ))}
+            </ul>
+          </>
+        ) : null}
+        <div>
+          <Button variant="secondary" disabled={busy} onClick={() => void run()}>
+            Practise a switch-over
+          </Button>
+        </div>
       </div>
     </Card>
   );

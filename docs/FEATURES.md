@@ -71,7 +71,11 @@ that something happened.
   organisation's Owner types their password again and confirms the old
   main is off; the backup server becomes the main and jobs come on. An old
   main that comes back finds a note in the backups folder and stops, and
-  can be paired as the backup server.
+  can be paired as the backup server. Given the main's address, the
+  backup server asks it every 5 minutes and **offers a switch-over** by email
+  after 15 minutes without an answer (BKS20). **Practise a switch-over**
+  (BKS21-BKS22) checks every copy opens, the note can be written and the
+  outside address answers, without switching.
   **Restoring** makes a copy of the organisation, so
   nothing is overwritten, and works on a new server given the old server's
   recovery kit (below).
