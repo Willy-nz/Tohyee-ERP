@@ -19,6 +19,7 @@ export const SERVER_LINKS = [
   { href: "/server/analytics", label: "Analytics folders" },
   { href: "/server/bank-files", label: "Bank files folders" },
   { href: "/server/backups", label: "Backups" },
+  { href: "/server/backup-server", label: "Backup server" },
   { href: "/server/updates", label: "Updates" },
   { href: "/server/logs", label: "Logs" },
 ];

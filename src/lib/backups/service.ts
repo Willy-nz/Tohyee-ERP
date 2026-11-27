@@ -13,6 +13,7 @@ import { currentRecoveryKey, type RecoveryKey } from "@/lib/backups/recovery-key
 import { diskSpace, explainBackupError, formatBytes, notEnoughSpace } from "@/lib/backups/destination";
 import { startPgTool } from "@/lib/backups/pg-tools";
 import { folderAccessHint } from "@/lib/server-admin/folder-access";
+import { serverRole } from "@/lib/backup-server/mode";
 import { backupsToKeep, KEEP_DAILY, KEEP_MONTHLY, KEEP_RECENT_HOURLY } from "@/lib/backups/retention";
 import { coreDatabaseName } from "@/lib/db/connection";
 import { LATEST_TENANT_VERSION } from "@/lib/db/migrations";
@@ -887,6 +888,7 @@ export async function pausedOrganisations(): Promise<{ id: string; displayName: 
  */
 export async function resumeOrganisationJobs(auth: ServerAdminAuth, organisationIdInput: unknown): Promise<void> {
   if (!auth.user.isServerAdmin) throw new ForbiddenError("Only a server admin can turn on a restored copy's automatic jobs.");
+  if ((await serverRole()) === "backup") throw new ForbiddenError("This is a backup server: its copies' automatic jobs stay off. They come on when it's made the main server.");
   const organisationId = parseOrganisationId(organisationIdInput);
   await withCoreTransaction(async (client) => {
     // The demo farm's jobs stay off: it's made up, so it never sends or imports anything.

@@ -1,5 +1,6 @@
 import { type BackupCheck, runDueIntegrityChecks } from "@/lib/backups/checks";
 import { backUpNow, type BackupRun, cleanUpInterruptedRestores, getBackupSettings, localParts, markInterruptedBackups } from "@/lib/backups/service";
+import { serverRole } from "@/lib/backup-server/mode";
 import { coreQuery } from "@/lib/db/transactions";
 import { sendSecurityAlert } from "@/lib/email/mailer";
 
@@ -89,6 +90,8 @@ export async function runDueBackups(now = new Date(), processStartedAt = PROCESS
     // A restore cut off by a restart leaves nothing half-made behind.
     const cleaned = await cleanUpInterruptedRestores(processStartedAt).catch(() => [] as string[]);
     for (const id of cleaned) console.warn(`[tohyee] A restore into ${id} was interrupted by a restart; what it had made was removed.`);
+    // A backup server makes no backups of its copies (BKS6): the main's are the record.
+    if ((await serverRole()) === "backup") return [];
     const settings = await getBackupSettings();
     if (!settings.enabled || !settings.keySet) return [];
     // Otherwise a cut-off run counts as "running" all day and blocks that day's backups.

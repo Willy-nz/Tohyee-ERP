@@ -145,6 +145,20 @@ export async function register() {
     startStatsSampler();
   }
 
+  // A backup server (BKS6) starts none of the jobs below: no feeds, no emails,
+  // no imports, no backups of its copies. The main server runs them, and
+  // nothing may be sent or imported twice. The role is read once here, so a
+  // change of role is finished by restarting Tohyee.
+  try {
+    const { noteStartedRole } = await import("@/lib/backup-server/mode");
+    if ((await noteStartedRole()) === "backup") {
+      console.log("[tohyee] This is a backup server: automatic jobs are off.");
+      return;
+    }
+  } catch (error) {
+    console.warn("[tohyee] Couldn't read this server's role:", error instanceof Error ? error.message : error);
+  }
+
   if (process.env.TOHYEE_BANK_FEEDS_SCHEDULER !== "off") {
     const { startBankFeedScheduler } = await import("@/lib/bank/akahu/sync");
     startBankFeedScheduler();

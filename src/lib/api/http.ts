@@ -1,3 +1,5 @@
+import { serverRole } from "@/lib/backup-server/mode";
+import { BACKUP_SERVER_ADMINS_ONLY, BACKUP_SERVER_MESSAGE, backupServerRefuses } from "@/lib/backup-server/rules";
 import { CLIENT_PG_ERRORS, pgErrorCode, plainDatabaseError } from "@/lib/db/plain-errors";
 import { NextResponse } from "next/server";
 import { assertSameOrigin, authenticate, type AuthContext, requireOrganisationRole } from "@/lib/auth/guard";
@@ -46,6 +48,8 @@ export function route<Context = unknown>(handler: Handler<Context>): Handler<Con
     const started = performance.now();
     let response: Response;
     try {
+      // A backup server takes no changes (BKS5): its copy is replaced from the main's backups.
+      if (backupServerRefuses(request.method, new URL(request.url).pathname) && (await serverRole()) === "backup") throw new ForbiddenError(BACKUP_SERVER_MESSAGE);
       response = await handler(request, context);
     } catch (error) {
       response = errorResponse(error);
@@ -88,7 +92,10 @@ export function searchParams(request: Request): URLSearchParams {
 /** Signed-in user, with the cross-site check for anything that changes data. */
 export async function requireAuth(request: Request): Promise<AuthContext> {
   assertSameOrigin(request);
-  return authenticate(request);
+  const auth = await authenticate(request);
+  // Only server admins look at a backup server's copy (BKS5).
+  if (!auth.user.isServerAdmin && (await serverRole()) === "backup") throw new ForbiddenError(BACKUP_SERVER_ADMINS_ONLY);
+  return auth;
 }
 
 /**

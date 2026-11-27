@@ -942,3 +942,12 @@
   font-size: var(--text-xs, 12px);
   font-weight: 600;
 }
+
+.backupCopy {
+  padding: 8px 16px;
+  background: var(--warning-bg, #fff4d6);
+  color: var(--warning-text, #6b4e00);
+  border-bottom: 1px solid var(--border);
+  font-size: 0.9rem;
+  text-align: center;
+}
