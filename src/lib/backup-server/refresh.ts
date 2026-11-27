@@ -321,6 +321,12 @@ export function startCopyRefresher(): void {
       .then((quiet) => {
         if (quiet.quiet) console.warn(`[tohyee] Backup server: no new backup from the main server for more than ${quiet.hours} hours.`);
       })
+      // And: can the main be reached at its address (BKS20)?
+      .then(() => import("@/lib/backup-server/practice"))
+      .then(({ checkMainReachable }) => checkMainReachable())
+      .then((reach) => {
+        if (reach?.offer) console.warn(`[tohyee] Backup server: the main server hasn't answered since ${reach.unreachableSince}.`);
+      })
       .catch((error) => console.warn("[tohyee] Backup server refresh:", error instanceof Error ? error.message : error));
   };
   timer = setInterval(tick, 5 * 60 * 1000);

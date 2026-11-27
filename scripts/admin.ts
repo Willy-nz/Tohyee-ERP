@@ -14,6 +14,7 @@ import { createInterface } from "node:readline";
 import { stdin, stdout } from "node:process";
 import { COMMAND_LINE_ADMIN } from "@/lib/audit";
 import { getBackupServerSettings, pairAsBackupServer, unpairBackupServer } from "@/lib/backup-server/mode";
+import { OFFER_AFTER_MINUTES, practiseSwitchOver, setMainAddress } from "@/lib/backup-server/practice";
 import { KEEP_REMOVED_DAYS, refreshCopies } from "@/lib/backup-server/refresh";
 import { mainAfterAll, makeMainServer } from "@/lib/backup-server/switch";
 import { revokeUserAiKeys } from "@/lib/ai/tokens";
@@ -110,6 +111,8 @@ Backups (encrypted with the server's recovery key: save the recovery kit somewhe
   backup-server refresh                    take new copies from the main server's backups now
   backup-server make-main --reason TEXT --old-main-is-off    make this backup server the main one
   backup-server main-after-all             on a server that found the main had moved: it's the main after all
+  backup-server main-address [URL]         the main server's outside address, to tell when it can't be reached (none turns it off)
+  backup-server practise                   check everything a switch-over needs, without switching
                                             --folder "" goes back to the default folder
   backups run [--id ORGANISATION]           back up now (everything, or one organisation)
   backups list [--id ORGANISATION] [--json]
@@ -611,7 +614,19 @@ async function backupServer(command: string | undefined, args: string[]): Promis
     console.log("This server is the main one again. Restart Tohyee to finish.");
     return;
   }
-  throw new UsageError("backup-server status | pair | unpair | refresh | make-main | main-after-all");
+  if (command === "main-address") {
+    const reach = await setMainAddress(COMMAND_LINE_ADMIN, { url: args.find((arg) => !arg.startsWith("--")) ?? "" });
+    console.log(reach.url ? `It will check ${reach.url} every 5 minutes, and ask about switching over after ${OFFER_AFTER_MINUTES} minutes without an answer.` : "It no longer checks whether the main server can be reached.");
+    return;
+  }
+  if (command === "practise" || command === "practice") {
+    const practice = await practiseSwitchOver(COMMAND_LINE_ADMIN);
+    for (const each of practice.organisations) console.log(`${each.displayName}: ${each.opens ? "opens" : "DOESN'T OPEN"}; as at ${each.asAt ?? "no copy"}${each.behindMinutes === null ? "" : ` (${each.behindMinutes} minutes of work would be lost)`}`);
+    console.log(practice.ready ? "Ready: a switch-over would work today." : `Not ready:\n- ${practice.problems.join("\n- ")}`);
+    if (!practice.ready) process.exitCode = 1;
+    return;
+  }
+  throw new UsageError("backup-server status | pair | unpair | refresh | make-main | main-after-all | main-address | practise");
 }
 
 async function backups(command: string | undefined, args: string[]) {
