@@ -33,21 +33,34 @@ public class TohyeeServerPlugin extends Plugin {
 
     @PluginMethod
     public void set(PluginCall call) {
-        // Only the app's own first-run page may choose the server, never a page from a server.
-        String current = getBridge().getWebView().getUrl();
-        String local = getBridge().getLocalUrl();
-        if (current == null || local == null || !current.startsWith(local + "/") || getBridge().getServerUrl() != null) {
-            call.reject("The Tohyee address can only be chosen on the app's first screen.", "NOT_ALLOWED");
+        Activity activity = getActivity();
+        if (activity == null) {
+            call.reject("The app isn't ready yet. Try again.", "NOT_READY");
             return;
         }
-        String origin = TohyeeServer.origin(call.getString("url"));
-        if (origin == null) {
-            call.reject("The app only opens HTTPS addresses (https://…).", "INVALID");
-            return;
-        }
-        TohyeeServer.save(getContext(), origin);
-        call.resolve();
-        restart();
+        // Plugin calls run on Capacitor's own thread, and Android stops the app if a
+        // WebView is asked anything from there: the page's address is read on the main thread.
+        activity.runOnUiThread(() -> {
+            try {
+                // Only the app's own first-run page may choose the server, never a page from a server.
+                String current = getBridge().getWebView().getUrl();
+                String local = getBridge().getLocalUrl();
+                if (current == null || local == null || !current.startsWith(local + "/") || getBridge().getServerUrl() != null) {
+                    call.reject("The Tohyee address can only be chosen on the app's first screen.", "NOT_ALLOWED");
+                    return;
+                }
+                String origin = TohyeeServer.origin(call.getString("url"));
+                if (origin == null) {
+                    call.reject("The app only opens HTTPS addresses (https://…).", "INVALID");
+                    return;
+                }
+                TohyeeServer.save(getContext(), origin);
+                call.resolve();
+                activity.recreate();
+            } catch (Exception error) {
+                call.reject("The address couldn't be kept: " + error.getMessage(), "FAILED");
+            }
+        });
     }
 
     @PluginMethod
