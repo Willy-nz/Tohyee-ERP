@@ -56,7 +56,9 @@ that something happened.
   encrypted with the server's backup recovery key, into a folder the server admin
   chooses (a OneDrive folder gets copies off the computer); each checked after
   it's made; 14 daily and 12 monthly kept; failures retried hourly and
-  emailed to server admins. **Restoring** makes a copy of the organisation, so
+  emailed to server admins. They can be made **every hour** instead (BKS1-BKS3,
+  for a server with a backup server at a second place): the newest 24 are
+  kept as well. **Restoring** makes a copy of the organisation, so
   nothing is overwritten, and works on a new server given the old server's
   recovery kit (below).
 - **Menus**: Home, Sales, Purchases, Banking, Payroll, Reports, Accounting,

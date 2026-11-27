@@ -13,7 +13,7 @@ import { currentRecoveryKey, type RecoveryKey } from "@/lib/backups/recovery-key
 import { diskSpace, explainBackupError, formatBytes, notEnoughSpace } from "@/lib/backups/destination";
 import { startPgTool } from "@/lib/backups/pg-tools";
 import { folderAccessHint } from "@/lib/server-admin/folder-access";
-import { backupsToKeep } from "@/lib/backups/retention";
+import { backupsToKeep, KEEP_DAILY, KEEP_MONTHLY, KEEP_RECENT_HOURLY } from "@/lib/backups/retention";
 import { coreDatabaseName } from "@/lib/db/connection";
 import { LATEST_TENANT_VERSION } from "@/lib/db/migrations";
 import { connectAsAdmin, getAdminPool, getCorePool } from "@/lib/db/pools";
@@ -38,7 +38,8 @@ import { deleteServerSetting, readServerSetting, writeServerSetting } from "@/li
  * Restoring makes a copy of the organisation, so nothing is overwritten.
  */
 
-type BackupValue = { enabled: boolean; folder: string | null; time: string };
+export type BackupFrequency = "nightly" | "hourly";
+type BackupValue = { enabled: boolean; folder: string | null; time: string; frequency?: BackupFrequency };
 
 export type BackupSettings = {
   enabled: boolean;
@@ -46,6 +47,8 @@ export type BackupSettings = {
   /** The folder used when none is chosen. */
   defaultFolder: string;
   time: string;
+  /** Nightly at `time`, or every hour (BKS1): what a backup server at a second place copies from. */
+  frequency: BackupFrequency;
   timeZone: string;
   keySet: boolean;
   updatedAt: string | null;
@@ -132,6 +135,7 @@ export async function getBackupSettings(): Promise<BackupSettings> {
     folder: stored.value.folder || defaultFolder,
     defaultFolder,
     time: stored.value.time ?? "02:00",
+    frequency: stored.value.frequency === "hourly" ? "hourly" : "nightly",
     timeZone: businessTimeZone(),
     keySet: secretsAvailable(),
     updatedAt: stored.updatedAt,
@@ -158,10 +162,10 @@ async function assertWritableFolder(folder: string): Promise<void> {
   }
 }
 
-/** Saves the backup settings: `enabled`, `folder` (blank = the default), `time` (HH:MM, 24-hour). `reset: true` goes back to the defaults. */
+/** Saves the backup settings: `enabled`, `folder` (blank = the default), `time` (HH:MM, 24-hour), `frequency` (nightly or hourly). `reset: true` goes back to the defaults. */
 export async function updateBackupSettings(
   auth: ServerAdminAuth,
-  input: { enabled?: unknown; folder?: unknown; time?: unknown; reset?: unknown },
+  input: { enabled?: unknown; folder?: unknown; time?: unknown; frequency?: unknown; reset?: unknown },
 ): Promise<BackupSettings> {
   if (!auth.user.isServerAdmin) throw new ForbiddenError("Only a server admin can change backups.");
   const actor = { userId: auth.user.id, email: auth.user.email };
@@ -186,6 +190,11 @@ export async function updateBackupSettings(
     }
     time = input.time.trim();
   }
+  let frequency = current.frequency;
+  if (input.frequency !== undefined) {
+    if (input.frequency !== "nightly" && input.frequency !== "hourly") throw new ValidationError("How often is nightly or hourly.");
+    frequency = input.frequency;
+  }
   let folder = stored.value.folder ?? null;
   if (input.folder !== undefined) {
     if (input.folder !== null && typeof input.folder !== "string") throw new ValidationError("folder must be a path.");
@@ -199,12 +208,12 @@ export async function updateBackupSettings(
   }
   await assertWritableFolder(folder ?? current.defaultFolder);
   await withCoreTransaction(async (client) => {
-    await writeServerSetting<BackupValue, Record<string, never>>(client, "backups", { enabled, folder, time }, {}, auth.user.email);
+    await writeServerSetting<BackupValue, Record<string, never>>(client, "backups", { enabled, folder, time, frequency }, {}, auth.user.email);
     await writeAdminAuditEvent(client, actor, {
       eventType: "server.backups_updated",
       entityType: "server_setting",
       entityId: "backups",
-      details: { enabled, folder, time },
+      details: { enabled, folder, time, frequency },
     });
   });
   return getBackupSettings();
@@ -309,7 +318,7 @@ export async function checkBackup(file: string, material?: RecoveryMaterial): Pr
   return header;
 }
 
-async function backUpTarget(root: string, target: Target, trigger: BackupRun["trigger"], requestedByEmail: string | null, recovery: RecoveryKey): Promise<BackupRun> {
+async function backUpTarget(root: string, target: Target, trigger: BackupRun["trigger"], requestedByEmail: string | null, recovery: RecoveryKey, frequency: BackupFrequency): Promise<BackupRun> {
   const run = await coreQuery<{ id: string }>(
     "insert into backup_runs (organisation_id, trigger, requested_by_email) values ($1, $2, $3) returning id::text as id",
     [target.organisationId, trigger, requestedByEmail],
@@ -368,7 +377,7 @@ async function backUpTarget(root: string, target: Target, trigger: BackupRun["tr
         where id = $1 returning ${RUN_COLUMNS}`,
       [runId, finalPath, size, sha256],
     );
-    await prune(folder, target);
+    await prune(folder, target, frequency);
     return toRun(done.rows[0]);
   } catch (error) {
     await fs.rm(partial, { force: true }).catch(() => undefined);
@@ -416,9 +425,9 @@ export async function datedBackupFiles(folder: string, target: { organisationId:
  * the place of a good one in the 14 days and 12 months, and pruning never
  * deletes it either (it's reported instead, for a person to look at).
  */
-async function prune(folder: string, target: { organisationId: string | null }): Promise<string[]> {
+async function prune(folder: string, target: { organisationId: string | null }, frequency: BackupFrequency): Promise<string[]> {
   const dated = (await datedBackupFiles(folder, target)).filter((entry) => entry.readable);
-  const keep = backupsToKeep(dated);
+  const keep = backupsToKeep(dated, KEEP_DAILY, KEEP_MONTHLY, frequency === "hourly" ? KEEP_RECENT_HOURLY : 0);
   const removed: string[] = [];
   for (const backup of dated) {
     if (!keep.has(backup.name)) {
@@ -489,7 +498,7 @@ export async function backUpNow(options: {
       return runs;
     }
     for (const target of list) {
-      runs.push(await backUpTarget(settings.folder, target, options.trigger, options.requestedByEmail, recovery));
+      runs.push(await backUpTarget(settings.folder, target, options.trigger, options.requestedByEmail, recovery, settings.frequency));
     }
     return runs;
   });

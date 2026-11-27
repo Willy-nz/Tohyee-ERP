@@ -100,7 +100,7 @@ Backups (encrypted with the server's recovery key: save the recovery kit somewhe
   backups status [--json]                   each database's latest and last good backup, the checks, and
                                             what isn't proven (such as off-site copies)
   backups verify [--id ORGANISATION]        read the newest backup files back and check them again
-  backups set [--on|--off] [--folder PATH] [--time 02:00]
+  backups set [--on|--off] [--folder PATH] [--time 02:00] [--every night|hour]
                                             --folder "" goes back to the default folder
   backups run [--id ORGANISATION]           back up now (everything, or one organisation)
   backups list [--id ORGANISATION] [--json]
@@ -573,7 +573,7 @@ async function backups(command: string | undefined, args: string[]) {
     const { overview } = await backupOverview();
     const kit = await recoveryKitStatus();
     show(args, { settings, recoveryKit: kit, status, overview }, () => {
-      console.log(`Nightly backups: ${settings.enabled ? `on, at ${settings.time} (${settings.timeZone})` : "off"}`);
+      console.log(`Automatic backups: ${settings.enabled ? (settings.frequency === "hourly" ? "on, every hour" : `on, every night at ${settings.time} (${settings.timeZone})`) : "off"}`);
       console.log(`Folder: ${settings.folder}${settings.folder === settings.defaultFolder ? " (the default)" : ""}, ${overview.destination.description}`);
       console.log(`Off-site: ${overview.offSite.note}`);
       console.log(
@@ -619,7 +619,7 @@ async function backups(command: string | undefined, args: string[]) {
     return;
   }
   if (command === "set") {
-    const input: { enabled?: boolean; folder?: string; time?: string } = {};
+    const input: { enabled?: boolean; folder?: string; time?: string; frequency?: "nightly" | "hourly" } = {};
     if (flag(args, "on") || flag(args, "off")) input.enabled = onOff(args);
     const folderIndex = args.indexOf("--folder");
     if (folderIndex !== -1) {
@@ -629,10 +629,15 @@ async function backups(command: string | undefined, args: string[]) {
     }
     const time = option(args, "time");
     if (time !== null) input.time = time;
-    if (Object.keys(input).length === 0) throw new UsageError("Say what to change: --on/--off, --folder or --time.");
+    const every = option(args, "every");
+    if (every !== null) {
+      if (every !== "night" && every !== "hour") throw new UsageError("--every is night or hour.");
+      input.frequency = every === "hour" ? "hourly" : "nightly";
+    }
+    if (Object.keys(input).length === 0) throw new UsageError("Say what to change: --on/--off, --folder, --time or --every.");
     if (input.folder) giveServiceAccess(input.folder, "write");
     const settings = await updateBackupSettings(COMMAND_LINE_ADMIN, input);
-    console.log(`Backups saved: ${settings.enabled ? `nightly at ${settings.time}` : "off"}, into ${settings.folder}.`);
+    console.log(`Backups saved: ${settings.enabled ? (settings.frequency === "hourly" ? "every hour" : `nightly at ${settings.time}`) : "off"}, into ${settings.folder}.`);
     return;
   }
   if (command === "run") {

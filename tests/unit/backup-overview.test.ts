@@ -56,6 +56,15 @@ function input(overrides: Partial<OverviewInput> = {}): OverviewInput {
 }
 
 describe("the Backups panel's overview", () => {
+  it("BKS3 with hourly backups, a last good backup over 3 hours old is old", () => {
+    // The fixture's backups are from 02:00; the nightly rule (36 hours) calls them fine.
+    expect(summariseBackups(input()).targets.map((t) => t.state)).toEqual(["ok", "ok"]);
+    const hourly = input();
+    expect(summariseBackups({ ...hourly, settings: { ...hourly.settings, frequency: "hourly" } }).targets.map((t) => t.state)).toEqual(["old", "old"]);
+    const fresh = new Date(new Date("2026-10-21T02:01:00Z").getTime() + 2 * 60 * 60 * 1000);
+    expect(summariseBackups({ ...hourly, now: fresh, settings: { ...hourly.settings, frequency: "hourly" } }).targets.map((t) => t.state)).toEqual(["ok", "ok"]);
+  });
+
   it("everything backed up and checked: no problems, but off-site is still not proven", () => {
     const overview = summariseBackups(input());
     expect(overview.everythingBackedUpAt).toBe("2026-10-21T02:00:30Z");

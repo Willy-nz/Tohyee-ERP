@@ -14,11 +14,12 @@ type RecentRun = { organisationId: string | null; trigger: "schedule" | "manual"
  */
 export function dueToday(
   now: Date,
-  settings: { enabled: boolean; time: string },
+  settings: { enabled: boolean; time: string; frequency?: "nightly" | "hourly" },
   targetIds: (string | null)[],
   runs: RecentRun[],
 ): (string | null)[] {
   if (!settings.enabled) return [];
+  if (settings.frequency === "hourly") return dueThisHour(now, targetIds, runs);
   const today = localParts(now);
   if (today.time < settings.time) return [];
   const sinceSetTime = (run: RecentRun) => {
@@ -33,12 +34,31 @@ export function dueToday(
   });
 }
 
-async function emailServerAdmins(failed: BackupRun[]): Promise<void> {
+/**
+ * Hourly backups (BKS2): every database with no good or running backup
+ * started in this clock hour, at any time of day. A scheduled attempt that
+ * failed this hour isn't tried again until the next hour, so a broken
+ * folder gets one try an hour, not one every five minutes.
+ */
+export function dueThisHour(now: Date, targetIds: (string | null)[], runs: RecentRun[]): (string | null)[] {
+  const hour = (when: Date) => {
+    const parts = localParts(when);
+    return `${parts.date} ${parts.time.slice(0, 2)}`;
+  };
+  const thisHour = hour(now);
+  return targetIds.filter((id) => {
+    const mine = runs.filter((run) => run.organisationId === id && hour(run.startedAt) === thisHour);
+    if (mine.some((run) => run.status === "ok" || run.status === "running")) return false;
+    return !mine.some((run) => run.trigger === "schedule");
+  });
+}
+
+async function emailServerAdmins(failed: BackupRun[], frequency: "nightly" | "hourly" = "nightly"): Promise<void> {
   const admins = await coreQuery<{ email: string }>("select email from users where is_server_admin and is_active");
   const lines = [
-    `Tohyee's nightly backup failed for ${failed.length === 1 ? "one database" : `${failed.length} databases`}:`,
+    `Tohyee's ${frequency === "hourly" ? "hourly" : "nightly"} backup failed for ${failed.length === 1 ? "one database" : `${failed.length} databases`}:`,
     ...failed.map((run) => `- ${run.organisationId ?? "the server's own database"}: ${run.error ?? "no message"}`),
-    "It will try again in an hour. The server app's Backups tab (or `backups status` on the command line) shows the details.",
+    "It will try again in the next hour. The server app's Backups tab (or `backups status` on the command line) shows the details.",
   ];
   for (const admin of admins.rows) {
     await sendSecurityAlert(admin.email, "a backup failed", lines);
@@ -74,7 +94,7 @@ export async function runDueBackups(now = new Date(), processStartedAt = PROCESS
     // Otherwise a cut-off run counts as "running" all day and blocks that day's backups.
     const interrupted = await markInterruptedBackups(processStartedAt, now);
     for (const run of interrupted) console.warn(`[tohyee] Backup of ${run.organisationId ?? "the server database"} was interrupted by a restart; it's tried again.`);
-    if (interrupted.length > 0) await emailServerAdmins(interrupted).catch(() => undefined);
+    if (interrupted.length > 0) await emailServerAdmins(interrupted, settings.frequency).catch(() => undefined);
     const organisations = await coreQuery<{ id: string }>("select id from organisations where provisioning_status = 'ready'");
     const targetIds = [null, ...organisations.rows.map((row) => row.id)];
     const recent = await coreQuery<{ organisation_id: string | null; trigger: RecentRun["trigger"]; status: string; started_at: Date }>(
@@ -88,7 +108,7 @@ export async function runDueBackups(now = new Date(), processStartedAt = PROCESS
     const failed = made.filter((run) => run.status === "failed");
     for (const run of failed) console.warn(`[tohyee] Backup of ${run.organisationId ?? "the server database"} failed: ${run.error}`);
     const newlyFailed = failed.filter((run) => firstTryToday.includes(run.organisationId));
-    if (newlyFailed.length > 0) await emailServerAdmins(newlyFailed).catch(() => undefined);
+    if (newlyFailed.length > 0) await emailServerAdmins(newlyFailed, settings.frequency).catch(() => undefined);
     return made;
   } finally {
     running = false;
@@ -97,7 +117,7 @@ export async function runDueBackups(now = new Date(), processStartedAt = PROCESS
 
 let timer: NodeJS.Timeout | null = null;
 
-/** Checks every 5 minutes whether the nightly backup (or the weekly check of the backups) is due, while the server runs. */
+/** Checks every 5 minutes whether the nightly or hourly backup (or the weekly check of the backups) is due, while the server runs. */
 export function startBackupScheduler(): void {
   if (timer) return;
   const tick = () => {

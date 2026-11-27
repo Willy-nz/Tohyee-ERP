@@ -284,6 +284,7 @@ function Destination({ details, onSaved }: { details: Details; onSaved: () => Pr
   const { settings, overview } = details;
   const [enabled, setEnabled] = useState(settings.enabled);
   const [time, setTime] = useState(settings.time);
+  const [frequency, setFrequency] = useState(settings.frequency);
   const [folder, setFolder] = useState(settings.folder === settings.defaultFolder ? "" : settings.folder);
   const [busy, setBusy] = useState(false);
   const [message, setMessage] = useState<Message>(null);
@@ -293,7 +294,7 @@ function Destination({ details, onSaved }: { details: Details; onSaved: () => Pr
     setBusy(true);
     setMessage(null);
     try {
-      await api("/api/admin/backups", { method: "PUT", body: { enabled, time, folder } });
+      await api("/api/admin/backups", { method: "PUT", body: { enabled, time, frequency, folder } });
       await onSaved();
       setMessage({ tone: "success", text: "Saved. Tohyee checked it can write to that folder." });
     } catch (caught) {
@@ -309,12 +310,20 @@ function Destination({ details, onSaved }: { details: Details; onSaved: () => Pr
       <form onSubmit={(event) => void save(event)} style={{ display: "grid", gap: 12 }}>
         {message ? <Notice tone={message.tone}>{message.text}</Notice> : null}
         <label className={ui.checkbox}>
-          <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Back up every night
+          <input type="checkbox" checked={enabled} onChange={(event) => setEnabled(event.target.checked)} /> Back up automatically
         </label>
         <div className={ui.grid2}>
-          <Field label="At (24-hour)" hint={`In ${settings.timeZone} time.`}>
-            <input value={time} onChange={(event) => setTime(event.target.value)} inputMode="numeric" pattern="[0-2][0-9]:[0-5][0-9]" />
+          <Field label="How often" hint="Every hour is for a server with a backup server at a second place: the newest 24 are kept as well as the daily and monthly ones.">
+            <select value={frequency} onChange={(event) => setFrequency(event.target.value === "hourly" ? "hourly" : "nightly")}>
+              <option value="nightly">Every night</option>
+              <option value="hourly">Every hour</option>
+            </select>
           </Field>
+          {frequency === "nightly" ? (
+            <Field label="At (24-hour)" hint={`In ${settings.timeZone} time.`}>
+              <input value={time} onChange={(event) => setTime(event.target.value)} inputMode="numeric" pattern="[0-2][0-9]:[0-5][0-9]" />
+            </Field>
+          ) : null}
           <Field
             label="Folder"
             hint={

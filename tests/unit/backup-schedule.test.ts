@@ -1,6 +1,6 @@
 import { describe, expect, it } from "vitest";
-import { dueToday } from "@/lib/backups/scheduler";
-import { backupsToKeep } from "@/lib/backups/retention";
+import { dueThisHour, dueToday } from "@/lib/backups/scheduler";
+import { backupsToKeep, KEEP_RECENT_HOURLY } from "@/lib/backups/retention";
 
 describe("which backups are kept (14 daily + 12 monthly)", () => {
   const name = (stamp: string) => `harbour-club_${stamp}.tohyee-backup`;
@@ -68,5 +68,52 @@ describe("when the nightly backup is due (NZ time)", () => {
     const runs = [{ organisationId: "harbour-club", trigger: "schedule" as const, status: "failed", startedAt: at("2026-09-27T13:01:00Z") }];
     expect(dueToday(at("2026-09-27T13:30:00Z"), settings, targets, runs)).toEqual([null]);
     expect(dueToday(at("2026-09-27T14:02:00Z"), settings, targets, runs)).toEqual(targets);
+  });
+});
+
+describe("hourly backups, for a server with a backup server (BKS1-BKS2)", () => {
+  const at = (iso: string) => new Date(iso);
+  const targets = [null, "harbour-club"];
+  const hourly = { enabled: true, time: "02:00", frequency: "hourly" as const };
+
+  it("BKS1 keeps the newest 24 as well as a day's newest and a month's first", () => {
+    // Three days of hourly backups, 00:10 to 23:10, in October 2026.
+    const stamps: string[] = [];
+    for (const day of ["2026-10-05", "2026-10-06", "2026-10-07"]) for (let hour = 0; hour < 24; hour += 1) stamps.push(`${day}_${String(hour).padStart(2, "0")}1000`);
+    const all = stamps.map((stamp) => ({ name: stamp, stamp }));
+    const kept = [...backupsToKeep(all, 14, 12, KEEP_RECENT_HOURLY)].sort();
+    // All 24 of the 7th, the last of the 5th and 6th, and the month's first (5 Oct 00:10): 27 files.
+    expect(kept).toHaveLength(27);
+    expect(kept.filter((name) => name.startsWith("2026-10-07"))).toHaveLength(24);
+    expect(kept.filter((name) => !name.startsWith("2026-10-07"))).toEqual(["2026-10-05_001000", "2026-10-05_231000", "2026-10-06_231000"]);
+    // Part way through a day the 24 reach back into yesterday.
+    const toTen = all.filter((backup) => backup.stamp <= "2026-10-07_101000");
+    const keptAtTen = backupsToKeep(toTen, 14, 12, KEEP_RECENT_HOURLY);
+    expect(keptAtTen.has("2026-10-06_111000")).toBe(true);
+    expect(keptAtTen.has("2026-10-06_101000")).toBe(false);
+    // Nightly backups are kept as before.
+    expect([...backupsToKeep(all)].sort()).toEqual(["2026-10-05_001000", "2026-10-05_231000", "2026-10-06_231000", "2026-10-07_231000"]);
+  });
+
+  it("BKS2 is due once in each clock hour, whatever the time of day", () => {
+    // 10:05 NZDT on 28 Sep is 27 Sep 21:05 UTC.
+    expect(dueToday(at("2026-09-27T21:05:00Z"), hourly, targets, [])).toEqual(targets);
+    const runs = [
+      { organisationId: null, trigger: "schedule" as const, status: "ok", startedAt: at("2026-09-27T21:06:00Z") },
+      { organisationId: "harbour-club", trigger: "manual" as const, status: "ok", startedAt: at("2026-09-27T21:20:00Z") },
+    ];
+    expect(dueToday(at("2026-09-27T21:55:00Z"), hourly, targets, runs)).toEqual([]);
+    expect(dueToday(at("2026-09-27T22:00:00Z"), hourly, targets, runs)).toEqual(targets);
+    expect(dueThisHour(at("2026-09-27T22:00:00Z"), targets, runs)).toEqual(targets);
+    expect(dueToday(at("2026-09-27T21:05:00Z"), { ...hourly, enabled: false }, targets, [])).toEqual([]);
+  });
+
+  it("BKS2 a failed try waits for the next hour; a running one isn't started twice", () => {
+    const runs = [
+      { organisationId: "harbour-club", trigger: "schedule" as const, status: "failed", startedAt: at("2026-09-27T21:06:00Z") },
+      { organisationId: null, trigger: "schedule" as const, status: "running", startedAt: at("2026-09-27T21:06:00Z") },
+    ];
+    expect(dueToday(at("2026-09-27T21:40:00Z"), hourly, targets, runs)).toEqual([]);
+    expect(dueToday(at("2026-09-27T22:01:00Z"), hourly, targets, runs)).toEqual(targets);
   });
 });
