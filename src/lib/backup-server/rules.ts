@@ -5,9 +5,25 @@
  * next copy, and anything sent or imported here would be done twice.
  */
 
-export type ServerRole = "main" | "backup";
+/**
+ * main: the server everyone uses. backup: keeps a copy of another one.
+ * fenced (BKS17): was the main, and has found that the backup server was
+ * made the main while it was away; it takes no changes and runs no jobs
+ * until a server admin pairs it as the backup server (or says it's the main
+ * after all).
+ */
+export type ServerRole = "main" | "backup" | "fenced";
 
 export const BACKUP_SERVER_MESSAGE = "This is the backup copy of another Tohyee server. Nothing can be changed here. Use the main server, or ask a server admin about switching over.";
+export const FENCED_MESSAGE = "This server is no longer the main one: the backup server was made the main while this one was away. Nothing can be changed here. Use the other server.";
+/** What a server that isn't the main says when it refuses a change. */
+export function refusalFor(role: ServerRole): string {
+  return role === "fenced" ? FENCED_MESSAGE : BACKUP_SERVER_MESSAGE;
+}
+/** On a backup server, people who aren't server admins reach only this (BKS15): the switch-over screen, for an organisation's Owner. */
+export function openToOwnersOnBackup(pathname: string): boolean {
+  return pathname === "/api/backup-server/switch-over" || pathname === "/api/server-role" || pathname.startsWith("/api/auth/");
+}
 export const BACKUP_SERVER_ADMINS_ONLY = "This is the backup copy of another Tohyee server. Only server admins can look at it. Use the main server.";
 
 /**
@@ -18,6 +34,8 @@ export const BACKUP_SERVER_ADMINS_ONLY = "This is the backup copy of another Toh
 const ALLOWED: RegExp[] = [
   /^\/api\/auth\//,
   /^\/api\/admin\/backup-server(\/|$)/, // its pairing, and "take new copies now"
+  /^\/api\/backup-server\/switch-over$/, // making it the main server
+  /^\/api\/admin\/backup-server\/main-after-all$/,
   /^\/api\/admin\/server-update(\/|$)/,
   /^\/api\/admin\/updates(\/|$)/,
   /^\/api\/admin\/backups\/(check|restore\/find)(\/|$)/,

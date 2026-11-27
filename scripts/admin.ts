@@ -15,6 +15,7 @@ import { stdin, stdout } from "node:process";
 import { COMMAND_LINE_ADMIN } from "@/lib/audit";
 import { getBackupServerSettings, pairAsBackupServer, unpairBackupServer } from "@/lib/backup-server/mode";
 import { KEEP_REMOVED_DAYS, refreshCopies } from "@/lib/backup-server/refresh";
+import { mainAfterAll, makeMainServer } from "@/lib/backup-server/switch";
 import { revokeUserAiKeys } from "@/lib/ai/tokens";
 import { endPasskeys } from "@/lib/auth/passkey-end";
 import { hashPassword, validateNewPassword } from "@/lib/auth/password";
@@ -107,6 +108,8 @@ Backups (encrypted with the server's recovery key: save the recovery kit somewhe
   backup-server pair --folder PATH [--other-key CODE | --kit-file PATH]   (the main server's recovery kit; asked for if not given)
   backup-server unpair
   backup-server refresh                    take new copies from the main server's backups now
+  backup-server make-main --reason TEXT --old-main-is-off    make this backup server the main one
+  backup-server main-after-all             on a server that found the main had moved: it's the main after all
                                             --folder "" goes back to the default folder
   backups run [--id ORGANISATION]           back up now (everything, or one organisation)
   backups list [--id ORGANISATION] [--json]
@@ -575,7 +578,7 @@ function when(iso: string | null): string {
 /** backup-server status | pair | unpair (BKS4-BKS7). */
 async function backupServer(command: string | undefined, args: string[]): Promise<void> {
   const say = (settings: Awaited<ReturnType<typeof getBackupServerSettings>>) => {
-    console.log(settings.role === "backup" ? `This is a backup server. It reads the main server's backups from ${settings.folder}.` : "This is a main server.");
+    console.log(settings.role === "backup" ? `This is a backup server. It reads the main server's backups from ${settings.folder}.` : settings.role === "fenced" ? "This server is no longer the main one: the backup server was made the main. It takes no changes. Pair it as the backup server, or run backup-server main-after-all." : "This is a main server.");
     if (settings.restartNeeded) console.log("Restart Tohyee to finish the change.");
   };
   if (command === "status") return say(await getBackupServerSettings());
@@ -596,7 +599,19 @@ async function backupServer(command: string | undefined, args: string[]): Promis
     if (result.failed.length) process.exitCode = 1;
     return;
   }
-  throw new UsageError("backup-server status | pair | unpair | refresh");
+  if (command === "make-main") {
+    const done = await makeMainServer(COMMAND_LINE_ADMIN, { oldMainIsOff: flag(args, "old-main-is-off"), reason: option(args, "reason") ?? "" });
+    console.log(`This is now the main server. Automatic jobs are on for: ${done.organisations.join(", ") || "no organisations"}.`);
+    console.log(done.noteWritten ? "A note for the old main server was left in the backups folder: if it comes back, it will stop." : "The note for the old main server couldn't be written. Keep the old main off, or it will carry on as a main.");
+    console.log("Restart Tohyee to finish. Then set where this server backs up, and save its recovery kit.");
+    return;
+  }
+  if (command === "main-after-all") {
+    await mainAfterAll(COMMAND_LINE_ADMIN);
+    console.log("This server is the main one again. Restart Tohyee to finish.");
+    return;
+  }
+  throw new UsageError("backup-server status | pair | unpair | refresh | make-main | main-after-all");
 }
 
 async function backups(command: string | undefined, args: string[]) {

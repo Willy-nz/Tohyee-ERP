@@ -1,3 +1,4 @@
+import { serverRole } from "@/lib/backup-server/mode";
 import { localParts } from "@/lib/backups/service";
 import { emailStuckSources } from "@/lib/analytics/failure-email";
 import type { Actor } from "@/lib/db/org-transaction";
@@ -64,6 +65,8 @@ let running = false;
 
 /** Loads whatever is due across every organisation with analytics on. Returns what it did. */
 export async function runDueLoads(now = new Date()): Promise<LoadRun[]> {
+  // Only the main server runs jobs (BKS6, BKS17).
+  if ((await serverRole()) !== "main") return [];
   if (running) return [];
   running = true;
   const made: LoadRun[] = [];

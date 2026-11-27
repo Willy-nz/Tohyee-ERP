@@ -91,7 +91,7 @@ export async function runDueBackups(now = new Date(), processStartedAt = PROCESS
     const cleaned = await cleanUpInterruptedRestores(processStartedAt).catch(() => [] as string[]);
     for (const id of cleaned) console.warn(`[tohyee] A restore into ${id} was interrupted by a restart; what it had made was removed.`);
     // A backup server makes no backups of its copies (BKS6): the main's are the record.
-    if ((await serverRole()) === "backup") return [];
+    if ((await serverRole()) !== "main") return [];
     const settings = await getBackupSettings();
     if (!settings.enabled || !settings.keySet) return [];
     // Otherwise a cut-off run counts as "running" all day and blocks that day's backups.
@@ -127,6 +127,13 @@ export function startBackupScheduler(): void {
     runDueBackups()
       .catch((error) => console.warn("[tohyee] Backup scheduler:", error instanceof Error ? error.message : error))
       // Once a week the newest backups are read back and checked again.
+      // Was the backup server made the main while this one was away (BKS17)?
+      .then(() => import("@/lib/backup-server/switch"))
+      .then(({ checkMainMoved }) => checkMainMoved())
+      .then((moved) => {
+        if (moved) console.warn("[tohyee] The backup server was made the main server. This server now takes no changes and runs no jobs.");
+      })
+      .catch((error) => console.warn("[tohyee] Main-moved check:", error instanceof Error ? error.message : error))
       // Has a backup server at a second place stopped taking copies (BKS14)?
       .then(() => import("@/lib/backup-server/alerts"))
       .then(({ watchForBackupServerGoneQuiet }) => watchForBackupServerGoneQuiet())

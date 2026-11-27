@@ -151,7 +151,14 @@ export async function register() {
   // change of role is finished by restarting Tohyee.
   try {
     const { noteStartedRole } = await import("@/lib/backup-server/mode");
-    if ((await noteStartedRole()) === "backup") {
+    // A main that was away while the backup server was made the main finds the note now, before any job starts (BKS17).
+    await (await import("@/lib/backup-server/switch")).checkMainMoved().catch(() => null);
+    const startedAs = await noteStartedRole();
+    if (startedAs === "fenced") {
+      console.warn("[tohyee] The backup server was made the main server while this one was away. This server takes no changes and runs no jobs.");
+      return;
+    }
+    if (startedAs === "backup") {
       console.log("[tohyee] This is a backup server: automatic jobs are off.");
       // Its one job: taking new copies from the main server's backups folder (BKS8).
       const { startCopyRefresher } = await import("@/lib/backup-server/refresh");

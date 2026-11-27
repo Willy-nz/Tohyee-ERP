@@ -1,3 +1,4 @@
+import { serverRole } from "@/lib/backup-server/mode";
 import { randomUUID } from "node:crypto";
 import yauzl from "yauzl";
 import { writeAuditEvent } from "@/lib/audit";
@@ -412,6 +413,8 @@ export async function checkReportMailbox(
   });
 }
 export async function runDueReportEmailChecks(now = new Date()): Promise<ReportEmailCheck[]> {
+  // Only the main server runs jobs (BKS6, BKS17).
+  if ((await serverRole()) !== "main") return [];
   const organisations = await coreQuery<{ id: string }>(
     "select id from organisations where is_active and provisioning_status='ready' and migration_status='current' and jobs_paused_at is null order by id");
   const made: ReportEmailCheck[] = [];

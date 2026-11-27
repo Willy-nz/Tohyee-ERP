@@ -64,7 +64,7 @@ describeWithDatabase("backup server mode", () => {
   it("BKS4 a main server by default, and pairing is refused while it has organisations", async () => {
     expect(await serverRole()).toBe("main");
     expect(await getBackupServerSettings()).toMatchObject({ role: "main", folder: null, restartNeeded: false });
-    expect(await (await roleRoute.GET(apiRequest("/api/server-role", { cookie: kimCookie }), noContext)).json()).toEqual({ role: "main" });
+    expect(await (await roleRoute.GET(apiRequest("/api/server-role", { cookie: kimCookie }), noContext)).json()).toMatchObject({ role: "main" });
     await expect(pairAsBackupServer({ user: admin }, { folder, key: code })).rejects.toThrow(/starts empty, and this server has an organisation/);
     expect(await serverRole()).toBe("main");
   });
@@ -100,8 +100,10 @@ describeWithDatabase("backup server mode", () => {
     expect(change.status).toBe(403);
     expect(((await change.json()) as { error: string }).error).toBe(BACKUP_SERVER_MESSAGE);
     expect((await backupsRoute.GET(apiRequest("/api/admin/backups", { cookie: adminCookie }), noContext)).status).toBe(200);
-    expect(await (await roleRoute.GET(apiRequest("/api/server-role", { cookie: adminCookie }), noContext)).json()).toEqual({ role: "backup" });
-    const notAdmin = await roleRoute.GET(apiRequest("/api/server-role", { cookie: kimCookie }), noContext);
+    expect(await (await roleRoute.GET(apiRequest("/api/server-role", { cookie: adminCookie }), noContext)).json()).toMatchObject({ role: "backup" });
+    // Kim isn't a server admin: every page but the role and the switch-over screen (BKS15) is closed to her.
+    expect(await (await roleRoute.GET(apiRequest("/api/server-role", { cookie: kimCookie }), noContext)).json()).toEqual({ role: "backup", maySwitchOver: false });
+    const notAdmin = await backupsRoute.GET(apiRequest("/api/admin/backups", { cookie: kimCookie }), noContext);
     expect(notAdmin.status).toBe(403);
     expect(((await notAdmin.json()) as { error: string }).error).toBe(BACKUP_SERVER_ADMINS_ONLY);
   });

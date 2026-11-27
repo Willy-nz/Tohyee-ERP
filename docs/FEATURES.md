@@ -67,7 +67,11 @@ that something happened.
   organisations and no others (one the main removes is archived for 30
   days, then deleted); and the main's Backups page shows what it has taken.
   Each server emails its admins when the other goes quiet (BKS13-BKS14).
-  Switching over is still to come.
+  **Switching over** (BKS15-BKS19) is a person's call: a server admin or an
+  organisation's Owner types their password again and confirms the old
+  main is off; the backup server becomes the main and jobs come on. An old
+  main that comes back finds a note in the backups folder and stops, and
+  can be paired as the backup server.
   **Restoring** makes a copy of the organisation, so
   nothing is overwritten, and works on a new server given the old server's
   recovery kit (below).
