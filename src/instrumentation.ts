@@ -153,6 +153,9 @@ export async function register() {
     const { noteStartedRole } = await import("@/lib/backup-server/mode");
     if ((await noteStartedRole()) === "backup") {
       console.log("[tohyee] This is a backup server: automatic jobs are off.");
+      // Its one job: taking new copies from the main server's backups folder (BKS8).
+      const { startCopyRefresher } = await import("@/lib/backup-server/refresh");
+      startCopyRefresher();
       return;
     }
   } catch (error) {

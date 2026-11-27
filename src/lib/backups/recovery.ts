@@ -277,6 +277,8 @@ export type PeoplePlan = {
   roleChanges: { organisationId: string; email: string; roleHere: string; role: string }[];
   /** Organisations in the server backup that aren't on this server: restore each from its own backup, keeping its ID. */
   organisationsNotHere: { id: string; displayName: string }[];
+  /** Every organisation in the server backup: a backup server holds these and no others (BKS9). */
+  organisationsInBackup: { id: string; displayName: string }[];
   /** Server settings in the backup that aren't copied (they'd compete with the original, or point at folders that differ here). */
   settingsNotCopied: string[];
   /**
@@ -307,7 +309,7 @@ export type PeoplePlan = {
  */
 export async function recoverPeople(
   auth: ServerAdminAuth,
-  input: { file: string; material?: RecoveryMaterial; apply?: boolean; replace?: unknown },
+  input: { file: string; material?: RecoveryMaterial; apply?: boolean; replace?: unknown; /** A backup server (BKS9): people already here are brought up to date, and memberships match the backup's exactly. */ mirror?: boolean },
 ): Promise<PeoplePlan> {
   if (!auth.user.isServerAdmin) throw new ForbiddenError("Only a server admin can recover people from a backup.");
   const { header } = await readBackupHeader(input.file);
@@ -363,10 +365,27 @@ export async function recoverPeople(
     memberships: [],
     roleChanges: [],
     organisationsNotHere: fromBackup.organisations.filter((o) => !orgsHere.has(o.id)).map((o) => ({ id: o.id, displayName: o.display_name })),
+    organisationsInBackup: fromBackup.organisations.map((o) => ({ id: o.id, displayName: o.display_name })),
     settingsNotCopied: fromBackup.settings.filter((key) => !["backup_recovery_keys", "backup_recovery_kit_checks", "backups"].includes(key)),
     googleNotRestored: [],
     googleMoved: [],
     applied: false,
+  };
+  /** A person's two-step secret, re-encrypted with this server's key. */
+  const rewrapTotp = (user: BackupUser): { totp: string | null; twoStep: "kept" | "set up again" | "off" } => {
+    if (!user.totp_secret_ciphertext) return { totp: null, twoStep: "off" };
+    try {
+      const plain = (() => {
+        try {
+          return decryptSecret(user.totp_secret_ciphertext!);
+        } catch {
+          return decryptSecretWithKey(user.totp_secret_ciphertext!, sourceLiveKey);
+        }
+      })();
+      return { totp: encryptSecret(plain), twoStep: "kept" };
+    } catch {
+      return { totp: null, twoStep: "set up again" };
+    }
   };
   const toAdd: (BackupUser & { totp: string | null; replacesId: string | null })[] = [];
   for (const user of fromBackup.users) {
@@ -382,23 +401,7 @@ export async function recoverPeople(
       if (!replacing) continue;
       replacesId = sameEmail.id;
     }
-    let totp: string | null = null;
-    let twoStep: "kept" | "set up again" | "off" = "off";
-    if (user.totp_secret_ciphertext) {
-      try {
-        const plain = (() => {
-          try {
-            return decryptSecret(user.totp_secret_ciphertext!);
-          } catch {
-            return decryptSecretWithKey(user.totp_secret_ciphertext!, sourceLiveKey);
-          }
-        })();
-        totp = encryptSecret(plain);
-        twoStep = "kept";
-      } catch {
-        twoStep = "set up again";
-      }
-    }
+    const { totp, twoStep } = rewrapTotp(user);
     toAdd.push({ ...user, totp, replacesId });
     // Its Google link: a link here on the account it replaces steps aside; one on another login stays there and is reported.
     const google = fromBackup.google.find((g) => g.user_id === user.id);
@@ -494,6 +497,35 @@ export async function recoverPeople(
         `insert into organisation_members (organisation_id, user_id, role, access_starts_at, access_ends_at) values ($1, $2, $3, $4, $5)
          on conflict (organisation_id, user_id) do update set role = excluded.role, access_starts_at = excluded.access_starts_at, access_ends_at = excluded.access_ends_at, updated_at = now()`,
         [member.organisation_id, member.user_id, member.role, member.access_starts_at, member.access_ends_at],
+      );
+    }
+    if (input.mirror) {
+      // People already here (same ID) are brought up to the backup's: password, two-step, name, and whether they're active.
+      const addedIds = new Set(toAdd.map((user) => user.id));
+      for (const user of fromBackup.users) {
+        if (addedIds.has(user.id) || !hereById.has(user.id)) continue;
+        const { totp } = rewrapTotp(user);
+        await client.query(
+          `update users set email = $2, display_name = $3, password_hash = $4, is_server_admin = $5, is_active = $6, password_changed_at = $7,
+                  totp_secret_ciphertext = $8, totp_enabled_at = $9 where id = $1`,
+          [user.id, user.email, user.display_name, user.password_hash, user.is_server_admin, user.is_active, user.password_changed_at, totp, totp ? user.totp_enabled_at : null],
+        );
+      }
+      // Memberships of the organisations held here match the backup's: added, changed and removed.
+      const usersNow = new Set((await client.query<{ id: string }>("select id::text from users")).rows.map((row) => row.id));
+      const wanted = fromBackup.members.filter((member) => orgsHere.has(member.organisation_id) && usersNow.has(member.user_id));
+      for (const member of wanted) {
+        await client.query(
+          `insert into organisation_members (organisation_id, user_id, role, access_starts_at, access_ends_at) values ($1, $2, $3, $4, $5)
+           on conflict (organisation_id, user_id) do update set role = excluded.role, access_starts_at = excluded.access_starts_at, access_ends_at = excluded.access_ends_at, updated_at = now()`,
+          [member.organisation_id, member.user_id, member.role, member.access_starts_at, member.access_ends_at],
+        );
+      }
+      const inBackup = fromBackup.organisations.map((organisation) => organisation.id).filter((id) => orgsHere.has(id));
+      await client.query(
+        `delete from organisation_members m where m.organisation_id = any($1::text[])
+            and not exists (select 1 from unnest($2::text[], $3::uuid[]) as w(organisation_id, user_id) where w.organisation_id = m.organisation_id and w.user_id = m.user_id)`,
+        [inBackup, wanted.map((member) => member.organisation_id), wanted.map((member) => member.user_id)],
       );
     }
     // Every organisation still has an Owner.

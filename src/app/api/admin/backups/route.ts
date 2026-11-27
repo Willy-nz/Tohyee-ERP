@@ -1,6 +1,7 @@
 import { json, readJson, requireAuth, route } from "@/lib/api/http";
 import { requireServerAdmin } from "@/lib/auth/guard";
 import { recentChecks } from "@/lib/backups/checks";
+import { readBackupServerReport } from "@/lib/backup-server/refresh";
 import { backupOverview } from "@/lib/backups/overview";
 import { recoveryKitStatus } from "@/lib/backups/recovery-kit";
 import { backUpNow, backupStatus, getBackupSettings, recentBackupRuns, updateBackupSettings } from "@/lib/backups/service";
@@ -14,8 +15,11 @@ export const GET = route(async (request) => {
   const auth = await requireAuth(request);
   requireServerAdmin(auth, request);
   const { overview, files } = await backupOverview();
+  const settings = await getBackupSettings();
   return json({
-    settings: await getBackupSettings(),
+    settings,
+    // What a backup server at a second place last said it has taken (BKS12), or null when there isn't one.
+    backupServer: await readBackupServerReport(settings.folder),
     overview,
     recoveryKit: await recoveryKitStatus(),
     status: await backupStatus(),

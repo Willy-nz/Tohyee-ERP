@@ -14,6 +14,7 @@ import { createInterface } from "node:readline";
 import { stdin, stdout } from "node:process";
 import { COMMAND_LINE_ADMIN } from "@/lib/audit";
 import { getBackupServerSettings, pairAsBackupServer, unpairBackupServer } from "@/lib/backup-server/mode";
+import { KEEP_REMOVED_DAYS, refreshCopies } from "@/lib/backup-server/refresh";
 import { revokeUserAiKeys } from "@/lib/ai/tokens";
 import { endPasskeys } from "@/lib/auth/passkey-end";
 import { hashPassword, validateNewPassword } from "@/lib/auth/password";
@@ -105,6 +106,7 @@ Backups (encrypted with the server's recovery key: save the recovery kit somewhe
   backup-server status
   backup-server pair --folder PATH [--other-key CODE | --kit-file PATH]   (the main server's recovery kit; asked for if not given)
   backup-server unpair
+  backup-server refresh                    take new copies from the main server's backups now
                                             --folder "" goes back to the default folder
   backups run [--id ORGANISATION]           back up now (everything, or one organisation)
   backups list [--id ORGANISATION] [--json]
@@ -584,7 +586,17 @@ async function backupServer(command: string | undefined, args: string[]): Promis
     return say(await pairAsBackupServer(COMMAND_LINE_ADMIN, { folder, material: await cliMaterial(args) }));
   }
   if (command === "unpair") return say(await unpairBackupServer(COMMAND_LINE_ADMIN));
-  throw new UsageError("backup-server status | pair | unpair");
+  if (command === "refresh") {
+    const result = await refreshCopies();
+    console.log(result.refreshed.length ? `New copies taken: ${result.refreshed.join(", ")}.` : "Nothing new to take.");
+    if (result.people) console.log("People and memberships brought up to date.");
+    for (const id of result.archived) console.log(`${id}: the main server no longer has it; archived here for ${KEEP_REMOVED_DAYS} days.`);
+    for (const id of result.deleted) console.log(`${id}: deleted (archived ${KEEP_REMOVED_DAYS} days ago).`);
+    for (const failure of result.failed) console.log(`FAILED ${failure.organisationId ?? "people"}: ${failure.error}`);
+    if (result.failed.length) process.exitCode = 1;
+    return;
+  }
+  throw new UsageError("backup-server status | pair | unpair | refresh");
 }
 
 async function backups(command: string | undefined, args: string[]) {
