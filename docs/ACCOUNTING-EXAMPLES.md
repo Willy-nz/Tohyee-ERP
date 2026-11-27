@@ -24971,3 +24971,39 @@ examples are added as each stage is.
   to server admins, as before.
 - **BKS3 Worth a look.** With hourly backups, a database whose last good
   backup is more than 3 hours old shows as old (36 hours with nightly).
+
+**Stage 1b: backup server mode and pairing.** Tested in
+`tests/unit/backup-server-rules.test.ts` and
+`tests/integration/backup-server-mode.test.ts`. Keeping the copy up to
+date and switching over come in later stages.
+
+- **BKS4 Pairing.** Every Tohyee is a main server until a server admin, on
+  the server computer, makes it a backup server: Server › Backup server, or
+  `backup-server pair`. They give the folder the main's backups arrive in
+  on this computer (a synced folder) and the main's recovery kit (its code,
+  or its file and passphrase). It's refused unless this server has **no
+  organisations** (its copies will replace what's here: "A backup server
+  starts empty"), the folder has Tohyee backups, and the kit opens the
+  newest one. Moana's fresh server, pointed at Harbour Club's backups
+  folder with the right code, becomes a backup server; an empty folder, a
+  folder that isn't a full path, no kit, or Kim (not a server admin) are
+  each refused and nothing changes. The main's recovery key is kept
+  encrypted with this server's own key. The main's live secret key never
+  leaves the main. Nothing is copied at this step.
+- **BKS5 Nothing changes on a backup server.** Every change (anything but
+  a read) is refused with "This is the backup copy of another Tohyee
+  server. Nothing can be changed here." The few exceptions are signing in
+  and out, the backup server's own settings, installing updates (it has to
+  run the main's version) and checking the backups folder. Only server
+  admins can look (the owner's choice): Kim gets "Only server admins can
+  look at it. Use the main server." Every page shows a banner saying it's
+  a backup copy.
+- **BKS6 No jobs.** A backup server starts none of the automatic jobs: no
+  bank or payment feeds, sales platform sync, emails, repeating invoices,
+  schedules, Analytics loads or camera collection, and no backups of its
+  copies. Jobs are chosen when Tohyee starts, so after pairing it says
+  "Restart Tohyee to finish"; until then the jobs that go organisation by
+  organisation already find none, and a copy's jobs can't be turned on.
+- **BKS7 Undoing a pairing.** A backup server that holds no organisations
+  yet can stop being one. Once it has copies it can't be unpaired: it
+  becomes the main server by switching over (a later stage).

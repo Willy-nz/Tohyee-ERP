@@ -26,6 +26,8 @@ export const SCREEN_COVERAGE: Record<string, ScreenCoverage> = {
   "POST /api/admin/backups/restore/resume": {"person": "Server settings are for server admins on the server computer."},
   "POST /api/admin/backups/restore": {"person": "Server settings are for server admins on the server computer."},
   "PUT /api/admin/backups": {"person": "Server settings are for server admins on the server computer."},
+  "PUT /api/admin/backup-server": {"person": "Server settings are for server admins on the server computer."},
+  "DELETE /api/admin/backup-server": {"person": "Server settings are for server admins on the server computer."},
   "POST /api/admin/backups": {"person": "Server settings are for server admins on the server computer."},
   "POST /api/admin/backups/test-restore": {"person": "Server settings are for server admins on the server computer."},
   "PUT /api/admin/bank-file-folders": {"person": "Server settings are for server admins on the server computer."},

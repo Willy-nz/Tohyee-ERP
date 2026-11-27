@@ -13,6 +13,7 @@ import path from "node:path";
 import { createInterface } from "node:readline";
 import { stdin, stdout } from "node:process";
 import { COMMAND_LINE_ADMIN } from "@/lib/audit";
+import { getBackupServerSettings, pairAsBackupServer, unpairBackupServer } from "@/lib/backup-server/mode";
 import { revokeUserAiKeys } from "@/lib/ai/tokens";
 import { endPasskeys } from "@/lib/auth/passkey-end";
 import { hashPassword, validateNewPassword } from "@/lib/auth/password";
@@ -101,6 +102,9 @@ Backups (encrypted with the server's recovery key: save the recovery kit somewhe
                                             what isn't proven (such as off-site copies)
   backups verify [--id ORGANISATION]        read the newest backup files back and check them again
   backups set [--on|--off] [--folder PATH] [--time 02:00] [--every night|hour]
+  backup-server status
+  backup-server pair --folder PATH [--other-key CODE | --kit-file PATH]   (the main server's recovery kit; asked for if not given)
+  backup-server unpair
                                             --folder "" goes back to the default folder
   backups run [--id ORGANISATION]           back up now (everything, or one organisation)
   backups list [--id ORGANISATION] [--json]
@@ -566,6 +570,23 @@ function when(iso: string | null): string {
   return iso ? new Date(iso).toISOString().slice(0, 16).replace("T", " ") + " UTC" : "";
 }
 
+/** backup-server status | pair | unpair (BKS4-BKS7). */
+async function backupServer(command: string | undefined, args: string[]): Promise<void> {
+  const say = (settings: Awaited<ReturnType<typeof getBackupServerSettings>>) => {
+    console.log(settings.role === "backup" ? `This is a backup server. It reads the main server's backups from ${settings.folder}.` : "This is a main server.");
+    if (settings.restartNeeded) console.log("Restart Tohyee to finish the change.");
+  };
+  if (command === "status") return say(await getBackupServerSettings());
+  if (command === "pair") {
+    const folder = option(args, "folder");
+    if (!folder) throw new UsageError("--folder needs the path the main server's backups arrive in.");
+    giveServiceAccess(folder, "read");
+    return say(await pairAsBackupServer(COMMAND_LINE_ADMIN, { folder, material: await cliMaterial(args) }));
+  }
+  if (command === "unpair") return say(await unpairBackupServer(COMMAND_LINE_ADMIN));
+  throw new UsageError("backup-server status | pair | unpair");
+}
+
 async function backups(command: string | undefined, args: string[]) {
   if (command === "status") {
     const settings = await getBackupSettings();
@@ -887,6 +908,7 @@ async function main(argv: string[]): Promise<void> {
   if (area === "email") return email(command, rest);
   if (area === "updates") return updates(command, rest);
   if (area === "backups") return backups(command, rest);
+  if (area === "backup-server") return backupServer(command, rest);
   if (area === "analytics") return analytics(command, rest);
   if (area === "bank") return bank(command, rest);
   if (area === "demo") return demo(command, rest);

@@ -80,7 +80,7 @@ const ROUTES: Array<[string, IllustratedIconName]> = [
   ["/server/analytics", "analytics"], ["/server/bank-files", "banking"],
   ["/server/users", "team"], ["/server/sign-ins", "key"], ["/server/google-sign-in", "key"],
   ["/server/remote-access", "key"], ["/server/organisations", "accounting"],
-  ["/server/email", "mail"], ["/server/backups", "documents"], ["/server", "settings"],
+  ["/server/email", "mail"], ["/server/backups", "documents"], ["/server/backup-server", "documents"], ["/server", "settings"],
   ["/operations", "accounting"],
 ];
 

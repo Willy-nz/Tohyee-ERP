@@ -58,7 +58,11 @@ that something happened.
   it's made; 14 daily and 12 monthly kept; failures retried hourly and
   emailed to server admins. They can be made **every hour** instead (BKS1-BKS3,
   for a server with a backup server at a second place): the newest 24 are
-  kept as well. **Restoring** makes a copy of the organisation, so
+  kept as well. A fresh Tohyee can be made a **backup server** for another
+  one (BKS4-BKS7, Server › Backup server or `backup-server pair`): it takes
+  no changes, only server admins can look, and it runs no automatic jobs.
+  Keeping its copy up to date and switching over are still to come.
+  **Restoring** makes a copy of the organisation, so
   nothing is overwritten, and works on a new server given the old server's
   recovery kit (below).
 - **Menus**: Home, Sales, Purchases, Banking, Payroll, Reports, Accounting,

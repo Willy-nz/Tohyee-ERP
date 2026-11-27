@@ -1,3 +1,4 @@
+import { serverRole } from "@/lib/backup-server/mode";
 import { type AdminActor, writeAdminAuditEvent } from "@/lib/audit";
 import { getAdminPool } from "@/lib/db/pools";
 import { normaliseEmail } from "@/lib/auth/service";
@@ -40,6 +41,8 @@ export async function listAllOrganisations(): Promise<OrganisationAdminView[]> {
  * current, its own settings) itself.
  */
 export async function listOrganisationsForJobs(): Promise<OrganisationAdminView[]> {
+  // A backup server runs no jobs for anyone (BKS6): the main does, and nothing may be sent or imported twice.
+  if ((await serverRole()) === "backup") return [];
   const paused = new Set((await coreQuery<{ id: string }>("select id from organisations where jobs_paused_at is not null")).rows.map((row) => row.id));
   return (await listAllOrganisations()).filter((organisation) => !paused.has(organisation.id));
 }

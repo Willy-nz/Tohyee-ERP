@@ -889,6 +889,7 @@ function Shell({ app: layoutApp, children, warnings }: { app: AppKey; children: 
       </header>
       <OfflineSupport userId={user.id} organisationId={current?.id ?? null} />
       <NativeAppSupport />
+      <BackupCopyBanner />
       <main id="main-content" className={styles.content} tabIndex={-1}>
         <div ref={page} className={styles.page}>
           {/* Not rendered for a report viewer outside Analytics, so the page doesn't ask for anything before the redirect. */}
@@ -927,5 +928,16 @@ export function AppShell({
         {children}
       </Shell>
     </WorkspaceProvider>
+  );
+}
+
+/** On a backup server (BKS5), every page says so: nothing can be changed there. A main server shows nothing. */
+function BackupCopyBanner() {
+  const role = useApiData<{ role: "main" | "backup" }>("/api/server-role");
+  if (role.data?.role !== "backup") return null;
+  return (
+    <div className={styles.backupCopy} role="status" data-print="hide">
+      Backup copy of another Tohyee server. Nothing can be changed here.
+    </div>
   );
 }
