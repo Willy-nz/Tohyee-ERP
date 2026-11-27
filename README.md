@@ -49,8 +49,8 @@ before connecting an assistant.
 > organisation and review accounting outputs. Tohyee is provided as is, without
 > warranty; see the [licence](LICENSE).
 
-Latest release: [v0.48.0](https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.48.0)
-([notes](docs/releases/0.48.0.md)). Get the installer and what each download
+Latest release: [v0.48.1](https://github.com/Willy-nz/Tohyee-ERP/releases/tag/v0.48.1)
+([notes](docs/releases/0.48.1.md)). Get the installer and what each download
 includes from the [latest release](https://github.com/Willy-nz/Tohyee-ERP/releases/latest).
 The [feature register](docs/FEATURES.md) records implemented features and limits;
 [release notes](docs/releases) describe packaged versions.
@@ -130,7 +130,8 @@ real phone or in a paddock yet.
 
 | Release | What's new |
 | --- | --- |
-| [**0.48.0**](docs/releases/0.48.0.md) | A backup server at a second place: a second Tohyee keeps a copy from hourly backups, a person can switch over to it if the main is lost, and a switch-over can be practised first. |
+| [**0.48.1**](docs/releases/0.48.1.md) | Android app: Open Tohyee on the first screen no longer closes the app. |
+| [0.48.0](docs/releases/0.48.0.md) | A backup server at a second place: a second Tohyee keeps a copy from hourly backups, a person can switch over to it if the main is lost, and a switch-over can be practised first. |
 | [0.47.0](docs/releases/0.47.0.md) | Chat: direct messages, spaces anyone can make, mentions, and a place for owners and admins to review chats, with every look recorded. |
 | [0.46.0](docs/releases/0.46.0.md) | Farm water (pipe sizing, stock water, pump matching), moving stock between farms, task categories, provisional tax options, signed Windows updates, and fixes from six reviews of the books, tax, sales platforms, farm screens and security. |
 | [0.45.0](docs/releases/0.45.0.md) | Late fees: an option to charge a fee and daily interest on overdue invoices, with GST done the NZ way, each on an invoice of its own. |
