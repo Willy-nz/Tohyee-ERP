@@ -40,7 +40,7 @@ const grid=document.createElement("div");grid.className="grid";
 for(const name of names.split(" ")){
 const card=document.createElement("div");card.className="card";
 const preview=document.createElement("div");preview.className="preview";
-const img=document.createElement("img");const extension=".svg";img.src="./icons/"+name+extension;img.width=+size.value;img.height=+size.value;img.alt=name.replaceAll("-"," ");
+const img=document.createElement("img");const extension=category==="Existing shared icons"?".svg":".png";img.src="./icons/"+name+extension;img.width=+size.value;img.height=+size.value;img.alt=name.replaceAll("-"," ");
 img.addEventListener("error",()=>{card.style.borderColor="#bf594c"});
 preview.append(img);const label=document.createElement("strong");label.textContent=name.replaceAll("-"," ");const code=document.createElement("code");code.textContent=name+extension;
 card.append(preview,label,code);grid.append(card)}
