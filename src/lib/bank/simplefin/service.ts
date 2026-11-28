@@ -13,6 +13,7 @@ import {
   type SimpleFinAccountSet,
   type SimpleFinProblem,
   type SimpleFinTransaction,
+  simpleFinNow,
   simpleFinProblem,
 } from "@/lib/bank/simplefin/client";
 import { businessTimeZone, parseIsoDate } from "@/lib/dates";
@@ -567,7 +568,7 @@ export async function syncSimpleFin(
       const overlap = since ? new Date(epochOf(since) * 1000 - OVERLAP_DAYS * DAY * 1000).toISOString().slice(0, 10) : link.start_date;
       return overlap > link.start_date ? overlap : link.start_date;
     });
-    const end = Math.floor(Date.now() / 1000) + DAY;
+    const end = Math.floor(simpleFinNow() / 1000) + DAY;
     let start = froms.length ? Math.min(...froms.map(epochOf)) - DAY : end - DAY;
     if (!prepared.links.length) start = end - DAY;
     const windows: Array<[number, number]> = [];

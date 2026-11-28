@@ -7,7 +7,7 @@ import type { SessionUser } from "@/lib/auth/sessions";
 import { createBankAccount, getBankAccount, listStatementLines } from "@/lib/bank/accounts";
 import { linkBankFeed } from "@/lib/bank/akahu/settings";
 import { importStatementFile } from "@/lib/bank/imports";
-import { setSimpleFinFetchForTests } from "@/lib/bank/simplefin/client";
+import { setSimpleFinClockForTests, setSimpleFinFetchForTests } from "@/lib/bank/simplefin/client";
 import {
   connectSimpleFin,
   disconnectSimpleFin,
@@ -44,6 +44,8 @@ const T1 = {
   payee: "John's Fishin Shack",
   memo: "JOHNS FISHIN SHACK BAIT",
 };
+/** When the syncs in this file happen (see beforeAll). */
+const NOW = Date.parse("2026-10-20T00:00:00Z");
 const T2 = { id: "T2", posted: 1788364800, amount: "-130.00", description: "Grocery store" };
 
 /** A pretend SimpleFIN Bridge: claims each token once, and answers /accounts with whatever the test sets. */
@@ -120,6 +122,9 @@ describeWithDatabase("SimpleFIN bank feeds (SF1-SF10)", () => {
     process.env.TOHYEE_SECRET_KEY = "test-secret-key-that-is-long-enough-123456";
     setMailHostResolverForTests(async () => ["203.0.113.10"]);
     setSimpleFinFetchForTests(fakeFetch);
+    // The links start on 1 Sep 2026 and a sync makes one request per 90 days up to "now": held inside the
+    // first 90 days, or the request counts change with the calendar (they did on 28 Nov 2026).
+    setSimpleFinClockForTests(() => NOW);
     server = await startTestServer();
     owner = await createTestUser("owner@example.com");
     bookkeeper = await createTestUser("bookkeeper@example.com");
@@ -148,6 +153,7 @@ describeWithDatabase("SimpleFIN bank feeds (SF1-SF10)", () => {
 
   afterAll(async () => {
     setSimpleFinFetchForTests(null);
+    setSimpleFinClockForTests(null);
     setMailHostResolverForTests(null);
     await server?.teardown();
   });
@@ -275,7 +281,7 @@ describeWithDatabase("SimpleFIN bank feeds (SF1-SF10)", () => {
     const before = bridge.requests.length;
     const result = await syncSimpleFin(await organisation(), actorOf(bookkeeper), { manual: true });
     const start = Date.parse("2025-12-31T00:00:00Z");
-    const end = Math.floor(Date.now() / 1000) * 1000 + 86_400_000;
+    const end = Math.floor(NOW / 1000) * 1000 + 86_400_000;
     const expected = Math.ceil((end - start) / (90 * 86_400_000));
     expect(result.requests).toBe(expected);
     const asked = bridge.requests.slice(before);
