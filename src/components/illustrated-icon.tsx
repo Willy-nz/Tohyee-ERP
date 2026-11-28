@@ -90,11 +90,17 @@ function isFarmIcon(name: IllustratedIconName): name is FarmIconName {
 
 export type IllustratedIconName = keyof typeof artwork | FarmIconName;
 
+// These farm-facing shared destinations use the approved illustrated artwork.
+// Other shared icons retain the existing inline SVGs until the business design pass.
+const ILLUSTRATED_SHARED_ICONS: ReadonlySet<IllustratedIconName> = new Set([
+  "livestock", "effluent", "camera", "quad", "weather",
+]);
+
 /** Decorative illustration: always pair with a visible label. */
 export function IllustratedIcon({ name, size = 40 }: { name: IllustratedIconName; size?: 28 | 32 | 40 | 48 | 56 }) {
   return (
     <span className={styles.icon} aria-hidden="true" style={{ width: size, height: size }}>
-      {isFarmIcon(name) ? (
+      {(isFarmIcon(name) || ILLUSTRATED_SHARED_ICONS.has(name)) ? (
         <Image src={`/illustrations/icons/${name}.png`} alt="" width={size} height={size} unoptimized />
       ) : (
         <svg viewBox="0 0 64 64" width={size} height={size} focusable="false">{artwork[name]}</svg>
