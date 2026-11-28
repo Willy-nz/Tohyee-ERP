@@ -5,6 +5,7 @@ import { type ReactNode, useState } from "react";
 import { DateInput } from "@/components/date-input";
 import { type MapOverlay, PaddockMap } from "@/components/farming";
 import type { FarmContext } from "@/components/farm-workspace";
+import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
 import { useApiData } from "@/components/hooks";
 import { InfoTip } from "@/components/info-tip";
 import { QueuedWork, submitThroughQueue, useOfflineQueue } from "@/components/offline-queue";
@@ -214,17 +215,59 @@ export function FarmTasks({ organisationId, farm, startNew = false }: FarmContex
     setMessage(text ?? null);
     tasks.reload();
   };
+  const today = todayInBrowser();
+  // The panel's figures are always the jobs still to do, whichever list is showing underneath.
+  const todo = useFarmTasks(organisationId, farm.id, "open").data?.tasks ?? null;
+  const count = (state: TaskState) => (todo ?? []).filter((task) => task.state === state).length;
+  const pressing = (todo ?? []).filter((task) => task.state === "overdue" || task.state === "today").slice(0, 6);
+  const yours = (todo ?? []).filter((task) => task.assignedToUserId === user.id).length;
+  const show = (task: FarmTask) => {
+    setView("open");
+    setFilter("everyone");
+    setCategory("");
+    setOpen(task.id);
+    requestAnimationFrame(() => document.getElementById("farm-task-list")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+  };
   return (
     <div style={{ display: "grid", gap: 16 }}>
-      {canRecord ? (
-        adding ? (
-          <TaskForm organisationId={organisationId} farm={farm} task={null} onClose={() => setAdding(false)} onSaved={() => changed("Task added.")} />
-        ) : (
-          <div className={styles.actions}>
-            <Button onClick={() => setAdding(true)}>Add a task</Button>
-          </div>
-        )
-      ) : null}
+      <FarmHero
+        eyebrow="Jobs / tasks"
+        title={farm.name}
+        label={`${farm.name} tasks`}
+        heading="Needs doing now"
+        hint={pressing.length ? "Tap one to open it" : undefined}
+        footer="Job board"
+        stats={
+          todo
+            ? [
+                { value: todo.length, label: "to do" },
+                ...(count("overdue") ? [{ value: count("overdue"), label: "overdue", tone: "alert" as const }] : []),
+                ...(count("today") ? [{ value: count("today"), label: "due today", tone: "attention" as const }] : []),
+                ...(yours ? [{ value: yours, label: "yours" }] : []),
+              ]
+            : []
+        }
+        action={canRecord && !adding ? <Button size="small" onClick={() => setAdding(true)}>Add a task</Button> : null}
+      >
+        {!todo ? <HeroEmpty>Loading…</HeroEmpty> : null}
+        {todo && !pressing.length ? <HeroEmpty>{todo.length ? "Nothing overdue or due today." : "Nothing to do."}</HeroEmpty> : null}
+        {pressing.length ? (
+          <HeroTiles wide>
+            {pressing.map((task) => (
+              <HeroTile
+                key={task.id}
+                title={task.title}
+                lines={[dueText(task, today), [task.assignedToName, task.paddockName ? `Paddock ${task.paddockName}` : null, task.category].filter(Boolean).join(" · ")].filter(Boolean)}
+                tone={task.state === "overdue" ? "alert" : "attention"}
+                pressed={open === task.id}
+                onOpen={() => show(task)}
+              />
+            ))}
+          </HeroTiles>
+        ) : null}
+      </FarmHero>
+      {canRecord && adding ? <TaskForm organisationId={organisationId} farm={farm} task={null} onClose={() => setAdding(false)} onSaved={() => changed("Task added.")} /> : null}
+      <div id="farm-task-list" style={{ scrollMarginTop: 64 }} />
       <Card
         title={`Tasks on ${farm.name}`}
         description={

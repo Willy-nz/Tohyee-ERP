@@ -5,6 +5,8 @@ import { useEffect, useRef, useState } from "react";
 import { DateInput } from "@/components/date-input";
 import { type MapOverlay, PaddockMap } from "@/components/farming";
 import type { FarmContext } from "@/components/farm-workspace";
+import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
+import hero from "@/components/farm-hero.module.css";
 import { useApiData } from "@/components/hooks";
 import { InfoTip } from "@/components/info-tip";
 import { QueuedWork, submitThroughQueue, useOfflineQueue } from "@/components/offline-queue";
@@ -218,30 +220,59 @@ export function FarmRainfall({ organisationId, farm }: FarmContext) {
   const [picked, setPicked] = useState<string | null>(null);
   // The gauge with the most readings first: usually the farm's main one.
   const gauge = all.find((entry) => entry.id === picked) ?? [...active].sort((a, b) => b.readings - a.readings)[0] ?? null;
+  const today = todayInBrowser();
+  const stale = active.filter((entry) => !entry.last || entry.last.readOn < addDays(today, -7)).length;
   return (
     <div style={{ display: "grid", gap: 16 }}>
       {gauges.error ? <Notice tone="error">{gauges.error}</Notice> : null}
-      {gauges.data && !all.length ? <Empty>No rain gauges on {farm.name} yet.{canRecord ? " Add one below." : ""}</Empty> : null}
-      {all.length > 1 ? (
-        <div className={ui.tabs} role="group" aria-label="Rain gauge">
-          {all
-            .filter((entry) => entry.isActive || entry.id === gauge?.id)
-            .map((entry) => (
-              <button key={entry.id} type="button" aria-pressed={entry.id === gauge?.id} className={`${ui.tab} ${entry.id === gauge?.id ? ui.tabActive : ""}`} onClick={() => setPicked(entry.id)}>
-                {entry.name}
-              </button>
-            ))}
-        </div>
-      ) : null}
+      <FarmHero
+        eyebrow="Weather / rain gauges"
+        title={farm.name}
+        label={`${farm.name} rain gauges`}
+        heading="Last reading at each gauge"
+        hint={active.length > 1 ? "Tap a gauge for its history" : undefined}
+        footer="Rain gauges"
+        stats={
+          gauges.data
+            ? [
+                { value: active.length, label: active.length === 1 ? "gauge" : "gauges" },
+                { value: active.reduce((sum, entry) => sum + entry.readings, 0).toLocaleString("en-NZ"), label: "readings" },
+                ...(stale ? [{ value: stale, label: "not read this week", tone: "attention" as const }] : []),
+              ]
+            : []
+        }
+        action={
+          canRecord && active.length ? (
+            <Link className={hero.link} href="/operations/farm/log?record=rain">
+              Record today&apos;s rain
+            </Link>
+          ) : null
+        }
+      >
+        {!gauges.data && !gauges.error ? <HeroEmpty>Loading…</HeroEmpty> : null}
+        {gauges.data && !all.length ? <HeroEmpty>No rain gauges on {farm.name} yet.{canRecord ? " Add one below." : ""}</HeroEmpty> : null}
+        {all.length ? (
+          <HeroTiles>
+            {all
+              .filter((entry) => entry.isActive || entry.id === gauge?.id)
+              .map((entry) => (
+                <HeroTile
+                  key={entry.id}
+                  title={entry.name}
+                  figure={entry.last ? mmText(entry.last.mm).replace(/\s*mm$/, "") : "–"}
+                  unit={entry.last ? "mm" : undefined}
+                  lines={[entry.last ? `Read ${shortDate(entry.last.readOn, today)}` : "No readings yet", entry.isActive ? "" : "Retired"].filter(Boolean)}
+                  tone={entry.isActive && (!entry.last || entry.last.readOn < addDays(today, -7)) ? "attention" : undefined}
+                  pressed={all.length > 1 && entry.id === gauge?.id}
+                  onOpen={all.length > 1 ? () => setPicked(entry.id) : undefined}
+                />
+              ))}
+          </HeroTiles>
+        ) : null}
+      </FarmHero>
       <DailyWeather organisationId={organisationId} farmId={farm.id} />
       {gauge ? <RainHistory key={gauge.id} organisationId={organisationId} gauge={gauge} /> : null}
       {gauge ? <RainReadings key={`r${gauge.id}`} organisationId={organisationId} farm={farm} gauge={gauge} canRecord={canRecord} canRemove={can("bookkeeper")} onChanged={gauges.reload} /> : null}
-      {canRecord ? (
-        <Link className={styles.bigButton} href="/operations/farm/log?record=rain">
-          Record today&apos;s rain
-          <small>On the Log, works with no signal</small>
-        </Link>
-      ) : null}
       {gauges.data ? <RainGauges organisationId={organisationId} farm={farm} gauges={all} canRecord={canRecord} onChanged={gauges.reload} onPick={setPicked} /> : null}
       {gauge && can("bookkeeper") && gauge.isActive ? <ImportRain organisationId={organisationId} gauge={gauge} onImported={gauges.reload} /> : null}
     </div>

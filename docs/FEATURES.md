@@ -3646,7 +3646,14 @@ that something happened.
   their names underneath, under the Farm menu's own headings (Paddocks and
   feed, Stock, Weather, Jobs and records, Year end and money, Apps and this
   device), Effluent first. The phone's ☰ menu draws Farm's More the same way.
-  Both come from the one Farm menu, so a page added to it appears in each. **Safety** has a labelled
+  Both come from the one Farm menu, so a page added to it appears in each.
+  **Mobs**, **Tasks** and **Rainfall** open with the same dark panel as the
+  medicine cabinet (`FarmHero`): the farm's name, a few figures, and the
+  page's own tiles to tap. Mobs shows each mob with its head, class and
+  paddock (amber when it's in no paddock, red while a withholding is in
+  force); Tasks shows what's overdue or due today; Rainfall shows each
+  gauge's last reading (amber when it hasn't been read for a week). The
+  lists, forms and what they record are unchanged. **Safety** has a labelled
   **Emergency details** area (address, entrance, contacts to tap, 111 as a
   phone link); the large Call 111 button is gone. **Get Tohyee on this
   device** picks the steps for the browser it's opened in (Safari,
