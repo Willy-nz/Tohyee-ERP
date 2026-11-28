@@ -6,6 +6,7 @@ import { DateInput } from "@/components/date-input";
 import { type MapOverlay, PaddockMap } from "@/components/farming";
 import type { FarmContext } from "@/components/farm-workspace";
 import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
+import { RainGaugeArt } from "@/components/farm-hero-art";
 import hero from "@/components/farm-hero.module.css";
 import { useApiData } from "@/components/hooks";
 import { InfoTip } from "@/components/info-tip";
@@ -261,6 +262,7 @@ export function FarmRainfall({ organisationId, farm }: FarmContext) {
                   title={entry.name}
                   figure={entry.last ? mmText(entry.last.mm).replace(/\s*mm$/, "") : "–"}
                   unit={entry.last ? "mm" : undefined}
+                  picture={<RainGaugeArt mm={entry.last ? Number(entry.last.mm) : null} />}
                   lines={[entry.last ? `Read ${shortDate(entry.last.readOn, today)}` : "No readings yet", entry.isActive ? "" : "Retired"].filter(Boolean)}
                   tone={entry.isActive && (!entry.last || entry.last.readOn < addDays(today, -7)) ? "attention" : undefined}
                   pressed={all.length > 1 && entry.id === gauge?.id}

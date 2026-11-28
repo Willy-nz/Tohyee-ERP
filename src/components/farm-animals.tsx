@@ -8,6 +8,7 @@ import { FarmRowList } from "@/components/farm-rows";
 import { useCanRecordFarmWork } from "@/components/farm-selector";
 import type { FarmContext } from "@/components/farm-workspace";
 import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
+import { EarTagArt } from "@/components/farm-hero-art";
 import hero from "@/components/farm-hero.module.css";
 import { useApiData } from "@/components/hooks";
 import { InfoTip } from "@/components/info-tip";
@@ -135,6 +136,7 @@ export function FarmAnimals({ organisationId, farm, initialAnimal }: FarmContext
                     title={group.name}
                     figure={group.tagged.toLocaleString("en-NZ")}
                     unit="tagged"
+                    picture={<EarTagArt colour={group.id ? (mobs.data?.mobs ?? []).find((mob) => mob.id === group.id)?.tagColour : null} />}
                     lines={[head !== undefined ? `of ${head.toLocaleString("en-NZ")} head` : "", group.weighed ? `${group.weighed.toLocaleString("en-NZ")} weighed` : ""].filter(Boolean)}
                     tone={group.id ? undefined : "attention"}
                     pressed={Boolean(group.id) && mobId === group.id}

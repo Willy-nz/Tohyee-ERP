@@ -90,6 +90,8 @@ export function HeroTile({
   unit,
   lines = [],
   mark,
+  picture,
+  pictureAbove = false,
   tone,
   pressed,
   onOpen,
@@ -100,8 +102,12 @@ export function HeroTile({
   figure?: ReactNode;
   unit?: string;
   lines?: string[];
-  /** A small picture or swatch above the name. */
+  /** A small swatch before the name. */
   mark?: ReactNode;
+  /** The tile's drawn picture (farm-hero-art), at its right-hand side. */
+  picture?: ReactNode;
+  /** A wide picture goes across the top instead, so it doesn't squeeze the words. */
+  pictureAbove?: boolean;
   tone?: "attention" | "alert";
   pressed?: boolean;
   onOpen?: () => void;
@@ -109,22 +115,26 @@ export function HeroTile({
 }) {
   const inner = (
     <>
-      <span className={styles.tileTitle}>
-        {mark ? <span className={styles.mark}>{mark}</span> : null}
-        {title}
-      </span>
-      {figure !== undefined ? (
-        <span className={styles.figure}>
-          {figure}
-          {unit ? <small> {unit}</small> : null}
+      {picture && pictureAbove ? <span className={styles.pictureAbove}>{picture}</span> : null}
+      <span className={styles.words}>
+        <span className={styles.tileTitle}>
+          {mark ? <span className={styles.mark}>{mark}</span> : null}
+          {title}
         </span>
-      ) : null}
-      {lines.map((line) => (
-        <span key={line} className={styles.line}>{line}</span>
-      ))}
+        {figure !== undefined ? (
+          <span className={styles.figure}>
+            {figure}
+            {unit ? <small> {unit}</small> : null}
+          </span>
+        ) : null}
+        {lines.map((line) => (
+          <span key={line} className={styles.line}>{line}</span>
+        ))}
+      </span>
+      {picture && !pictureAbove ? <span className={styles.picture}>{picture}</span> : null}
     </>
   );
-  const className = `${styles.tile} ${tone === "attention" ? styles.tileAttention : tone === "alert" ? styles.tileAlert : ""} ${pressed ? styles.tilePressed : ""}`;
+  const className = `${styles.tile} ${pictureAbove ? styles.tileStacked : ""} ${tone === "attention" ? styles.tileAttention : tone === "alert" ? styles.tileAlert : ""} ${pressed ? styles.tilePressed : ""}`;
   return (
     <li>
       {onOpen ? (

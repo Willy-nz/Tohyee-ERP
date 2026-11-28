@@ -7,6 +7,7 @@ import { FarmSelector, useSelectedFarm } from "@/components/farm-selector";
 import { FarmRowList, farmRowStyles } from "@/components/farm-rows";
 import { useState } from "react";
 import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
+import { SoilCoreArt } from "@/components/farm-hero-art";
 import { useApiData } from "@/components/hooks";
 import { RecordExtrasPanel } from "@/components/records/record-extras";
 import { Badge, Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
@@ -148,6 +149,7 @@ function FarmSoil({
                 <HeroTile
                   key={row.paddockId}
                   title={row.paddockName}
+                  picture={<SoilCoreArt />}
                   figure={measures[0] ? row.latest[measures[0]].valueText : undefined}
                   unit={measures[0] ? [measures[0], row.latest[measures[0]].unit].filter(Boolean).join(", ") : undefined}
                   lines={[...measures.slice(1, 3).map((measure) => `${measure} ${result(row.latest[measure])}`), `Tested ${age(row.lastSampledOn!)}`]}

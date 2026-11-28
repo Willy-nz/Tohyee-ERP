@@ -6,6 +6,7 @@ import { DateInput } from "@/components/date-input";
 import { type MapOverlay, PaddockMap } from "@/components/farming";
 import type { FarmContext } from "@/components/farm-workspace";
 import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
+import { PinnedNoteArt } from "@/components/farm-hero-art";
 import { useApiData } from "@/components/hooks";
 import { InfoTip } from "@/components/info-tip";
 import { QueuedWork, submitThroughQueue, useOfflineQueue } from "@/components/offline-queue";
@@ -258,6 +259,7 @@ export function FarmTasks({ organisationId, farm, startNew = false }: FarmContex
                 key={task.id}
                 title={task.title}
                 lines={[dueText(task, today), [task.assignedToName, task.paddockName ? `Paddock ${task.paddockName}` : null, task.category].filter(Boolean).join(" · ")].filter(Boolean)}
+                picture={<PinnedNoteArt overdue={task.state === "overdue"} />}
                 tone={task.state === "overdue" ? "alert" : "attention"}
                 pressed={open === task.id}
                 onOpen={() => show(task)}

@@ -18,6 +18,7 @@ import type { RotationPlan } from "@/lib/farming/planning";
 import { useCanRecordFarmWork } from "@/components/farm-selector";
 import type { FarmContext } from "@/components/farm-workspace";
 import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
+import { PenArt } from "@/components/farm-hero-art";
 import { useApiData } from "@/components/hooks";
 import { InfoTip } from "@/components/info-tip";
 import { MoreMenu } from "@/components/more-menu";
@@ -181,6 +182,8 @@ export function FarmMobs({ organisationId, farm, farms }: FarmContext) {
                     title={entry.name}
                     figure={entry.head.toLocaleString("en-NZ")}
                     unit="head"
+                    picture={<PenArt head={entry.head} />}
+                    pictureAbove
                     lines={rest}
                     tone={isHeld(entry) ? "alert" : entry.paddock ? undefined : "attention"}
                     pressed={selected === entry.id}
