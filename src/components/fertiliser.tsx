@@ -5,6 +5,8 @@ import Link from "next/link";
 import { FarmSelector, useSelectedFarm } from "@/components/farm-selector";
 import { useRouter } from "next/navigation";
 import { useState } from "react";
+import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
+import { FertiliserBagArt } from "@/components/farm-hero-art";
 import { useApiData } from "@/components/hooks";
 import { Badge, Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
@@ -66,38 +68,38 @@ function PlanList({ organisationId, farm }: { organisationId: string; farm: Farm
   const plans = useApiData<{ plans: PlanSummary[] }>(`/api/farming/farms/${farm.id}/plans`, { organisationId });
   const [name, setName] = useState("");
   const { busy, error, run } = useRun();
+  const list = plans.data?.plans ?? [];
   return (
-    <Card title={`Fertiliser plans for ${farm.name}`} description="A plan is a budget: what goes on which paddock, at what rate and price. It posts nothing. Each change is saved as a new version.">
-      {plans.error ? <Notice tone="error">{plans.error}</Notice> : null}
-      {error ? <Notice tone="error">{error}</Notice> : null}
-      {plans.data && plans.data.plans.length === 0 ? <Empty>No plans yet.</Empty> : null}
-      {plans.data && plans.data.plans.length > 0 ? (
-        <div className={ui.tableWrap}>
-          <table className={`${ui.table} ${ui.stackOnPhone}`}>
-            <thead>
-              <tr>
-                <th>Plan</th>
-                <th>Changes</th>
-                <th>Added</th>
-              </tr>
-            </thead>
-            <tbody>
-              {plans.data.plans.map((plan) => (
-                <tr key={plan.id}>
-                  <td data-label="Plan">
-                    <Link href={`/operations/farming/fertiliser?plan=${plan.id}`}>
-                      <strong>{plan.name}</strong>
-                    </Link>
-                  </td>
-                  <td data-label="Changes">{plan.latestVersion ? (plan.latestVersion === 1 ? "As first saved" : `Changed ${plan.latestVersion - 1} time${plan.latestVersion === 2 ? "" : "s"}`) : <span className={ui.muted}>No lines yet</span>}</td>
-                  <td data-label="Added">{formatDate(plan.createdAt.slice(0, 10))}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-        </div>
+    <>
+    <FarmHero
+      eyebrow="Paddocks / fertiliser plans"
+      title={farm.name}
+      label={`${farm.name} fertiliser plans`}
+      heading="Plans"
+      hint={list.length ? "Tap a plan to open it" : undefined}
+      footer="Fertiliser shed"
+      stats={plans.data ? [{ value: list.length, label: list.length === 1 ? "plan" : "plans" }] : []}
+    >
+      {!plans.data && !plans.error ? <HeroEmpty>Loading…</HeroEmpty> : null}
+      {plans.data && !list.length ? <HeroEmpty>No plans yet.{can("bookkeeper") ? " Name one below to start." : ""}</HeroEmpty> : null}
+      {list.length ? (
+        <HeroTiles wide>
+          {list.map((plan) => (
+            <HeroTile
+              key={plan.id}
+              title={plan.name}
+              picture={<FertiliserBagArt />}
+              lines={[plan.latestVersion ? (plan.latestVersion === 1 ? "As first saved" : `Changed ${plan.latestVersion - 1} time${plan.latestVersion === 2 ? "" : "s"}`) : "Nothing saved yet", `Added ${formatDate(plan.createdAt.slice(0, 10))}`]}
+              onOpen={() => router.push(`/operations/farming/fertiliser?plan=${plan.id}`)}
+            />
+          ))}
+        </HeroTiles>
       ) : null}
-      {can("bookkeeper") ? (
+    </FarmHero>
+    {plans.error ? <Notice tone="error">{plans.error}</Notice> : null}
+    {can("bookkeeper") ? (
+    <Card title="Add a plan" description="A plan is a budget: what goes on which paddock, at what rate and price. It posts nothing. Each change is saved as a new version.">
+      {error ? <Notice tone="error">{error}</Notice> : null}
         <div className={ui.inlineForm}>
           <Field label="New plan">
             <input value={name} maxLength={100} placeholder="Spring urea 2026" onChange={(event) => setName(event.target.value)} />
@@ -116,8 +118,11 @@ function PlanList({ organisationId, farm }: { organisationId: string; farm: Farm
             Add plan
           </Button>
         </div>
-      ) : null}
     </Card>
+    ) : (
+      <p className={ui.muted}>A plan is a budget: what goes on which paddock, at what rate and price. It posts nothing.</p>
+    )}
+    </>
   );
 }
 

@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
-import { EarTagArt, PenArt, PinnedNoteArt, RainGaugeArt, SoilCoreArt } from "@/components/farm-hero-art";
+import { EarTagArt, FeedWedgeArt, PenArt, PinnedNoteArt, RainGaugeArt, SoilCoreArt } from "@/components/farm-hero-art";
 
 /** The dark panel farm pages open with: purely how it looks, so the checks are on what's read and what can be tapped. */
 describe("farm panel", () => {
@@ -51,5 +51,20 @@ describe("farm panel", () => {
     for (const art of [createElement(PenArt, { head: 1 }), createElement(RainGaugeArt, { mm: 1 }), createElement(EarTagArt, {}), createElement(PinnedNoteArt, { overdue: false }), createElement(SoilCoreArt)]) {
       expect(draw(art)).toContain('aria-hidden="true"');
     }
+  });
+
+  it("draws the feed wedge as a bar per paddock, tallest for the highest cover, with the average as a line", () => {
+    const html = renderToStaticMarkup(createElement(FeedWedgeArt, { bars: [{ name: "9", cover: 3000 }, { name: "4", cover: 1500 }, { name: "14", cover: 0 }], average: 1500 }));
+    const heights = [...html.matchAll(/<rect[^>]*height="([\d.]+)"/g)].map((match) => Number(match[1]));
+    expect(heights).toEqual([84, 42, 0]);
+    // The average line sits at the same height as the middle bar's top, and the ends are named.
+    expect(html).toContain('d="M0 50h300"');
+    expect(html).toMatch(/<text[^>]*>9<\/text>/);
+    expect(html).toMatch(/<text[^>]*>14<\/text>/);
+    expect(html).toContain('aria-hidden="true"');
+    // No readings: no bars, no line, and nothing divides by zero.
+    const empty = renderToStaticMarkup(createElement(FeedWedgeArt, { bars: [], average: null }));
+    expect(empty).not.toContain("<rect");
+    expect(empty).not.toContain("NaN");
   });
 });

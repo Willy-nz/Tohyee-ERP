@@ -5,6 +5,9 @@ import { FarmSelector, useSelectedFarm } from "@/components/farm-selector";
 import { InfoTip } from "@/components/info-tip";
 import { type FormEvent, useState } from "react";
 import { DateInput } from "@/components/date-input";
+import { FarmHero, HeroEmpty } from "@/components/farm-hero";
+import { FeedWedgeArt } from "@/components/farm-hero-art";
+import hero from "@/components/farm-hero.module.css";
 import { useApiData } from "@/components/hooks";
 import { Badge, Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
 import { useWorkspace } from "@/components/workspace";
@@ -115,6 +118,37 @@ function FarmPasture({ organisationId, farm }: { organisationId: string; farm: F
       </div>
       {tab === "cover" ? (
         <>
+      <FarmHero
+        eyebrow="Paddocks / pasture cover"
+        title={farm.name}
+        label={`${farm.name} pasture cover`}
+        heading="Feed wedge"
+        hint={data?.cover.wedge.length ? "Highest cover first" : undefined}
+        footer="Feed wedge"
+        stats={
+          data && data.cover.averageKgDmPerHa !== null
+            ? [
+                { value: kg(data.cover.averageKgDmPerHa), label: "kg DM/ha average" },
+                { value: data.cover.hectares, label: "ha" },
+                { value: data.cover.readings, label: data.cover.readings === 1 ? "reading" : "readings" },
+                ...(data.cover.noReading.length ? [{ value: data.cover.noReading.length, label: "with no reading", tone: "attention" as const }] : []),
+                ...(data.cover.estimates ? [{ value: data.cover.estimates, label: data.cover.estimates === 1 ? "estimate" : "estimates", tone: "attention" as const }] : []),
+              ]
+            : []
+        }
+      >
+        {!data && !summary.error ? <HeroEmpty>Loading…</HeroEmpty> : null}
+        {data && !data.cover.wedge.length ? <HeroEmpty>No readings on or before {formatDate(onDate)} yet.</HeroEmpty> : null}
+        {data?.cover.wedge.length ? (
+          <>
+            <FeedWedgeArt bars={data.cover.wedge.map((entry) => ({ name: entry.name, cover: entry.cover }))} average={data.cover.averageKgDmPerHa === null ? null : Number(data.cover.averageKgDmPerHa)} />
+            <p className={hero.caption}>
+              {data.cover.wedge[0].name} is highest at {kg(data.cover.wedge[0].cover)}
+              {data.cover.wedge.length > 1 ? `, ${data.cover.wedge[data.cover.wedge.length - 1].name} lowest at ${kg(data.cover.wedge[data.cover.wedge.length - 1].cover)}` : ""}. The dashed line is the average.
+            </p>
+          </>
+        ) : null}
+      </FarmHero>
       <Card title={`Pasture cover on ${farm.name}`} description="Each paddock's latest reading, averaged by area. Satellite, model and photo readings are marked as estimates.">
         <div className={ui.inlineForm}>
           <Field label="On">

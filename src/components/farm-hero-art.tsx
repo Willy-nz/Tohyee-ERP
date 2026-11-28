@@ -96,3 +96,48 @@ export function SoilCoreArt() {
     </svg>
   );
 }
+
+/**
+ * The feed wedge: a bar for each paddock's cover, highest first, with the
+ * farm's average as a dashed line. The first and last bars carry their
+ * paddock's name; the figures are all in the list underneath.
+ */
+export function FeedWedgeArt({ bars, average }: { bars: Array<{ name: string; cover: number }>; average: number | null }) {
+  const width = 300;
+  const top = 8;
+  const floor = 92;
+  const max = Math.max(1, ...bars.map((bar) => bar.cover));
+  const step = width / Math.max(bars.length, 1);
+  const y = (cover: number) => floor - (Math.max(0, cover) / max) * (floor - top);
+  return (
+    <svg className={styles.chart} viewBox={`0 0 ${width} 112`} aria-hidden="true">
+      {bars.map((bar, i) => (
+        <rect key={`${bar.name}-${i}`} x={i * step + step * 0.12} y={y(bar.cover)} width={step * 0.76} height={floor - y(bar.cover)} rx={Math.min(3, step * 0.2)} fill={i === 0 ? "#bde5c5" : "#7fc9a0"} opacity={0.55 + 0.45 * (bar.cover / max)} />
+      ))}
+      <path d={`M0 ${floor}h${width}`} stroke="#cfe9e2" strokeWidth="1" opacity="0.5" />
+      {average !== null && average > 0 && average <= max ? <path d={`M0 ${y(average)}h${width}`} stroke="#ffe3af" strokeWidth="1.4" strokeDasharray="5 4" /> : null}
+      {bars.length ? (
+        <text x="2" y="108" fill="#d3e2dc" fontSize="12">
+          {bars[0].name}
+        </text>
+      ) : null}
+      {bars.length > 1 ? (
+        <text x={width - 2} y="108" fill="#d3e2dc" fontSize="12" textAnchor="end">
+          {bars[bars.length - 1].name}
+        </text>
+      ) : null}
+    </svg>
+  );
+}
+
+/** A bag of fertiliser, for a plan. */
+export function FertiliserBagArt() {
+  return (
+    <svg className={styles.art} viewBox="0 0 36 48" aria-hidden="true">
+      <path d="M8 9c3 2 17 2 20 0l3 6c-1.5 8-1.5 18 0 26-4 3-22 3-26 0 1.5-8 1.5-18 0-26Z" fill="#f3efe2" stroke={INK} strokeWidth="1.3" strokeLinejoin="round" />
+      <path d="M8 9c1-3 3-5 4-6h12c1 1 3 3 4 6" fill="#e3dcc4" stroke={INK} strokeWidth="1.3" strokeLinejoin="round" />
+      <rect x="11" y="20" width="14" height="12" rx="2" fill="#7fc97f" stroke={INK} strokeWidth="1" />
+      <path d="M18 30v-7m0 3c-2-.5-3-2-3-3.5m3 5c2-.5 3-2 3-3.5" stroke={INK} strokeWidth="1.1" strokeLinecap="round" fill="none" />
+    </svg>
+  );
+}
