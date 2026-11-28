@@ -17,6 +17,7 @@ import { BREEDING_LABELS, type BreedingType } from "@/lib/farming/planning-rules
 import type { RotationPlan } from "@/lib/farming/planning";
 import { useCanRecordFarmWork } from "@/components/farm-selector";
 import type { FarmContext } from "@/components/farm-workspace";
+import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
 import { useApiData } from "@/components/hooks";
 import { InfoTip } from "@/components/info-tip";
 import { MoreMenu } from "@/components/more-menu";
@@ -80,6 +81,9 @@ export function FarmMobs({ organisationId, farm, farms }: FarmContext) {
   const [done, setDone] = useState<string | null>(null);
   const list = [...(mobs.data?.mobs ?? [])].sort((a, b) => NATURAL.compare(a.name, b.name));
   const mob = list.find((entry) => entry.id === selected) ?? null;
+  const unplaced = list.filter((entry) => !entry.paddock).length;
+  const isHeld = (entry: Mob) => Object.values(withheld(entry.withholding, today)).some(Boolean);
+  const held = list.filter(isHeld).length;
   const [version, setVersion] = useState(0);
   const rotation = useRotation(organisationId, farm.id, version);
   const terms = useFarmTerms(organisationId);
@@ -132,11 +136,27 @@ export function FarmMobs({ organisationId, farm, farms }: FarmContext) {
     <div className={styles.grid}>
       <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
         {done ? <Notice tone="success">{done}</Notice> : null}
-        <Card
-          title={term(terms, "mobs")}
-          actions={
+        <FarmHero
+          eyebrow={`Stock / ${term(terms, "mobs").toLowerCase()}`}
+          title={farm.name}
+          label={`${farm.name} ${term(terms, "mobs").toLowerCase()}`}
+          heading="On the farm now"
+          hint={list.length ? "Tap one to move, weigh or treat" : undefined}
+          footer="Stock yards"
+          stats={
+            mobs.data
+              ? [
+                  { value: list.length.toLocaleString("en-NZ"), label: list.length === 1 ? term(terms, "mob").toLowerCase() : term(terms, "mobs").toLowerCase() },
+                  { value: list.reduce((sum, entry) => sum + entry.head, 0).toLocaleString("en-NZ"), label: "head" },
+                  ...(unplaced ? [{ value: unplaced, label: "not in a paddock", tone: "attention" as const }] : []),
+                  ...(held ? [{ value: held, label: "withholding", tone: "alert" as const }] : []),
+                ]
+              : []
+          }
+          action={
             canRecord ? (
               <Button
+                size="small"
                 onClick={() => {
                   setDone(null);
                   setFlow({ kind: "add" });
@@ -148,28 +168,32 @@ export function FarmMobs({ organisationId, farm, farms }: FarmContext) {
           }
         >
           {mobs.error ? <Notice tone="error">{mobs.error}</Notice> : null}
-          {!mobs.data && !mobs.error ? <p className={ui.muted}>Loading…</p> : null}
-          {mobs.data && !list.length ? <p>No mobs yet. Add one, or make them from the mob names on your grazings.</p> : null}
+          {!mobs.data && !mobs.error ? <HeroEmpty>Loading…</HeroEmpty> : null}
+          {mobs.data && !list.length ? <HeroEmpty>No mobs yet. Add one, or make them from the mob names on your grazings.</HeroEmpty> : null}
           {list.length ? (
-            <FarmRowList
-              label="Mobs"
-              rows={list.map((entry) => ({
-                key: entry.id,
-                title: (
-                  <span style={{ display: "inline-flex", alignItems: "center", gap: 6 }}>
-                    <TagSwatch colour={entry.tagColour} />
-                    {entry.name}
-                  </span>
-                ),
-                parts: mobLine(entry, today, rotation.data?.plan ?? null, terms),
-                onOpen: () => {
-                  setSelected(entry.id);
-                  requestAnimationFrame(() => document.getElementById("mob-card")?.scrollIntoView({ behavior: "smooth", block: "start" }));
-                },
-              }))}
-            />
+            <HeroTiles>
+              {list.map((entry) => {
+                const [, ...rest] = mobLine(entry, today, rotation.data?.plan ?? null, terms);
+                return (
+                  <HeroTile
+                    key={entry.id}
+                    mark={entry.tagColour ? <TagSwatch colour={entry.tagColour} /> : undefined}
+                    title={entry.name}
+                    figure={entry.head.toLocaleString("en-NZ")}
+                    unit="head"
+                    lines={rest}
+                    tone={isHeld(entry) ? "alert" : entry.paddock ? undefined : "attention"}
+                    pressed={selected === entry.id}
+                    onOpen={() => {
+                      setSelected(entry.id);
+                      requestAnimationFrame(() => document.getElementById("mob-card")?.scrollIntoView({ behavior: "smooth", block: "start" }));
+                    }}
+                  />
+                );
+              })}
+            </HeroTiles>
           ) : null}
-        </Card>
+        </FarmHero>
         <div id="mob-card" style={{ scrollMarginTop: 64 }}>
           {mob ? (
             <MobCard
