@@ -52,9 +52,9 @@
 .tile {
   display: flex;
   flex: 1;
-  flex-direction: column;
   align-items: flex-start;
-  gap: 3px;
+  justify-content: space-between;
+  gap: 6px;
   min-width: 0;
   border: 1px solid rgb(207 237 226 / 0.18);
   border-bottom: 5px solid #627a78;
@@ -72,12 +72,19 @@ button.tile:focus-visible { outline: 2px solid #bde5c5; outline-offset: 2px; }
 .tilePressed { border-color: #bde5c5; border-bottom-color: #bde5c5; }
 .tileAttention { border-bottom-color: #d9a441; }
 .tileAlert { border-bottom-color: #e0806a; }
+.words { display: flex; flex-direction: column; align-items: flex-start; gap: 3px; min-width: 0; }
+/* The tile's drawn picture: beside the words, never squeezing them. */
+.picture { display: flex; flex: none; align-items: flex-start; opacity: 0.95; }
+.art { display: block; width: auto; height: 46px; }
+.tileStacked { flex-direction: column; justify-content: flex-start; }
+.pictureAbove { display: flex; align-self: stretch; justify-content: flex-end; margin-bottom: 2px; }
+.pictureAbove .art { height: 38px; }
 .mark { display: inline-flex; align-items: center; margin-right: 6px; vertical-align: -1px; }
-.tileTitle { max-width: 100%; font-size: 0.86rem; font-weight: 650; line-height: 1.3; overflow-wrap: anywhere; }
+.tileTitle { max-width: 100%; font-size: 0.86rem; font-weight: 650; line-height: 1.3; overflow-wrap: break-word; }
 .figure { color: #c7f4cb; font-size: 1.45rem; font-weight: 800; font-variant-numeric: tabular-nums; letter-spacing: -0.02em; line-height: 1.15; }
 .figure small { color: var(--hero-muted); font-size: 0.75rem; font-weight: 600; letter-spacing: 0; }
 /* 12px at least: read outdoors, and by older eyes. */
-.line { max-width: 100%; color: #d3e2dc; font-size: 0.75rem; line-height: 1.35; overflow-wrap: anywhere; }
+.line { max-width: 100%; color: #d3e2dc; font-size: 0.75rem; line-height: 1.35; overflow-wrap: break-word; }
 
 .footer { display: flex; align-items: center; gap: 12px; padding: 13px 9px 0; color: #aecbc4; }
 .light { flex: none; width: 7px; height: 7px; border-radius: 50%; background: #8de9ae; box-shadow: 0 0 0 4px rgb(141 233 174 / 0.09), 0 0 12px rgb(141 233 174 / 0.55); }

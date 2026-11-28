@@ -2,6 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
+import { EarTagArt, PenArt, PinnedNoteArt, RainGaugeArt, SoilCoreArt } from "@/components/farm-hero-art";
 
 /** The dark panel farm pages open with: purely how it looks, so the checks are on what's read and what can be tapped. */
 describe("farm panel", () => {
@@ -33,5 +34,22 @@ describe("farm panel", () => {
     expect(tiles).toContain("300<small> head</small>");
     expect(tiles).toContain("Paddock 9");
     expect(tiles).toMatch(/<div class="[^"]*">.*House gauge/);
+  });
+
+  it("draws the tile pictures from the data, hidden from a screen reader", () => {
+    const draw = (element: Parameters<typeof renderToStaticMarkup>[0]) => renderToStaticMarkup(element);
+    // A pen holds a dot per fifty head: at least one for any stock, twelve at most, none when empty.
+    const dots = (head: number) => (draw(createElement(PenArt, { head })).match(/<ellipse/g) ?? []).length;
+    expect([0, 6, 300, 5000].map(dots)).toEqual([0, 1, 6, 12]);
+    // The gauge's water is as tall as the reading, out of 50 mm, and never taller than the tube.
+    const water = (mm: number | null) => Number(/<rect[^>]*height="(\d+)"/.exec(draw(createElement(RainGaugeArt, { mm })))?.[1]);
+    expect([null, 0, 25, 50, 120].map(water)).toEqual([0, 0, 20, 40, 40]);
+    // A tag takes the mob's colour when it knows it, and is yellow otherwise.
+    expect(draw(createElement(EarTagArt, { colour: "Blue" }))).toContain("#6fa8dc");
+    expect(draw(createElement(EarTagArt, { colour: "tartan" }))).toContain("#f2c94c");
+    expect(draw(createElement(PinnedNoteArt, { overdue: true }))).toContain("#e0604c");
+    for (const art of [createElement(PenArt, { head: 1 }), createElement(RainGaugeArt, { mm: 1 }), createElement(EarTagArt, {}), createElement(PinnedNoteArt, { overdue: false }), createElement(SoilCoreArt)]) {
+      expect(draw(art)).toContain('aria-hidden="true"');
+    }
   });
 });
