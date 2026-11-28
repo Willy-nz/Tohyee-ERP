@@ -19,7 +19,7 @@ section{margin-top:35px}
 a{color:#216956}
 </style></head>
 <body><h1>Tohyee illustration review</h1>
-<p>Review every farm icon beside Tohyee's original general icons. Check the shapes at <strong>28px</strong> (mobile) and <strong>64px</strong> (cards), and against both light and dark surfaces. New farming icons use approved illustrated PNG artwork. Original shared icons remain SVG.</p>
+<p>Review every farm icon beside Tohyee's original general icons. Check the shapes at <strong>28px</strong> (mobile) and <strong>64px</strong> (cards), and against both light and dark surfaces. Farm and selected business/shared icons use approved illustrated PNG artwork; the remaining shared icons are still SVG.</p>
 <div class="controls"><label>Size <select id="size"><option value="28">28 px</option><option value="64" selected>64 px</option></select></label><label><input id="dark" type="checkbox">Dark preview background</label><label><input id="onlyNew" type="checkbox">Show new farm icons only</label></div>
 <div id="gallery"></div>
 <script>
@@ -40,7 +40,7 @@ const grid=document.createElement("div");grid.className="grid";
 for(const name of names.split(" ")){
 const card=document.createElement("div");card.className="card";
 const preview=document.createElement("div");preview.className="preview";
-const img=document.createElement("img");const sharedFarmPng=new Set(["livestock","effluent","camera","quad","weather"]);const extension=category==="Existing shared icons"&&!sharedFarmPng.has(name)?".svg":".png";img.src="./icons/"+name+extension;img.width=+size.value;img.height=+size.value;img.alt=name.replaceAll("-"," ");
+const img=document.createElement("img");const illustratedShared=new Set(["livestock","effluent","camera","quad","weather","banking","sales","purchases","inventory","settings","shop","team","card","phone","key","reassign","duplicates","form","pipeline","funnel","reports","chat","mail","ai","accounting"]);const extension=category==="Existing shared icons"&&!illustratedShared.has(name)?".svg":".png";img.src="./icons/"+name+extension;img.width=+size.value;img.height=+size.value;img.alt=name.replaceAll("-"," ");
 img.addEventListener("error",()=>{card.style.borderColor="#bf594c"});
 preview.append(img);const label=document.createElement("strong");label.textContent=name.replaceAll("-"," ");const code=document.createElement("code");code.textContent=name+extension;
 card.append(preview,label,code);grid.append(card)}
