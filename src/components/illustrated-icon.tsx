@@ -91,13 +91,17 @@ function isFarmIcon(name: IllustratedIconName): name is FarmIconName {
 export type IllustratedIconName = keyof typeof artwork | FarmIconName;
 
 // Approved illustrated artwork for farm destinations and the business icon refresh.
-// Keep the remaining inline SVGs until their individual artwork passes visual QA.
+// All shared menu icons now use approved PNG artwork. Historical inline SVGs remain as editable source and rollback fallback.
 const ILLUSTRATED_SHARED_ICONS: ReadonlySet<IllustratedIconName> = new Set([
   "livestock", "effluent", "camera", "quad", "weather",
   "banking", "sales", "purchases", "inventory", "settings",
   "shop", "team", "card", "phone", "key",
   "reassign", "duplicates", "form", "pipeline", "funnel",
   "reports", "chat", "mail", "ai", "accounting",
+  "calendar", "crm", "documents", "offline", "photo", "payroll", "tax", "tax-return", "tax-code", "credit-note",
+  "price", "coins", "currency", "receipt", "tagged-receipt", "awaiting", "inspect", "approval", "synced", "sync-pending",
+  "analytics", "farm", "jobs", "location", "maps", "safety", "sensors", "flask", "rd-claim", "clock",
+  "leave", "checklist", "scales", "vehicle", "apps", "csv", "spreadsheet", "database", "search", "social",
 ]);
 
 /** Decorative illustration: always pair with a visible label. */
