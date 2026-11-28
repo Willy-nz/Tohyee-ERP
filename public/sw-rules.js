@@ -41,8 +41,12 @@
   var FARM_ICON_URLS = ["farm-walk", "mob-in", "mob-out", "cover-reading", "feed", "rain-gauge", "move-mob", "births", "deaths", "treatment", "hazard", "near-miss", "incident", "irrigation", "pond-level", "log", "more", "pasture", "fertiliser", "rainfall", "soil-test", "tractor", "medicines", "animal-tag", "stock-truck", "vet", "delivery", "contractor", "meeting", "deadline", "sun", "cloud", "rain", "wind", "frost"].map(function (name) {
     return "/illustrations/icons/" + name + ".png";
   });
+  // Five farm-facing shared icons now use local PNG artwork too.
+  var SHARED_FARM_ICON_URLS = ["livestock", "effluent", "camera", "quad", "weather"].map(function (name) {
+    return "/illustrations/icons/" + name + ".png";
+  });
   /** Built files (names change with every build), icons, fonts and the manifest. */
-  var STATIC_CACHE = "tohyee-static-v1";
+  var STATIC_CACHE = "tohyee-static-v2";
   var PAGE_CACHE_PREFIX = "tohyee-pages-";
   /** After this long without signing in online, the copies on the device stay locked. Matches a Tohyee session's 14 days without use. */
   var OFFLINE_SESSION_DAYS = 14;
@@ -182,6 +186,7 @@
   scope.TohyeeSw = {
     OFFLINE_PAGES: OFFLINE_PAGES,
     FARM_ICON_URLS: FARM_ICON_URLS,
+    SHARED_FARM_ICON_URLS: SHARED_FARM_ICON_URLS,
     PAGE_NAMES: PAGE_NAMES,
     STATIC_CACHE: STATIC_CACHE,
     OFFLINE_SESSION_DAYS: OFFLINE_SESSION_DAYS,
