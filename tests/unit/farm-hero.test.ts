@@ -2,7 +2,7 @@ import { createElement } from "react";
 import { renderToStaticMarkup } from "react-dom/server";
 import { describe, expect, it } from "vitest";
 import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
-import { EarTagArt, FeedWedgeArt, PenArt, PinnedNoteArt, RainGaugeArt, SoilCoreArt } from "@/components/farm-hero-art";
+import { CoverLevelArt, EarTagArt, FeedWedgeArt, HoursChartArt, PenArt, PinnedNoteArt, PipeArt, RainGaugeArt, SoilCoreArt } from "@/components/farm-hero-art";
 
 /** The dark panel farm pages open with: purely how it looks, so the checks are on what's read and what can be tapped. */
 describe("farm panel", () => {
@@ -66,5 +66,34 @@ describe("farm panel", () => {
     const empty = renderToStaticMarkup(createElement(FeedWedgeArt, { bars: [], average: null }));
     expect(empty).not.toContain("<rect");
     expect(empty).not.toContain("NaN");
+  });
+
+  it("draws the next hours as a temperature line with a bar for each wet hour", () => {
+    const at = (hour: number) => new Date(2026, 10, 28, hour).toISOString();
+    const hours = [
+      { at: at(22), temperatureC: "10", rainMm: "0" },
+      { at: at(23), temperatureC: "6", rainMm: "2.0" },
+      { at: at(24), temperatureC: null, rainMm: "4.0" },
+      { at: at(25), temperatureC: "2", rainMm: null },
+    ];
+    const html = renderToStaticMarkup(createElement(HoursChartArt, { hours }));
+    // Two wet hours: two bars, the wettest the full 30 high and the other half of it.
+    expect([...html.matchAll(/<rect[^>]*height="([\d.]+)"/g)].map((match) => Number(match[1]))).toEqual([15, 30]);
+    // The line runs from the warmest (top, 10) to the coldest (bottom, 84), skipping the hour with no temperature.
+    const line = /<path d="M([^"]+)" fill="none"/.exec(html)?.[1].split("L") ?? [];
+    expect(line).toHaveLength(3);
+    expect(line[0].endsWith(" 10.0")).toBe(true);
+    expect(line[2].endsWith(" 84.0")).toBe(true);
+    // One midnight in these four hours.
+    expect(html.match(/stroke-dasharray="2 4"/g)).toHaveLength(1);
+    const empty = renderToStaticMarkup(createElement(HoursChartArt, { hours: [] }));
+    expect(empty).not.toContain("NaN");
+    expect(empty).not.toContain("<rect");
+  });
+
+  it("fills a farm's cover level against the highest farm, and draws nothing in it with no reading", () => {
+    const level = (cover: number | null, highest: number) => Number(/<rect x="8"[^>]*height="(\d+)"/.exec(renderToStaticMarkup(createElement(CoverLevelArt, { cover, highest })))?.[1]);
+    expect([level(2600, 2600), level(1300, 2600), level(null, 2600), level(500, 0)]).toEqual([36, 18, 0, 0]);
+    expect(renderToStaticMarkup(createElement(PipeArt))).toContain('aria-hidden="true"');
   });
 });

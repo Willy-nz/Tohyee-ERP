@@ -3,6 +3,8 @@
 import Link from "next/link";
 import { useEffect, useState } from "react";
 import { useCanRecordFarmWork } from "@/components/farm-selector";
+import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
+import { PipeArt } from "@/components/farm-hero-art";
 import { useApiData } from "@/components/hooks";
 import { Badge, Button, Card, Field, Notice, ui } from "@/components/ui";
 import { api, errorMessage } from "@/lib/client/api";
@@ -127,6 +129,47 @@ export function FarmWater({
           : " left out"}
         . Check with your supplier before you buy.
       </Notice>
+      <FarmHero
+        eyebrow="Farm water / pipes"
+        title={farm.name}
+        label={`${farm.name} water pipes`}
+        heading="Pipes on the map"
+        hint={water?.pipes.length ? "Tap a pipe to size it" : undefined}
+        footer="Pump shed"
+        stats={
+          water
+            ? [
+                { value: water.pipes.length, label: water.pipes.length === 1 ? "pipe" : "pipes" },
+                ...(water.pipes.length ? [{ value: distanceText(water.totalLengthM), label: "in all" }] : []),
+                ...(water.pipes.some((pipe) => pipe.insideMm === null) ? [{ value: water.pipes.filter((pipe) => pipe.insideMm === null).length, label: "with no size yet", tone: "attention" as const }] : []),
+              ]
+            : []
+        }
+      >
+        {!water && !loaded.error ? <HeroEmpty>Loading…</HeroEmpty> : null}
+        {water && !water.pipes.length ? <HeroEmpty>No water pipes drawn yet. Draw them on the Map, under Farm assets, and they show here with their lengths.</HeroEmpty> : null}
+        {water?.pipes.length ? (
+          <HeroTiles>
+            {water.pipes.map((pipe) => (
+              <HeroTile
+                key={pipe.assetId}
+                title={pipe.name}
+                figure={distanceText(pipe.lengthM)}
+                picture={<PipeArt />}
+                pictureAbove
+                lines={[pipe.insideMm === null ? "No size yet" : `${pipe.insideMm} mm inside`, pipe.flowLpm === null ? "" : `${pipe.flowLpm} L/min`].filter(Boolean)}
+                tone={pipe.insideMm === null ? "attention" : undefined}
+                pressed={sized?.assetId === pipe.assetId}
+                onOpen={() => {
+                  setSized(pipe);
+                  if (pipe.flowLpm) setFlow(String(pipe.flowLpm));
+                  toSizer();
+                }}
+              />
+            ))}
+          </HeroTiles>
+        ) : null}
+      </FarmHero>
       <StockWater
         fromMobs={water?.stock ?? null}
         onUse={(litresAMinute) => {

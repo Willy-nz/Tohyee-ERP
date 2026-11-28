@@ -1,8 +1,11 @@
 "use client";
 
 import Link from "next/link";
+import { useRouter } from "next/navigation";
 import { useState } from "react";
 import { DateInput } from "@/components/date-input";
+import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
+import { CoverLevelArt } from "@/components/farm-hero-art";
 import { useApiData } from "@/components/hooks";
 import { Badge, Card, Empty, Field, Notice, ui } from "@/components/ui";
 import { type FarmComparison, FRESH_PASTURE_DAYS } from "@/lib/farming/comparison-rules";
@@ -56,9 +59,55 @@ function Missing({ pasture }: { pasture: Pasture }) {
 export function FarmComparisonView({ organisationId }: { organisationId: string }) {
   const [onDate, setOnDate] = useState(todayInBrowser());
   const loaded = useApiData<{ comparison: FarmComparison }>("/api/farming/comparison", { organisationId, onDate });
+  const router = useRouter();
   if (loaded.error) return <Notice tone="error">{loaded.error}</Notice>;
   const data = loaded.data?.comparison;
+  const covers = (data?.farms ?? []).map((farm) => (farm.pasture.averageKgDmPerHa === null ? null : Number(farm.pasture.averageKgDmPerHa)));
+  const highest = Math.max(0, ...covers.filter((value): value is number => value !== null));
   return (
+    <>
+    <FarmHero
+      eyebrow="All farms / side by side"
+      title={data ? `${data.allFarms.farms} ${data.allFarms.farms === 1 ? "farm" : "farms"}` : "All farms"}
+      label="All farms compared"
+      heading="Pasture cover by farm"
+      hint={data?.farms.length ? "Tap a farm for its pasture" : undefined}
+      footer="All farms"
+      stats={
+        data && data.farms.length
+          ? [
+              { value: int.format(data.allFarms.paddocks), label: "paddocks" },
+              { value: data.allFarms.effectiveHa, label: "effective ha" },
+              ...(data.allFarms.pasture.averageKgDmPerHa === null ? [] : [{ value: int.format(Number(data.allFarms.pasture.averageKgDmPerHa)), label: "kg DM/ha over all" }]),
+              ...(data.allFarms.pasture.farmsNotFresh ? [{ value: data.allFarms.pasture.farmsNotFresh, label: `walked over ${FRESH_PASTURE_DAYS} days ago`, tone: "attention" as const }] : []),
+              ...(data.allFarms.farmsWithoutPlan ? [{ value: data.allFarms.farmsWithoutPlan, label: "with no fertiliser plan", tone: "attention" as const }] : []),
+            ]
+          : []
+      }
+    >
+      {!data ? <HeroEmpty>Loading…</HeroEmpty> : null}
+      {data && !data.farms.length ? <HeroEmpty>No farms yet.</HeroEmpty> : null}
+      {data?.farms.length ? (
+        <HeroTiles>
+          {data.farms.map((farm, index) => (
+            <HeroTile
+              key={farm.farmId}
+              title={farm.farmName}
+              figure={covers[index] === null ? "–" : int.format(covers[index]!)}
+              unit={covers[index] === null ? undefined : "kg DM/ha"}
+              picture={<CoverLevelArt cover={covers[index]} highest={highest} />}
+              lines={[
+                `${farm.effectiveHa} ha, ${farm.paddocks} paddock${farm.paddocks === 1 ? "" : "s"}`,
+                farm.pasture.newestReading ? `Walked ${formatDate(farm.pasture.newestReading)}` : "No readings",
+                farm.pasture.noReading ? `${farm.pasture.noReading} with no reading` : "",
+              ].filter(Boolean)}
+              tone={farm.pasture.newestReading && !farm.pasture.fresh ? "attention" : undefined}
+              onOpen={() => router.push(farmLink("/operations/farming/pasture", farm.farmId))}
+            />
+          ))}
+        </HeroTiles>
+      ) : null}
+    </FarmHero>
     <Card
       title="All farms"
       description={`Pasture cover uses each paddock's latest reading on or before the date, weighted by area. The all-farms figure is worked from every paddock, not by averaging the farms. A farm walk more than ${FRESH_PASTURE_DAYS} days old is flagged. Fertiliser is each farm's latest plan.`}
@@ -167,5 +216,6 @@ export function FarmComparisonView({ organisationId }: { organisationId: string 
       ) : null}
       {data ? <p className={ui.muted}>Figures are on {formatDate(data.onDate)}. Archived farms aren&apos;t included. Money isn&apos;t shown here: farm-level income and costs need the farm reporting rules first.</p> : null}
     </Card>
+    </>
   );
 }

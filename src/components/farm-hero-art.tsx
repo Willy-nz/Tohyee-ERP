@@ -141,3 +141,73 @@ export function FertiliserBagArt() {
     </svg>
   );
 }
+
+/**
+ * The next hours as a chart: the temperature as a line and each hour's rain
+ * as a bar from the bottom. Midnights are marked, so the days can be told
+ * apart. The figures are in the table underneath.
+ */
+export function HoursChartArt({ hours }: { hours: Array<{ at: string; temperatureC: string | null; rainMm: string | null }> }) {
+  const width = 300;
+  const top = 10;
+  const floor = 84;
+  const temps = hours.map((hour) => (hour.temperatureC === null ? null : Number(hour.temperatureC)));
+  const known = temps.filter((value): value is number => value !== null && Number.isFinite(value));
+  const rains = hours.map((hour) => (hour.rainMm === null ? 0 : Math.max(0, Number(hour.rainMm) || 0)));
+  const low = known.length ? Math.min(...known) : 0;
+  const high = known.length ? Math.max(...known) : 1;
+  const span = Math.max(1, high - low);
+  const wettest = Math.max(1, ...rains);
+  const step = width / Math.max(hours.length, 1);
+  const x = (i: number) => i * step + step / 2;
+  const y = (value: number) => floor - ((value - low) / span) * (floor - top);
+  const line = temps
+    .map((value, i) => (value === null || !Number.isFinite(value) ? null : `${x(i).toFixed(1)} ${y(value).toFixed(1)}`))
+    .filter((point): point is string => point !== null);
+  const midnights = hours.map((hour, i) => (new Date(hour.at).getHours() === 0 ? i : -1)).filter((i) => i >= 0);
+  return (
+    <svg className={styles.chart} viewBox={`0 0 ${width} 100`} aria-hidden="true">
+      {midnights.map((i) => (
+        <path key={i} d={`M${(i * step).toFixed(1)} ${top - 4}V${floor}`} stroke="#cfe9e2" strokeWidth="1" strokeDasharray="2 4" opacity="0.5" />
+      ))}
+      {rains.map((mm, i) => (mm > 0 ? <rect key={i} x={(i * step + step * 0.15).toFixed(1)} y={(floor - (mm / wettest) * 30).toFixed(1)} width={(step * 0.7).toFixed(1)} height={((mm / wettest) * 30).toFixed(1)} fill="#6fc3e8" opacity="0.85" /> : null))}
+      <path d={`M0 ${floor}h${width}`} stroke="#cfe9e2" strokeWidth="1" opacity="0.5" />
+      {line.length > 1 ? <path d={`M${line.join("L")}`} fill="none" stroke="#ffe3af" strokeWidth="2" strokeLinejoin="round" strokeLinecap="round" /> : null}
+      {known.length ? (
+        <>
+          <text x="2" y="98" fill="#d3e2dc" fontSize="12">
+            Now
+          </text>
+          <text x={width - 2} y="98" fill="#d3e2dc" fontSize="12" textAnchor="end">
+            {`+${hours.length} h`}
+          </text>
+        </>
+      ) : null}
+    </svg>
+  );
+}
+
+/** A length of pipe with a trough at the end, for a mapped water pipe. */
+export function PipeArt() {
+  return (
+    <svg className={styles.art} viewBox="0 0 52 44" aria-hidden="true">
+      <path d="M4 12h22a8 8 0 0 1 8 8v8" fill="none" stroke="#6fa8dc" strokeWidth="7" strokeLinecap="round" />
+      <path d="M4 12h22a8 8 0 0 1 8 8v8" fill="none" stroke="#cfe9e2" strokeWidth="1.2" strokeLinecap="round" opacity="0.6" />
+      <path d="M22 30h24l-3 10H25Z" fill="#9aa9ad" stroke={INK} strokeWidth="1.2" strokeLinejoin="round" />
+      <path d="M25.5 33h17" stroke="#6fc3e8" strokeWidth="3" strokeLinecap="round" />
+    </svg>
+  );
+}
+
+/** A farm's cover as a level, against the highest farm's. */
+export function CoverLevelArt({ cover, highest }: { cover: number | null; highest: number }) {
+  const level = cover === null || highest <= 0 ? 0 : Math.max(0, Math.min(1, cover / highest));
+  const height = Math.round(level * 36);
+  return (
+    <svg className={styles.art} viewBox="0 0 40 46" aria-hidden="true">
+      <rect x="6" y="4" width="28" height="38" rx="5" fill="rgb(255 255 255 / 0.08)" stroke="#cfe9e2" strokeWidth="1.3" />
+      <rect x="8" y={41 - height} width="24" height={height} rx="3" fill="#7fc9a0" />
+      {cover === null ? null : <path d="M11 9v-5m6 5V2m6 7V4m6 5V6" stroke="#7fc97f" strokeWidth="1.6" strokeLinecap="round" transform={`translate(0 ${32 - height})`} />}
+    </svg>
+  );
+}
