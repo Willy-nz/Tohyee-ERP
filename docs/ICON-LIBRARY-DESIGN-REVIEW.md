@@ -43,3 +43,14 @@ The more meaningful deficits were **missing illustrations** and **mismatched reu
 Artwork is not a substitute for actual product photos, medicines packaging or farm safety instructions. These icons are navigation illustrations, not diagnostic information. I inspected the cropped PNG contact sheet and reviewed file structure and paths; **a true browser/device visual review has not been completed**. The complete icon catalogue is available for a human/device pass before merging. The six calendar-job-type icons and five weather-condition icons are prepared for use, but their specialist screens are not yet wired in this PR.
 
 The app's existing internal artwork is intentionally retained, avoiding unnecessary churn to all unrelated modules.
+
+## Redraw of the flagged shared icons — 28 November 2026
+
+Issue #121 lists the icons a review found short of standard. This pass redrew the flagged **shared SVG** icons in the existing grammar (64×64, `#233E45` round 2.4 strokes, the four pale fills), drawn in code:
+
+- **Redrawn:** livestock (a cow side-on, replacing the face), effluent (a pond, an inlet and a level staff), camera (a fixed security camera on a bracket), weather, sensors (a weather mast), phone, price (a tag with a dollar sign), and the paper icons, each given its own main shape: receipt, tagged-receipt, credit-note (a return arrow), awaiting (an hourglass), sales (a till), csv (a sheet with a grid), form (tick boxes), payroll (a person and a coin), tax-return (a sheet being filed), inspect (a magnifier), reports and rd-claim (a bulb and a coin).
+- **New, so a page stops sharing a picture:** herd (Mobs), fuel (Fuel excise refund), compare (All farms compared), benchmark (Benchmarks), paddocks (Farms and paddocks), import-map (Import paddock shapes) and visits (My visits).
+- **Left as they were:** scales, key, tax, tax-code, maps, location, analytics and the three sync clouds, which the review called fine or low priority; `quad` is kept but no page uses it now.
+- **Not redrawn: the 35 farm PNGs.** Their painted look can't be matched in code, and flat replacements would be a step down. The lookalike pairs among them (cover reading and soil test; incident and vet; hazard and near miss) still need an illustrator; #121 has the brief.
+
+Checked on a contact sheet at 64px and 28px and in Farm › More at 360px. Not checked on a phone. `website/img/icons/payroll.svg` was updated with its shared copy.
