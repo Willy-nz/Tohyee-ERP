@@ -35,3 +35,13 @@ Use professionally illustrated, instantly recognizable **icons**, not glossy 3D 
 The original 96px raster icons (22 Nov review) and the rejected simplistic SVG experiments (PR #127) explain the prior two-style mismatch. The actual farm UI returned to PNG in PR #128, and this replacement improves that artwork without forcing the low-quality SVG experiment into production.
 
 The dynamic `FarmHero` artwork in `src/components/farm-hero-art.tsx` is separate: its charts, measurements and data-dependent states require a dedicated pass, not interchangeable static icons.
+
+## Shared business illustration refresh — first set (29 November 2026)
+
+Twenty shared icons now use individually cropped and cleaned 160×160 illustrated PNGs from a single consistent design sheet:
+
+`banking`, `sales`, `purchases`, `inventory`, `settings`, `shop`, `team`, `card`, `phone`, `key`, `reassign`, `duplicates`, `form`, `pipeline`, `funnel`, `reports`, `chat`, `mail`, `ai`, and `accounting`.
+
+The renderer selects these by explicit name, preserving the remaining inline shared SVG icons and the previously approved farm artwork. The original SVG copies remain in the repository as design source/fallback rather than being removed. Other shared icons, including the highly repetitive accounting document icons (`credit-note`, `awaiting`, `tax-return`, `receipt`, `tagged-receipt`, etc.), are **not** claimed complete and remain part of #125. Do not swap those for artwork taken from overview infographics until individual image quality has been verified.
+
+Quality checks: view `/illustrations/icon-review.html` at 28px and 64px on light and dark backgrounds. The business PNGs are not pre-fetched for offline farming pages unless needed on those pages; the existing farm offline icon cache is unchanged. App launch/logo artwork remains intentionally unchanged.
