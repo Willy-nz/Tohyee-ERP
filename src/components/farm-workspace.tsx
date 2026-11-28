@@ -2,10 +2,13 @@
 
 import Link from "next/link";
 import { InfoTip } from "@/components/info-tip";
-import { IllustratedIcon, type IllustratedIconName } from "@/components/illustrated-icon";
-import { useRouter } from "next/navigation";
+import type { IllustratedIconName } from "@/components/illustrated-icon";
+import { usePathname, useRouter } from "next/navigation";
 import { type ReactNode, useState } from "react";
+import { AppGrid } from "@/components/app-grid";
 import { RequireOrganisation } from "@/components/books";
+import { useModules } from "@/components/modules";
+import { farmAppGroups, visibleMenus } from "@/components/navigation";
 import { FarmEffluentToday } from "@/components/farm-effluent-care";
 import { lastMovedOverlays, useEffluentLog } from "@/components/farm-effluent-log";
 import { hazardOverlays } from "@/components/farm-safety";
@@ -16,7 +19,7 @@ import { gaugeOverlays, useRainGauges } from "@/components/farm-rainfall";
 import { assetOverlays, FarmAssetsCard, type MapDrawing, MapLayerToggles, MeasureCard, shownOverlays, useMapAssets, useMapLayers } from "@/components/farm-map-assets";
 import { type MapLayer, overlayLayer } from "@/lib/farming/map-assets-rules";
 import { MapPictureSwitch, PaddockGreenness, SatelliteVegetationLink, useFarmVegetation, useMapPicture, VegetationMapNotes, vegetationRaster } from "@/components/farm-vegetation";
-import { FarmOfflineStatus, OFFLINE_PAGE } from "@/components/farm-offline";
+import { FarmOfflineStatus } from "@/components/farm-offline";
 import { FarmRowList } from "@/components/farm-rows";
 import { FarmSelector, useCanRecordFarmWork, useSelectedFarm } from "@/components/farm-selector";
 import { PaddockMap } from "@/components/farming";
@@ -604,100 +607,19 @@ export function PaddockCard({ organisationId, farm, status, hazards = [], plan =
 
 export { FarmSafetyTab };
 
-type MoreLink = { icon?: IllustratedIconName; href: string; label: string; note?: string; staff?: boolean; minRole?: "viewer" | "bookkeeper" | "admin" };
-
-/** The Farm menu's big buttons: the farm work that isn't one of the five tabs, Effluent first. */
-const FARM_WORK: MoreLink[] = [
-  { href: "/operations/farm/effluent", icon: "effluent", label: "Effluent", note: "Irrigation log, ponds, checks, incidents, council pack", staff: true },
-  { href: "/operations/farm/tractor", icon: "tractor", label: "Tractor mode", note: "Spreading, spraying and mowing from phone GPS", staff: true },
-  { href: "/operations/farm/security", icon: "camera", label: "Security", note: "Camera photos and clips", staff: true },
-  { href: "/operations/farm/mobs", icon: "livestock", label: "Mobs", note: "Moves, weights, sales and stocking rate", staff: true },
-  { href: "/operations/farm/medicines", icon: "medicines", label: "Medicines", note: "What's on hand, running low and expiring", staff: true },
-  { href: "/operations/farm/animals", icon: "animal-tag", label: "Animals", note: "Tags, weights, body condition and quick entry", staff: true },
-  { href: "/operations/farming/pasture", icon: "pasture", label: "Pasture and feed", note: "Readings, grazings and feed", staff: true },
-  { href: "/operations/farming/rainfall", icon: "rainfall", label: "Rainfall", note: "Rain gauges, by month and season", staff: true },
-  { href: "/operations/farm/weather", icon: "weather", label: "Weather", note: "MetService forecast for the next 7 days", staff: true },
-  { href: "/operations/farm/water", icon: "irrigation", label: "Water", note: "Size a pipe, and what each water line does", staff: true },
-  { href: "/operations/farming/calendar", icon: "calendar", label: "Farm calendar", note: "Jobs, due dates and reminders", staff: true },
-  { href: "/operations/farming/tasks", icon: "checklist", label: "Tasks", note: "Jobs for the farm team, with reminders", staff: true },
-  { href: "/operations/farm/timeline", icon: "clock", label: "Farm timeline", note: "Moves, treatments, sales, weights and sprays", staff: true },
-  { href: "/operations/farming/soil", icon: "soil-test", label: "Soil tests", staff: true },
-  { href: "/operations/farming", icon: "maps", label: "Farms and paddocks", note: "Areas, boundaries, drawing paddocks", staff: true },
-];
-
-const DETAILS: MoreLink[] = [
-  { href: "/operations/farming/fertiliser", icon: "fertiliser", label: "Fertiliser plans" },
-  { href: "/operations/farming/notebook", icon: "documents", label: "Farm notebook" },
-  { href: "/operations/livestock", icon: "livestock", label: "Livestock" },
-  { href: "/operations/farming/compare", icon: "analytics", label: "All farms compared" },
-];
-
-const YEAR_END: MoreLink[] = [
-  { href: "/operations/farming/benchmarks", icon: "analytics", label: "Benchmarks" },
-  { href: "/operations/farming/co-op-shares", icon: "coins", label: "Co-op shares" },
-  { href: "/operations/farming/fuel-refund", icon: "quad", label: "Fuel excise refund", minRole: "bookkeeper" },
-  { href: "/operations/livestock/valuation", icon: "price", label: "Livestock valuation" },
-  { href: "/operations/farming/import", icon: "maps", label: "Import paddock shapes", minRole: "bookkeeper" },
-];
-
 export function FarmMore({ organisationId, farm }: FarmContext) {
   const { can, current } = useWorkspace();
+  const pathname = usePathname();
+  const modules = useModules(current?.id ?? null);
   const farmWorker = current?.role === "farm_worker";
-  const shown = (links: MoreLink[]) => links.filter((link) => (farmWorker ? link.staff : can(link.minRole ?? "viewer")));
-  const details = shown(DETAILS);
+  // Everything on the farm that isn't one of the five tabs, as a phone shows its apps: the Farm menu's own groups.
+  const groups = farmAppGroups(visibleMenus("farm", { can, modules, farmWorker }));
   return (
-    <div className={styles.grid}>
-      {/* The full Farm menu: everything on the farm, so Effluent is found without searching. */}
-      <Card title="Farm menu">
-        <nav aria-label="Farm menu" className={styles.menuTiles}>
-          {shown(FARM_WORK).map((link) => (
-            <Link key={link.href} href={link.href} className={styles.menuTile}>
-              {link.icon ? <IllustratedIcon name={link.icon} size={48} /> : null}
-              <span className={styles.menuTileText}><strong>{link.label}</strong>
-                {link.note ? <small>{link.note}</small> : null}
-              </span>
-              <span aria-hidden="true" className={styles.menuArrow}>›</span>
-            </Link>
-          ))}
-        </nav>
-      </Card>
-      {details.length ? (
-        <Card title="Details">
-          <LinkList links={details} />
-        </Card>
-      ) : null}
-      {farmWorker ? null : (
-        <Card title="Year-end and setup">
-          <LinkList links={shown(YEAR_END)} />
-        </Card>
-      )}
+    <div className={ui.stack}>
+      <nav aria-label="Farm menu">
+        <AppGrid groups={groups} current={(href) => href === pathname} />
+      </nav>
       <AppTiles organisationId={organisationId} farmId={farm.id} manage />
-      <Card title="This phone or tablet" description="Put Tohyee on the Home Screen as a web app. The farm pages then open without a signal.">
-        <LinkList
-          links={[
-            { href: "/get-tohyee", icon: "documents", label: "Get Tohyee on this device", staff: true },
-            { href: OFFLINE_PAGE, icon: "offline", label: "Offline on this device", note: "What's kept, and when it was updated", staff: true },
-          ]}
-        />
-      </Card>
     </div>
-  );
-}
-
-function LinkList({ links }: { links: MoreLink[] }) {
-  return (
-    <ul className={styles.links}>
-      {links.map((link) => (
-        <li key={link.href}>
-          <Link href={link.href}>
-            {link.icon ? <IllustratedIcon name={link.icon} size={32} /> : null}
-            <span>
-              {link.label}
-              {link.note ? <span className={ui.muted}> · {link.note}</span> : null}
-            </span>
-          </Link>
-        </li>
-      ))}
-    </ul>
   );
 }

@@ -3641,8 +3641,12 @@ that something happened.
   shared layout, so they're on every farm page: direct links, reloads,
   pages opened offline, and Farms and paddocks, Pasture, Soil and the
   calendar too. The page's tab is marked, the chosen farm stays, and pages
-  leave room for the tabs and the phone's own bar. **More** opens with a
-  **Farm menu** of big buttons, Effluent first. **Safety** has a labelled
+  leave room for the tabs and the phone's own bar. **More** shows
+  the farm's pages the way a phone shows its apps: a grid of pictures with
+  their names underneath, under the Farm menu's own headings (Paddocks and
+  feed, Stock, Weather, Jobs and records, Year end and money, Apps and this
+  device), Effluent first. The phone's ☰ menu draws Farm's More the same way.
+  Both come from the one Farm menu, so a page added to it appears in each. **Safety** has a labelled
   **Emergency details** area (address, entrance, contacts to tap, 111 as a
   phone link); the large Call 111 button is gone. **Get Tohyee on this
   device** picks the steps for the browser it's opened in (Safari,

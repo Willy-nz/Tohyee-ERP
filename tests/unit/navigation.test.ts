@@ -5,6 +5,7 @@ import {
   CHAT_MENUS,
   CRM_MENUS,
   FARM_MENUS,
+  farmAppGroups,
   destinations,
   farmWorkAllowsPath,
   inArea,
@@ -474,5 +475,42 @@ describe("the Chat app's menu (TCH1, TCH6)", () => {
     expect(inArea("/chat/review", CHAT_MENUS[1])).toBe(true);
     expect(visibleMenus("chat", { can: () => true, modules: { ...modules, chat: false } })).toEqual([]);
     expect(visibleMenus("chat", { can: () => false, modules, farmWorker: true })).toEqual([]);
+  });
+});
+
+/** The Farm app's More page and phone menu, drawn as a grid of apps. */
+describe("Farm More as a grid of apps", () => {
+  const modules = { crm: false, reporting: false, notForProfit: false, analytics: false, gst: true, farming: true, livestock: true } as never;
+  const owner = farmAppGroups(visibleMenus("farm", { can: () => true, modules }));
+
+  it("marks only Farm's More menu to be drawn as tiles", () => {
+    expect(FARM_MENUS.filter((menu) => menu.tiles).map((menu) => menu.label)).toEqual(["More"]);
+  });
+
+  it("keeps the Farm menu's headings, with Effluent first", () => {
+    expect(owner.map((group) => group.heading)).toEqual(["Paddocks and feed", "Stock", "Weather", "Jobs and records", "Year end and money", "Apps and this device"]);
+    expect(owner[0].links[0]).toEqual({ href: "/operations/farm/effluent", label: "Effluent" });
+  });
+
+  it("has every page of the More menu once, and nothing else", () => {
+    const more = FARM_MENUS.find((menu) => menu.label === "More")!;
+    const hrefs = owner.flatMap((group) => group.links.map((link) => link.href));
+    expect(hrefs).toEqual(["/operations/farm/effluent", ...more.groups.flatMap((group) => group.links.map((link) => link.href))]);
+    expect(new Set(hrefs).size).toBe(hrefs.length);
+  });
+
+  it("uses a short name under a picture only where the full one is long, and keeps it short", () => {
+    const links = owner.flatMap((group) => group.links);
+    for (const link of links) expect((link.tile ?? link.label).length, link.label).toBeLessThanOrEqual(20);
+    expect(links.find((link) => link.href === "/get-tohyee")?.tile).toBe("Get the app");
+  });
+
+  it("shows farm staff only the pages they may open", () => {
+    const staff = farmAppGroups(visibleMenus("farm", { can: () => false, modules, farmWorker: true }));
+    const hrefs = staff.flatMap((group) => group.links.map((link) => link.href));
+    expect(hrefs).toContain("/operations/farm/effluent");
+    expect(hrefs).toContain("/operations/farm/medicines");
+    expect(hrefs).not.toContain("/operations/farming/fuel-refund");
+    expect(hrefs).not.toContain("/operations/farming/notebook");
   });
 });

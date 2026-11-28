@@ -12,6 +12,7 @@ const artwork = {
   "shop": (<g fill="none" stroke="#233E45" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path fill="#FFFDF7" d="M14 30h36v24H14Z"/><rect x="19" y="36" width="11" height="10" rx="2" fill="#A8D8BF"/><path fill="#B9D9EE" d="M36 54V37h9v17"/><path fill="#F3D48B" d="M16 10h32l6 16q0 5-5.5 5t-5.5-5q0 5-5.5 5t-5.5-5q0 5-5.5 5t-5.5-5q0 5-5.5 5t-5.5-5Z"/><path d="M27 10l-2 16m12-16 2 16M10 54h44"/></g>),
   "team": (<g fill="none" stroke="#233E45" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><circle cx="42" cy="21" r="7" fill="#B9D9EE"/><path fill="#B9D9EE" d="M29 45v-2q0-11 13-11t13 11v2Z"/><circle cx="24" cy="27" r="8" fill="#FFFDF7"/><path fill="#A8D8BF" d="M9 54v-3q0-13 15-13t15 13v3Z"/></g>),
   "card": (<g fill="none" stroke="#233E45" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><rect x="8" y="15" width="48" height="34" rx="5" fill="#B9D9EE"/><path fill="#A8D8BF" d="M8 23h48v8H8Z"/><rect x="14" y="36" width="10" height="7" rx="2" fill="#F3D48B"/><path d="M32 41h17"/></g>),
+  "phone": (<g fill="none" stroke="#233E45" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><rect x="18" y="6" width="28" height="52" rx="6" fill="#B9D9EE"/><path fill="#FFFDF7" d="M22 14h20v32H22Z"/><path d="M29 52h6"/><path d="M32 20v14m-6-6 6 6 6-6"/><path fill="#A8D8BF" d="M26 39h12v3H26Z"/></g>),
   "key": (<g fill="none" stroke="#233E45" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path fill="#F3D48B" d="M28 28h28v8h-5v8h-7v-8h-4v5h-7v-5h-5Z"/><circle cx="20" cy="32" r="12" fill="#F3D48B"/><circle cx="16" cy="32" r="4" fill="#FFFDF7"/></g>),
   "reassign": (<g fill="none" stroke="#233E45" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path fill="#A8D8BF" d="M10 17h28v-7l16 13-16 13v-7H10Z"/><path fill="#B9D9EE" d="M54 41H26v-7L10 47l16 13v-7h28Z"/></g>),
   "duplicates": (<g fill="none" stroke="#233E45" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><rect x="19" y="9" width="36" height="30" rx="4" fill="#B9D9EE"/><rect x="9" y="22" width="36" height="32" rx="4" fill="#FFFDF7"/><circle cx="19" cy="34" r="4" fill="#A8D8BF"/><path d="M27 33h12M17 45h22"/></g>),
@@ -90,7 +91,7 @@ function isFarmIcon(name: IllustratedIconName): name is FarmIconName {
 export type IllustratedIconName = keyof typeof artwork | FarmIconName;
 
 /** Decorative illustration: always pair with a visible label. */
-export function IllustratedIcon({ name, size = 40 }: { name: IllustratedIconName; size?: 28 | 32 | 40 | 48 }) {
+export function IllustratedIcon({ name, size = 40 }: { name: IllustratedIconName; size?: 28 | 32 | 40 | 48 | 56 }) {
   return (
     <span className={styles.icon} aria-hidden="true" style={{ width: size, height: size }}>
       {isFarmIcon(name) ? (

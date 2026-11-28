@@ -6,7 +6,11 @@ import type { IllustratedIconName } from "@/components/illustrated-icon";
 /** An optional module a menu or link belongs to (example MOD1); shown only while it's on. Accounting counts as on unless it's been turned off (MOD2). */
 export type ModuleKey = "accounting" | "payroll" | "crm" | "reporting" | "notForProfit" | "analytics" | "gst" | "livestock" | "farming";
 /** `section`: the sub-heading the link sits under inside its column; links of a section are kept together. */
-export type MenuLink = { href: string; label: string; minRole?: Role; module?: ModuleKey; section?: string };
+export type MenuLink = {
+  href: string; label: string; minRole?: Role; module?: ModuleKey; section?: string;
+  /** A shorter name under its picture where the menu is drawn as a grid of apps; the label is still what's read out. */
+  tile?: string;
+};
 export type MenuGroup = { heading: string; links: MenuLink[] };
 /** A run of links under one sub-heading (none for a column without sub-headings). */
 export type MenuSection = { heading: string | null; links: MenuLink[] };
@@ -15,6 +19,8 @@ export type Menu = {
   label: string; href?: string; groups: MenuGroup[]; module?: ModuleKey; area?: string[]; minRole?: Role;
   /** Decorative picture for the whole menu, when its first link's picture would mislead (CRM Settings opens on Teams). */
   art?: IllustratedIconName;
+  /** On a phone, the menu's pages are drawn as a grid of pictures, like a phone's apps, instead of a list. */
+  tiles?: boolean;
 };
 
 /**
@@ -621,6 +627,7 @@ export const FARM_MENUS: Menu[] = [
     module: "farming",
     // Its first link (Farms and paddocks) is drawn as a map; the menu is the whole farm.
     art: "farm",
+    tiles: true,
     area: ["/operations/farm/more", "/operations/farm/offline", "/operations/farm/security", "/operations/farm/mobs", "/operations/farm/medicines", "/operations/farm/animals", "/operations/farm/timeline", "/operations/farm/weather", "/operations/farm/water", "/operations/farming"],
     // The everyday pages first; year-end and money sit together near the end.
     groups: [
@@ -632,8 +639,8 @@ export const FARM_MENUS: Menu[] = [
           { href: "/operations/farming/pasture", label: "Pasture and feed" },
           { href: "/operations/farming/soil", label: "Soil tests" },
           { href: "/operations/farming/fertiliser", label: "Fertiliser plans" },
-          { href: "/operations/farming/compare", label: "All farms compared" },
-          { href: "/operations/farming/import", label: "Import paddock shapes", minRole: "bookkeeper" },
+          { href: "/operations/farming/compare", label: "All farms compared", tile: "Compare farms" },
+          { href: "/operations/farming/import", label: "Import paddock shapes", minRole: "bookkeeper", tile: "Import shapes" },
         ],
       },
       {
@@ -668,7 +675,7 @@ export const FARM_MENUS: Menu[] = [
           { href: "/operations/livestock", label: "Livestock", module: "livestock" },
           { href: "/operations/livestock/valuation", label: "Livestock valuation", module: "livestock" },
           { href: "/operations/farming/co-op-shares", label: "Co-op shares" },
-          { href: "/operations/farming/fuel-refund", label: "Fuel excise refund", minRole: "bookkeeper" },
+          { href: "/operations/farming/fuel-refund", label: "Fuel excise refund", minRole: "bookkeeper", tile: "Fuel refund" },
           { href: "/operations/farming/benchmarks", label: "Benchmarks" },
         ],
       },
@@ -676,13 +683,27 @@ export const FARM_MENUS: Menu[] = [
         heading: "Apps and this device",
         links: [
           { href: "/operations/farming/apps", label: "Farm apps" },
-          { href: "/operations/farm/offline", label: "Offline on this device" },
-          { href: "/get-tohyee", label: "Get Tohyee on this device" },
+          { href: "/operations/farm/offline", label: "Offline on this device", tile: "Offline" },
+          { href: "/get-tohyee", label: "Get Tohyee on this device", tile: "Get the app" },
         ],
       },
     ],
   },
 ];
+
+/**
+ * The Farm app's More page as a grid of apps: the More menu's groups as the
+ * person may see them, with Effluent first (it has no tab on a phone).
+ */
+export function farmAppGroups(menus: Menu[]): MenuGroup[] {
+  const more = menus.find((menu) => menu.tiles);
+  const effluent = menus.find((menu) => menu.href === "/operations/farm/effluent");
+  const groups = more?.groups ?? [];
+  if (!effluent?.href) return groups;
+  const link: MenuLink = { href: effluent.href, label: effluent.label };
+  if (groups.length === 0) return [{ heading: "Paddocks and feed", links: [link] }];
+  return [{ ...groups[0], links: [link, ...groups[0].links] }, ...groups.slice(1)];
+}
 
 /** Which app's top bar a page shows: farm pages are in the Farm app, though they live under /operations. */
 export function appForPath(app: AppKey, pathname: string, modules: Modules | null = null): AppKey {

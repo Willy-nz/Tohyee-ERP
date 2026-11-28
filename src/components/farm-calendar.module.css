@@ -34,6 +34,8 @@
 
 .items {
   display: grid;
+  /* One column that may shrink: a long word in a job's name wraps instead of widening the page on a phone. */
+  grid-template-columns: minmax(0, 1fr);
   gap: 6px;
   margin: 0;
   padding: 0;
@@ -42,9 +44,11 @@
 
 .item {
   display: grid;
-  grid-template-columns: 5.5rem 1fr;
+  grid-template-columns: 5.5rem minmax(0, 1fr);
   gap: 4px 12px;
   width: 100%;
+  min-width: 0;
+  overflow-wrap: anywhere;
   border: 1px solid var(--border);
   border-left: 4px solid var(--kind, var(--border-strong));
   border-radius: var(--radius-sm);
@@ -266,7 +270,7 @@
   }
 
   .item {
-    grid-template-columns: 4.5rem 1fr;
+    grid-template-columns: 4.5rem minmax(0, 1fr);
   }
 
   .rangeLabel {
@@ -379,3 +383,6 @@
 /* : a compact prompt in place of the mailbox setup for someone with no mailbox connected. */
 .connectPrompt { display: flex; flex-wrap: wrap; align-items: center; gap: 8px 16px; padding: 10px 14px; border: 1px solid var(--border); border-radius: var(--radius-sm); background: var(--surface); }
 .connectPrompt p { flex: 1 1 280px; max-width: 75ch; }
+
+/* The calendar's own buttons (Add an item, Calendar link, Manage mailboxes): they wrap on a phone rather than run off the side. */
+.headerButtons { display: flex; flex-wrap: wrap; gap: 6px; min-width: 0; }

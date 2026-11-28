@@ -77,6 +77,7 @@ const ROUTES: Array<[string, IllustratedIconName]> = [
   ["/crm/record-types", "form"], ["/crm/stages", "pipeline"], ["/crm/dashboard", "analytics"], ["/crm", "crm"],
   ["/analytics/sources", "documents"], ["/analytics/shaping", "funnel"], ["/analytics", "analytics"],
   ["/chat", "chat"],
+  ["/get-tohyee", "phone"],
   ["/server/analytics", "analytics"], ["/server/bank-files", "banking"],
   ["/server/users", "team"], ["/server/sign-ins", "key"], ["/server/google-sign-in", "key"],
   ["/server/remote-access", "key"], ["/server/organisations", "accounting"],
