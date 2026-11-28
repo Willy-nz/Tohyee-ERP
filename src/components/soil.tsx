@@ -6,6 +6,7 @@ import Link from "next/link";
 import { FarmSelector, useSelectedFarm } from "@/components/farm-selector";
 import { FarmRowList, farmRowStyles } from "@/components/farm-rows";
 import { useState } from "react";
+import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
 import { useApiData } from "@/components/hooks";
 import { RecordExtrasPanel } from "@/components/records/record-extras";
 import { Badge, Button, Card, Empty, Field, Notice, ui } from "@/components/ui";
@@ -113,8 +114,49 @@ function FarmSoil({
     tests.reload();
   };
   const shown = summary.data?.summary.measures.slice(0, 6) ?? [];
+  const rows = summary.data?.summary.paddocks ?? [];
+  // Most recently tested first: the panel shows the freshest results, and counts the paddocks with none.
+  const tested = rows.filter((row) => row.lastSampledOn).sort((a, b) => (a.lastSampledOn! < b.lastSampledOn! ? 1 : -1));
+  const untested = rows.length - tested.length;
   return (
     <>
+      <FarmHero
+        eyebrow="Paddocks / soil tests"
+        title={farm.name}
+        label={`${farm.name} soil tests`}
+        heading="Latest results"
+        hint={tested.length > 8 ? "The 8 newest; all of them are below" : undefined}
+        footer="Soil lab"
+        stats={
+          summary.data
+            ? [
+                { value: `${tested.length} of ${rows.length}`, label: "paddocks tested" },
+                ...(untested && tested.length ? [{ value: untested, label: "not tested", tone: "attention" as const }] : []),
+                ...(tested.length ? [{ value: age(tested[tested.length - 1].lastSampledOn!), label: "the oldest" }] : []),
+              ]
+            : []
+        }
+      >
+        {!summary.data && !summary.error ? <HeroEmpty>Loading…</HeroEmpty> : null}
+        {summary.data && !rows.length ? <HeroEmpty>No paddocks yet.</HeroEmpty> : null}
+        {summary.data && rows.length && !tested.length ? <HeroEmpty>No soil tests yet. Add one, or import a lab file, below.</HeroEmpty> : null}
+        {tested.length ? (
+          <HeroTiles>
+            {tested.slice(0, 8).map((row) => {
+              const measures = shown.filter((measure) => row.latest[measure]);
+              return (
+                <HeroTile
+                  key={row.paddockId}
+                  title={row.paddockName}
+                  figure={measures[0] ? row.latest[measures[0]].valueText : undefined}
+                  unit={measures[0] ? [measures[0], row.latest[measures[0]].unit].filter(Boolean).join(", ") : undefined}
+                  lines={[...measures.slice(1, 3).map((measure) => `${measure} ${result(row.latest[measure])}`), `Tested ${age(row.lastSampledOn!)}`]}
+                />
+              );
+            })}
+          </HeroTiles>
+        ) : null}
+      </FarmHero>
       <Card
         title={`Latest soil tests on ${farm.name}`}
       >

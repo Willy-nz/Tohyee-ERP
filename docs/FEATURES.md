@@ -3652,8 +3652,11 @@ that something happened.
   page's own tiles to tap. Mobs shows each mob with its head, class and
   paddock (amber when it's in no paddock, red while a withholding is in
   force); Tasks shows what's overdue or due today; Rainfall shows each
-  gauge's last reading (amber when it hasn't been read for a week). The
-  lists, forms and what they record are unchanged. **Safety** has a labelled
+  gauge's last reading (amber when it hasn't been read for a week).
+  **Animals** shows the tagged animals in each mob beside the mob's head
+  (tapping a mob lists its animals), and **Soil tests** shows the eight
+  newest results with how many paddocks have been tested. The lists, forms
+  and what they record are unchanged. **Safety** has a labelled
   **Emergency details** area (address, entrance, contacts to tap, 111 as a
   phone link); the large Call 111 button is gone. **Get Tohyee on this
   device** picks the steps for the browser it's opened in (Safari,

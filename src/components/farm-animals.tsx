@@ -7,6 +7,8 @@ import { BigNumber, Choices, DayChoice, Step } from "@/components/farm-log";
 import { FarmRowList } from "@/components/farm-rows";
 import { useCanRecordFarmWork } from "@/components/farm-selector";
 import type { FarmContext } from "@/components/farm-workspace";
+import { FarmHero, HeroEmpty, HeroTile, HeroTiles } from "@/components/farm-hero";
+import hero from "@/components/farm-hero.module.css";
 import { useApiData } from "@/components/hooks";
 import { InfoTip } from "@/components/info-tip";
 import { MoreMenu } from "@/components/more-menu";
@@ -59,6 +61,19 @@ export function FarmAnimals({ organisationId, farm, initialAnimal }: FarmContext
   const animals = useApiData<{ animals: Animal[] }>(`/api/farming/farms/${farm.id}/animals`, { organisationId, includeGone: gone ? "1" : undefined, mobId: mobId || undefined, q: q.trim() || undefined });
   const mobs = useApiData<{ mobs: Mob[] }>(`/api/farming/farms/${farm.id}/mobs`, { organisationId });
   const list = [...(animals.data?.animals ?? [])].sort((a, b) => NATURAL.compare(a.tag, b.tag));
+  // The panel counts every tagged animal on the farm, whatever the list underneath is filtered to.
+  const everyone = useApiData<{ animals: Animal[] }>(`/api/farming/farms/${farm.id}/animals`, { organisationId }).data?.animals ?? null;
+  const byMob = new Map<string, { id: string; name: string; tagged: number; weighed: number }>();
+  for (const animal of everyone ?? []) {
+    const key = animal.mob?.id ?? "";
+    const entry = byMob.get(key) ?? { id: key, name: animal.mob?.name ?? "Not in a mob", tagged: 0, weighed: 0 };
+    entry.tagged += 1;
+    if (animal.lastWeight) entry.weighed += 1;
+    byMob.set(key, entry);
+  }
+  const groups = [...byMob.values()].sort((a, b) => (a.id === "" ? 1 : b.id === "" ? -1 : NATURAL.compare(a.name, b.name)));
+  const loose = byMob.get("")?.tagged ?? 0;
+  const weighed = (everyone ?? []).filter((animal) => animal.lastWeight).length;
   if (adding) {
     return (
       <AddAnimalFlow
@@ -79,19 +94,58 @@ export function FarmAnimals({ organisationId, farm, initialAnimal }: FarmContext
     <div className={styles.grid}>
       <div style={{ display: "grid", gap: 16, minWidth: 0 }}>
         {done ? <Notice tone="success">{done}</Notice> : null}
-        <Card
-          title="Animals"
-          actions={
+        <FarmHero
+          eyebrow="Stock / animal register"
+          title={farm.name}
+          label={`${farm.name} animal register`}
+          heading="Tagged animals by mob"
+          hint={groups.some((group) => group.id) ? "Tap a mob to list its animals" : undefined}
+          footer="Tag register"
+          stats={
+            everyone
+              ? [
+                  { value: everyone.length.toLocaleString("en-NZ"), label: everyone.length === 1 ? "tagged animal" : "tagged animals" },
+                  ...(weighed ? [{ value: weighed.toLocaleString("en-NZ"), label: "weighed" }] : []),
+                  ...(loose ? [{ value: loose.toLocaleString("en-NZ"), label: "not in a mob", tone: "attention" as const }] : []),
+                ]
+              : []
+          }
+          action={
             canRecord ? (
               <div style={{ display: "flex", gap: 8, flexWrap: "wrap" }}>
-                <Link className={`${ui.button} ${ui.secondary}`} href={`/operations/farm/animals/quick?farm=${farm.id}`}>
+                <Link className={hero.link} href={`/operations/farm/animals/quick?farm=${farm.id}`}>
                   Quick entry
                 </Link>
-                <Button onClick={() => (setDone(null), setAdding(true))}>Add an animal</Button>
+                <Button size="small" onClick={() => (setDone(null), setAdding(true))}>
+                  Add an animal
+                </Button>
               </div>
             ) : null
           }
         >
+          {!everyone ? <HeroEmpty>Loading…</HeroEmpty> : null}
+          {everyone && !everyone.length ? <HeroEmpty>No animals yet. Add one, or import a file.</HeroEmpty> : null}
+          {groups.length ? (
+            <HeroTiles>
+              {groups.map((group) => {
+                const head = group.id ? (mobs.data?.mobs ?? []).find((mob) => mob.id === group.id)?.head : undefined;
+                return (
+                  <HeroTile
+                    key={group.id || "none"}
+                    title={group.name}
+                    figure={group.tagged.toLocaleString("en-NZ")}
+                    unit="tagged"
+                    lines={[head !== undefined ? `of ${head.toLocaleString("en-NZ")} head` : "", group.weighed ? `${group.weighed.toLocaleString("en-NZ")} weighed` : ""].filter(Boolean)}
+                    tone={group.id ? undefined : "attention"}
+                    pressed={Boolean(group.id) && mobId === group.id}
+                    onOpen={group.id ? () => setMobId(mobId === group.id ? "" : group.id) : undefined}
+                  />
+                );
+              })}
+            </HeroTiles>
+          ) : null}
+        </FarmHero>
+        <Card title="Animals">
           <p className={ui.muted} style={{ marginTop: 0 }}>
             Animals with their own tag.{" "}
             <InfoTip label="Animals and mobs">
