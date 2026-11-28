@@ -188,7 +188,7 @@ function warm() {
       });
     }, Promise.resolve()).then(function () {
       // The farm pictures aren't in the pages' HTML, so they're kept by name.
-      return cacheAssets(R.FARM_ICON_URLS);
+      return cacheAssets(R.FARM_ICON_URLS.concat(R.SHARED_FARM_ICON_URLS || []));
     });
   });
 }

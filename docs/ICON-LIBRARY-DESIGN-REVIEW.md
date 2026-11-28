@@ -1,5 +1,7 @@
 # Icon-library design review — 22 November 2026
 
+> **Update — 28 Nov 2026:** The later farm icon refresh replaces all 35 previously displayed 96px farm PNGs with newly illustrated 160px transparent PNG artwork and adds five illustrated shared farm icons. This review below is retained as a historical description of the earlier assets, not the current release. See [ICON-MASTER-STYLE.md](./ICON-MASTER-STYLE.md) for current guidance. The business icon family and launcher artwork remain separate follow-ups.
+
 ## Approved illustrated artwork — 22 November 2026
 
 The 35 farm-specific icons now have **individual, transparent, 96×96 PNG assets** in `public/illustrations/icons/<name>.png`, taken from the five high-quality approved illustration sheets, rather than the first hand-coded sketches. The application now renders these PNGs through `IllustratedIcon`. The earlier `.svg` files are kept only as legacy editable placeholders and are **not the currently displayed artwork**. The icon QA gallery displays the PNGs for farm categories and the original SVGs for shared categories.
