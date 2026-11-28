@@ -39,7 +39,7 @@
    * names as FARM_ICON_NAMES in src/components/illustrated-icon.tsx (tested).
    */
   var FARM_ICON_URLS = ["farm-walk", "mob-in", "mob-out", "cover-reading", "feed", "rain-gauge", "move-mob", "births", "deaths", "treatment", "hazard", "near-miss", "incident", "irrigation", "pond-level", "log", "more", "pasture", "fertiliser", "rainfall", "soil-test", "tractor", "medicines", "animal-tag", "stock-truck", "vet", "delivery", "contractor", "meeting", "deadline", "sun", "cloud", "rain", "wind", "frost"].map(function (name) {
-    return "/illustrations/icons/" + name + ".svg";
+    return "/illustrations/icons/" + name + ".png";
   });
   /** Built files (names change with every build), icons, fonts and the manifest. */
   var STATIC_CACHE = "tohyee-static-v1";
