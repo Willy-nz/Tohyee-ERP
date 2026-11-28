@@ -45,3 +45,14 @@ Twenty shared icons now use individually cropped and cleaned 160×160 illustrate
 The renderer selects these by explicit name, preserving the remaining inline shared SVG icons and the previously approved farm artwork. The original SVG copies remain in the repository as design source/fallback rather than being removed. Other shared icons, including the highly repetitive accounting document icons (`credit-note`, `awaiting`, `tax-return`, `receipt`, `tagged-receipt`, etc.), are **not** claimed complete and remain part of #125. Do not swap those for artwork taken from overview infographics until individual image quality has been verified.
 
 Quality checks: view `/illustrations/icon-review.html` at 28px and 64px on light and dark backgrounds. The business PNGs are not pre-fetched for offline farming pages unless needed on those pages; the existing farm offline icon cache is unchanged. App launch/logo artwork remains intentionally unchanged.
+
+
+## Full shared icon illustration set — 29 November 2026
+
+The remaining **40 shared** icons have been replaced with individual illustrations, bringing the shared business/system vocabulary to **65 illustrated PNGs** (plus the 35 farm-specific icons). Previous inline SVGs remain in `illustrated-icon.tsx` as the original editable/rollback artwork. File paths and icon names are unchanged, so route mappings and business logic do not change. Shared assets were saved at 120×120 pixels for source size and reasonable UI download costs; icons are displayed at up to 56px.
+
+New names: `calendar`, `crm`, `documents`, `offline`, `photo`, `payroll`, `tax`, `tax-return`, `tax-code`, `credit-note`, `price`, `coins`, `currency`, `receipt`, `tagged-receipt`, `awaiting`, `inspect`, `approval`, `synced`, `sync-pending`, `analytics`, `farm`, `jobs`, `location`, `maps`, `safety`, `sensors`, `flask`, `rd-claim`, `clock`, `leave`, `checklist`, `scales`, `vehicle`, `apps`, `csv`, `spreadsheet`, `database`, `search`, `social`.
+
+### Quality assessment
+
+The individual artwork was extracted from two cleanly aligned icon sheets, reviewed at full size and at 32px. Some financial and tax symbols still rely on small text and should be further simplified if they prove illegible at 28px on a physical phone. Gallery preview now shows the complete new illustrated library. **No full Next.js production build, real-device/browser test, or live offline test has been run from this workflow.** A production build and visual regression review are required before considering the redesign fully QA-complete. The separate app launcher/logo and data-dependent farm hero artworks have not been replaced.
