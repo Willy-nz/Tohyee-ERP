@@ -59,6 +59,19 @@ export function setSimpleFinFetchForTests(replacement: FetchLike | null): void {
   fetcher = replacement ?? network;
 }
 
+/**
+ * The time a sync asks the Bridge up to. Tests hold it still: a sync makes one
+ * request per 90 days since a link's start date, so with made-up dates the
+ * number of requests would otherwise change with the calendar.
+ */
+let clock: () => number = Date.now;
+export function simpleFinNow(): number {
+  return clock();
+}
+export function setSimpleFinClockForTests(replacement: (() => number) | null): void {
+  clock = replacement ?? Date.now;
+}
+
 /** An answer's text, refused once it's bigger than MAX_ANSWER_BYTES (a test's canned answer goes through this too). */
 async function answerText(response: Response): Promise<string> {
   try {

@@ -67,8 +67,8 @@ Phones only install a web app and keep it offline on an HTTPS address (or
 Farm is its own app: the app switcher, or the ☰
 menu on a phone, moves between Accounting and Farm. The Farm tabs
 (Today · Map · Log · Safety · More) are on every farm page, including one
-opened from a link, after a reload or with no signal. More has the full
-Farm menu, Effluent first. Safety's first card is **Emergency details**.
+opened from a link, after a reload or with no signal. More shows the full
+Farm menu as a grid of pictures, like a phone's apps, Effluent first. Safety's first card is **Emergency details**.
 
 ## Your location on the maps
 

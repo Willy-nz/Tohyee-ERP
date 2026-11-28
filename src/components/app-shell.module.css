@@ -731,6 +731,12 @@
     padding: 6px 0 12px;
   }
 
+  /* A menu drawn as a grid of apps (the Farm app's More). */
+  .phoneAppGrid {
+    border-bottom: 1px solid var(--border);
+    padding: 10px 0 16px;
+  }
+
   .phoneHeading {
     padding: 8px 12px 2px;
     color: var(--text);

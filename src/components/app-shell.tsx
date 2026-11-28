@@ -22,6 +22,7 @@ import { BrandMark } from "@/components/brand-mark";
 import { CommandPalette } from "@/components/command-palette";
 import { useConfirm } from "@/components/confirm-dialog";
 import { useApiData } from "@/components/hooks";
+import { AppGrid } from "@/components/app-grid";
 import { type Modules, useModules } from "@/components/modules";
 import { OfflineSupport, prepareSignOut } from "@/components/offline-support";
 import {
@@ -556,7 +557,11 @@ function PhoneMenu({ app, modules, menus, chatUnread, onSignOut }: { app: AppKey
                       <Caret />
                     </span>
                   </button>
-                  {isExpanded ? (
+                  {isExpanded && menu.tiles ? (
+                    <div className={styles.phoneAppGrid}>
+                      <AppGrid groups={menu.groups} current={(href) => isCurrent(pathname, search, href)} onOpen={close} />
+                    </div>
+                  ) : isExpanded ? (
                     <div className={styles.phoneGroups}>
                       {menu.groups.map((group) => (
                         <div key={group.heading}>

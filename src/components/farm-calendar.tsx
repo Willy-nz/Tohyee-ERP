@@ -185,7 +185,7 @@ export function FarmCalendarHome({ organisationId }: { organisationId: string })
           ))}
         </div>
         {farmWorker ? null : (
-        <div className={ui.rowButtons}>
+        <div className={styles.headerButtons}>
           <Button size="small" aria-expanded={open === "add"} aria-controls="farm-calendar-add" onClick={() => setOpen(open === "add" ? null : "add")}>
             Add an item
           </Button>
