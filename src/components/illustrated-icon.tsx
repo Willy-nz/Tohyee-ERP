@@ -73,7 +73,7 @@ const artwork = {
   "social": (<g fill="none" stroke="#233E45" strokeWidth="2.4" strokeLinecap="round" strokeLinejoin="round"><path fill="#FFFDF7" d="M8 12h30q5 0 5 5v15q0 5-5 5H22l-9 8v-8H8Z"/><path d="M15 21h20M15 28h12"/><path fill="#A8D8BF" d="M26 37h25q5 0 5 5v9q0 3-3 3h-3v7l-8-7H26Z"/><path fill="#F3D48B" d="M41 50s-6-3.5-6-7.5a3 3 0 0 1 6-1 3 3 0 0 1 6 1c0 4-6 7.5-6 7.5Z"/></g>),
 };
 
-// Farm icon files use the same visual grammar as the inline general icons.
+// Farm icon files are crisp original SVGs with the same 64px visual grammar as shared icons.
 // Keep their names explicit so no untrusted path can become an image URL.
 const FARM_ICON_NAMES = [
   "farm-walk", "mob-in", "mob-out", "cover-reading", "feed", "rain-gauge",
@@ -95,7 +95,7 @@ export function IllustratedIcon({ name, size = 40 }: { name: IllustratedIconName
   return (
     <span className={styles.icon} aria-hidden="true" style={{ width: size, height: size }}>
       {isFarmIcon(name) ? (
-        <Image src={`/illustrations/icons/${name}.png`} alt="" width={size} height={size} unoptimized />
+        <Image src={`/illustrations/icons/${name}.svg`} alt="" width={size} height={size} unoptimized />
       ) : (
         <svg viewBox="0 0 64 64" width={size} height={size} focusable="false">{artwork[name]}</svg>
       )}
