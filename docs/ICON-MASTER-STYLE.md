@@ -1,32 +1,37 @@
 # Tohyee icon master style
 
-Status: farm vector refresh (see #121, #39); business/accounting expansion tracked in #125.
+Updated 28 November 2026. Farm illustration refresh tracked in #121 and #39. The separate future business/accounting redesign remains #125.
 
-## Purpose
-Icons should read immediately at 28px; they are navigation aids, not tiny realistic illustrations.
+## Design direction
 
-## Visual language
-- Base grid: 64 × 64 SVG with transparent canvas, generous optical whitespace.
-- Stroke: deep slate `#233E45`, rounded joins and caps, nominal 2.8 units.
-- Flat colour accents: mint `#A8D8BF`, sky `#B9D9EE`, maize `#F3D48B`, paper `#FFFDF7`; occasional blue `#5B9BD5` for water and muted red for warnings.
-- Use a strong main silhouette, only necessary internal details, no photographs, gradient gloss, fake lettering, grass under every icon, or generated-image texture.
-- Keep related operations recognizable but distinct (mob in/out direction, soil core versus plate meter, vet versus accident).
-- Decorative icons render beside a visible text label and are hidden from assistive technology.
+Use professionally illustrated, instantly recognizable **icons**, not glossy 3D miniatures or abstract hand-coded shapes.
 
-## Asset usage
-- Farm SVGs: `public/illustrations/icons/<name>.svg` (35 icons).
-- Shared inline SVG artwork: `src/components/illustrated-icon.tsx`.
-- Production renders from SVG via `IllustratedIcon`, never 96px PNG crops.
-- Existing farm PNGs are retained temporarily as historical fallback; they are not loaded by `IllustratedIcon`.
-- Offline icon pre-cache: `public/sw-rules.js` must list SVG files.
-- Quality gallery: `/illustrations/icon-review.html`.
+- Consistent deep navy outlines, rounded corners, restrained light shading and a coherent green, blue, amber and cream palette.
+- One dominant, recognizable object per icon; avoid random objects, tiny decorative details, shadows, fake text, embedded captions and mismatched visual metaphors.
+- Preserve distinct meanings: mob in/out/move; rainfall vs forecast; near miss vs incident vs hazard; pasture plate meter vs soil sample; treatments vs medicines.
+- Transparent backgrounds. All icons must look right on both the pale tiles and dark farm panels.
+- Farm-specific artwork is stored as optimized **160×160 PNG** files at `public/illustrations/icons/<name>.png`. They are source-controlled and served locally, no CDN required.
+- This file format is intentional: the approved visual assets are raster illustrations; simply rewriting them as rough SVG paths undermines visual quality. Editable vector masters are a separate future effort after visual review.
 
-## Release QA
-1. Check all icons at 28, 38, 48 and 64px on light and dark surfaces; validate in an actual mobile browser.
-2. Ensure crops, overlapping forms, and indistinguishable neighbouring actions have been resolved.
-3. Check Farm › Log, Farm › More, weather, safety, and offline use.
-4. Verify SVG network responses and offline caching on a deployed build.
-5. Do not replace the separate brand/launcher artwork until its existing design is reviewed.
+## Implementation
 
-## Scope
-The 35 farm-specific raster icons are replaced by SVG source art, plus six misleading shared farm icons. The pre-existing shared accounting/business set remains intentionally unchanged until #125.
+- The existing `IllustratedIcon` component keeps the farm icon filenames and renders the 35 farm illustrations as local images.
+- The same component additionally uses illustrated PNGs for five shared farm-facing icons: `livestock`, `effluent`, `camera`, `quad` (fuel refunds), and `weather`.
+- Other shared icons remain unchanged until the business icon pass (#125).
+- The service worker precaches both icon groups when saving farm pages offline, and a bumped static cache version refreshes older installations.
+- `/illustrations/icon-review.html` shows the local PNGs alongside the remaining SVGs at review sizes.
+
+## QA before / after rollout
+
+1. Compare icons together at **28px, 38px, 48px, and 64px**; ensure subject and direction remain clear.
+2. Check light/dark themes and a real mobile screen; verify no image is cut off and captions are not baked into the asset.
+3. Visit Farm > Log, Farm > More, Safety, Rainfall, Weather and Animals.
+4. Verify service worker pre-cache and offline access, especially after an existing installation upgrades.
+5. Run lint, typecheck, build and unit tests in CI.
+6. Do not alter the distinct Tohyee brand/app launcher mark without inspecting the existing version and explicit design approval.
+
+## Historical notes
+
+The original 96px raster icons (22 Nov review) and the rejected simplistic SVG experiments (PR #127) explain the prior two-style mismatch. The actual farm UI returned to PNG in PR #128, and this replacement improves that artwork without forcing the low-quality SVG experiment into production.
+
+The dynamic `FarmHero` artwork in `src/components/farm-hero-art.tsx` is separate: its charts, measurements and data-dependent states require a dedicated pass, not interchangeable static icons.
