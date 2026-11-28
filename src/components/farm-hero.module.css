@@ -76,6 +76,9 @@ button.tile:focus-visible { outline: 2px solid #bde5c5; outline-offset: 2px; }
 /* The tile's drawn picture: beside the words, never squeezing them. */
 .picture { display: flex; flex: none; align-items: flex-start; opacity: 0.95; }
 .art { display: block; width: auto; height: 46px; }
+/* A chart across the whole panel (the feed wedge). */
+.chart { display: block; width: 100%; height: auto; }
+.caption { margin: 8px 3px 0; color: #d3e2dc; font-size: 0.75rem; line-height: 1.4; }
 .tileStacked { flex-direction: column; justify-content: flex-start; }
 .pictureAbove { display: flex; align-self: stretch; justify-content: flex-end; margin-bottom: 2px; }
 .pictureAbove .art { height: 38px; }

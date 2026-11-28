@@ -3658,7 +3658,10 @@ that something happened.
   newest results with how many paddocks have been tested. Each tile has a
   small picture drawn in code (`farm-hero-art.tsx`): a gauge that fills to
   the reading, a pen with a dot per fifty head, an ear tag in the mob's tag
-  colour, a pinned note, a soil core. They are first drafts; issue #121
+  colour, a pinned note, a soil core. **Pasture and feed** opens with the
+  feed wedge drawn as a chart (a bar per paddock, highest cover first, the
+  average as a dashed line), and **Fertiliser plans** shows each plan as a
+  tile to open. They are first drafts; issue #121
   tracks better artwork and the pages still without a panel. The lists,
   forms and what they record are unchanged. **Safety** has a labelled
   **Emergency details** area (address, entrance, contacts to tap, 111 as a
