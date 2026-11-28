@@ -151,3 +151,7 @@
   font-weight: 400;
   font-size: 0.85rem;
 }
+
+/* The day's pictures on a forecast panel tile: stacked, on the pale tile the drawn pictures need. */
+.heroPictures { display: grid; gap: 4px; }
+.heroPictures > * { border-radius: 8px; background: #fffdf7; }

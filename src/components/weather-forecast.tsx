@@ -2,6 +2,9 @@
 
 import Link from "next/link";
 import { type ReactNode, useCallback, useEffect, useState } from "react";
+import { FarmHero, HeroTile, HeroTiles } from "@/components/farm-hero";
+import { HoursChartArt } from "@/components/farm-hero-art";
+import hero from "@/components/farm-hero.module.css";
 import { IllustratedIcon } from "@/components/illustrated-icon";
 import { InfoTip } from "@/components/info-tip";
 import { Badge, Button, Card, Notice, ui } from "@/components/ui";
@@ -337,8 +340,72 @@ export function WeatherPage({ organisationId, farm }: { organisationId: string; 
   const { loaded, error, offline, reload } = useFarmForecast(organisationId, farm.id);
   const forecast = loaded?.forecast ?? null;
   const data = forecast?.forecast ?? null;
+  const week = data?.days.slice(0, 7) ?? [];
+  const numbers = (values: Array<string | null>) => values.filter((value): value is string => value !== null).map(Number).filter(Number.isFinite);
+  const lows = numbers(week.map((day) => day.minC));
+  const highs = numbers(week.map((day) => day.maxC));
+  const rain = numbers(week.map((day) => day.rainMm));
+  const winds = numbers(week.map((day) => day.maxWindKmh));
+  const warned = new Set((data?.warnings ?? []).map((warning) => warning.date));
   return (
     <div className={styles.grid}>
+      {data ? (
+        <FarmHero
+          eyebrow="Weather / next 7 days"
+          title={farm.name}
+          label={`${farm.name} weather forecast`}
+          heading="Day by day"
+          hint="Details are below"
+          footer="Forecast"
+          stats={[
+            ...(rain.length ? [{ value: `${rain.reduce((sum, mm) => sum + mm, 0).toFixed(1)} mm`, label: "rain this week" }] : []),
+            ...(lows.length ? [{ value: `${Math.min(...lows)}°`, label: "coldest" }] : []),
+            ...(highs.length ? [{ value: `${Math.max(...highs)}°`, label: "warmest" }] : []),
+            ...(winds.length ? [{ value: `${Math.max(...winds)} km/h`, label: "strongest wind" }] : []),
+            ...(data.warnings.length ? [{ value: data.warnings.length, label: data.warnings.length === 1 ? "warning" : "warnings", tone: "alert" as const }] : []),
+            ...(data.freshness === "stale" ? [{ value: "Old", label: "forecast", tone: "attention" as const }] : []),
+          ]}
+        >
+          <HeroTiles>
+            {week.map((day, index) => {
+              const pictures = dayPictures(day, data.windyKmh);
+              return (
+                <HeroTile
+                  key={day.date}
+                  title={dayLabel(day.date, index)}
+                  figure={day.maxC === null ? undefined : `${day.maxC}°`}
+                  lines={[
+                    day.minC === null ? "" : `Low ${day.minC}°`,
+                    day.rainMm === null ? "" : Number(day.rainMm) > 0 ? `Rain ${day.rainMm} mm` : "No rain",
+                    day.maxWindKmh === null ? "" : `Wind to ${day.maxWindKmh} km/h`,
+                    pictures.map((picture) => picture.label).join(", "),
+                  ].filter(Boolean)}
+                  picture={
+                    pictures.length ? (
+                      <span className={styles.heroPictures}>
+                        {pictures.slice(0, 2).map((picture) =>
+                          picture.kind === "part" ? <IllustratedIcon key="part" name="sun" size={28} /> : <IllustratedIcon key={picture.kind} name={picture.kind} size={28} />,
+                        )}
+                      </span>
+                    ) : undefined
+                  }
+                  tone={warned.has(day.date) ? "alert" : undefined}
+                />
+              );
+            })}
+          </HeroTiles>
+          {data.hours.length > 1 && (data.choices.includes("temperature") || data.choices.includes("rain")) ? (
+            <>
+              <HoursChartArt hours={data.hours} />
+              <p className={hero.caption}>
+                The next {data.hours.length} hours{data.choices.includes("temperature") ? ": the line is the temperature" : ""}
+                {data.choices.includes("rain") ? `${data.choices.includes("temperature") ? "," : ":"} the blue bars are rain` : ""}. Dotted lines are midnight.
+              </p>
+            </>
+          ) : null}
+          <p className={hero.caption}>{METSERVICE_ATTRIBUTION}</p>
+        </FarmHero>
+      ) : null}
       <Card
         title="Next 7 days"
         actions={forecast?.canRefresh && data && !offline ? <RefreshButton organisationId={organisationId} onDone={reload} /> : undefined}

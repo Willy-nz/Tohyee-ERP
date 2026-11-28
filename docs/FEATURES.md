@@ -3661,7 +3661,13 @@ that something happened.
   colour, a pinned note, a soil core. **Pasture and feed** opens with the
   feed wedge drawn as a chart (a bar per paddock, highest cover first, the
   average as a dashed line), and **Fertiliser plans** shows each plan as a
-  tile to open. They are first drafts; issue #121
+  tile to open. **Weather** opens with a tile for each of the next seven
+  days (high, low, rain, wind and the day's pictures; red while a frost or
+  heavy-rain warning stands) over a chart of the next 48 hours' temperature
+  and rain. **All farms compared** shows each farm's cover as a tile, amber
+  when its last farm walk is over 14 days old. **Water** shows the farm's
+  mapped pipes as tiles; tapping one sizes it, as the list below does. The
+  water sums themselves are unchanged. They are first drafts; issue #121
   tracks better artwork and the pages still without a panel. The lists,
   forms and what they record are unchanged. **Safety** has a labelled
   **Emergency details** area (address, entrance, contacts to tap, 111 as a
